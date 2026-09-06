@@ -1,4 +1,82 @@
 {
+  "edgewarn_cli/main.py": {
+    "--version": {
+      "default": null,
+      "action": "version"
+    }
+  },
+  "edgewarn_cli/run.py": {
+    "mode": {
+      "default": "all",
+      "action": null
+    },
+    "--config-path": {
+      "default": null,
+      "action": null
+    },
+    "--args": {
+      "default": [],
+      "action": "append"
+    }
+  },
+  "edgewarn_cli/configure.py": {
+    "--config-path": {
+      "default": null,
+      "action": null
+    },
+    "target": {
+      "default": null,
+      "action": null
+    },
+    "value": {
+      "default": null,
+      "action": null
+    }
+  },
+  "edgewarn_cli/nws_zones.py": {
+    "--assets-dir": {
+      "default": null,
+      "action": null
+    },
+    "--zone-types": {
+      "default": null,
+      "action": null
+    },
+    "--timeout-seconds": {
+      "default": null,
+      "action": null
+    },
+    "--max-retries": {
+      "default": null,
+      "action": null
+    },
+    "--max-workers": {
+      "default": null,
+      "action": null
+    },
+    "--pause-seconds": {
+      "default": null,
+      "action": null
+    },
+    "--progress": {
+      "default": null,
+      "action": {
+        "@repr": "<not a literal>"
+      }
+    },
+    "--apply": {
+      "default": false,
+      "action": "store_true"
+    },
+    "--report-path": {
+      "default": null,
+      "action": null
+    },
+    "--config-path": {
+      "default": null,
+      "action": null
+    }
+  },
   "util/cli.py": {
     "--base_dir": {
       "default": null,
@@ -231,44 +309,6 @@
       "action": null
     }
   },
-  "run_ewmrs.py": {
-    "--profile": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
-    },
-    "--disable-metar": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
-    },
-    "--disable-nws": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
-    },
-    "--disable-wpc": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
-    },
-    "--disable-goes": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
-    },
-    "--mrms-core-only": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
-    }
-  },
   "run_all.py": {
     "--services": {
       "default": {
@@ -309,20 +349,6 @@
     "--drop-offset": {
       "default": null,
       "action": null
-    },
-    "--mrms-core-only": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
-    }
-  },
-  "run_nexrad.py": {
-    "--profile": {
-      "default": null,
-      "action": {
-        "@repr": "<not a literal>"
-      }
     },
     "--mrms-core-only": {
       "default": null,

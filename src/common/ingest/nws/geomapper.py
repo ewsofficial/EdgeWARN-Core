@@ -1,5 +1,6 @@
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Sequence, cast
 from shapely.geometry import Polygon, MultiPolygon, shape
@@ -23,7 +24,21 @@ def _assets_dir() -> Path:
     the environment after this module is imported.
     """
     zone_sync_cfg = load_config("nws")["zone_sync"]
-    return repo_root() / zone_sync_cfg["assets_dir"]
+    configured = repo_root() / zone_sync_cfg["assets_dir"]
+
+    # A mounted/operator-managed tree wins whenever it contains assets. Docker
+    # images built with EDGEWARN_SYNC_NWS_ZONES=true carry a fallback snapshot
+    # outside that mount so an empty bind mount cannot hide the build output.
+    if configured.is_dir() and any(configured.rglob("zones.json")):
+        return configured
+
+    bundled_value = os.environ.get("EDGEWARN_BUNDLED_NWS_ZONES_DIR")
+    if bundled_value:
+        bundled = Path(bundled_value)
+        if bundled.is_dir() and any(bundled.rglob("zones.json")):
+            return bundled
+
+    return configured
 
 
 _BOOTSTRAPPED = False
@@ -41,8 +56,8 @@ def ensure_zone_assets() -> None:
     Zone assets are an explicit operational prerequisite.  Fetching thousands
     of zones from an alert-processing worker delays startup unpredictably and
     can leave the registry only partially mapped after a failed bootstrap.
-    Use ``python scripts/sync_nws_zones.py`` from the repository root to create
-    or refresh the assets before starting a pipeline.
+    Use ``edgewarn sync-nws-zones --apply`` to create or refresh the assets
+    before starting a pipeline.
     """
     global _BOOTSTRAPPED
     if _BOOTSTRAPPED:
@@ -53,8 +68,7 @@ def ensure_zone_assets() -> None:
     if not has_data:
         raise RuntimeError(
             f"NWS zone assets are missing from {assets}. "
-            "Run `python scripts/sync_nws_zones.py` from the repository root "
-            "before starting the pipeline."
+            "Run `edgewarn sync-nws-zones --apply` before starting the pipeline."
         )
 
     _BOOTSTRAPPED = True

@@ -1,0 +1,14 @@
+.git
+.github
+.pytest_cache
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+node_modules
+tests
+plans
+venv
+ctam_modules
+assets/nws_zones

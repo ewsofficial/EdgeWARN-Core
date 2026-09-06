@@ -1,0 +1,9 @@
+{
+  "shadows_yaml": [
+    "--args",
+    "mode"
+  ],
+  "can_be_unset": [
+    "--config-path"
+  ]
+}

@@ -34,7 +34,7 @@ point). Schema version 1:
   "run_id": "<uuid>",
   "updated_at": "2026-08-23T12:00:00+00:00",
   "phase": "mrms-render",
-  "version": "2.7.0",
+  "version": "3.0.0",
   "last_successful_activity": "2026-08-23T11:59:40+00:00",
   "degraded_children": []
 }

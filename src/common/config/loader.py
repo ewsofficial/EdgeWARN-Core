@@ -46,6 +46,7 @@ import json
 import math
 import os
 import re
+import sys
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -118,11 +119,15 @@ def _find_config_root_by_walking_up() -> Path:
         if (config_dir / "runtime.yaml").is_file():
             _root_cache[None] = config_dir
             return config_dir
+    installed_config = Path(sys.prefix).resolve() / "share" / "edgewarn" / "config"
+    if (installed_config / "runtime.yaml").is_file():
+        _root_cache[None] = installed_config
+        return installed_config
     raise ConfigError(
         "config/",
         None,
-        f"could not locate a config/ directory containing runtime.yaml by "
-        f"walking up from {here}",
+        "could not locate a config/ directory containing runtime.yaml by "
+        f"walking up from {here} or at {installed_config}",
     )
 
 
@@ -427,6 +432,25 @@ def _validate(name: str, document: dict[str, Any], schema_path: Path) -> None:
         raise ConfigError(f"{name}.yaml", _dotted_path(first_path) or None, first_message)
 
 
+def validate_document(
+    name: str,
+    document: Any,
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+) -> None:
+    """Validate one mutable document with the canonical catalog schema.
+
+    This is the supported in-memory counterpart to :func:`load_config`.  It is
+    intentionally unfrozen so callers can validate a proposed edit before any
+    bytes are written.
+    """
+    if not isinstance(document, dict):
+        raise ConfigError(f"{name}.yaml", None, "top-level document must be a mapping")
+
+    root = config_root(config_dir)
+    _validate(name, document, root / "schema" / f"{name}.schema.json")
+
+
 def reset_cache() -> None:
     """Clear memoized configs, provenance, and resolved roots. Intended for tests."""
     _config_cache.clear()
@@ -461,8 +485,7 @@ def load_config(name: str, *, config_dir: str | os.PathLike[str] | None = None) 
     if not isinstance(document, dict):
         raise ConfigError(f"{name}.yaml", None, "top-level document must be a mapping")
 
-    schema_path = root / "schema" / f"{name}.schema.json"
-    _validate(name, document, schema_path)
+    validate_document(name, document, config_dir=root)
 
     frozen = _freeze(document)
     _config_cache[cache_key] = frozen

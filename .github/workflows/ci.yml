@@ -55,3 +55,43 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -m pytest -o faulthandler_timeout=120
         timeout-minutes: 25
+
+  package-command:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup isolated package environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          activate-environment: EdgeWARN-dev
+          environment-file: environment.yml
+          python-version: '3.13'
+
+      - name: Build and install wheel
+        shell: bash -el {0}
+        run: |
+          python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
+          python -m pip install --no-deps --force-reinstall dist/edgewarn_core-*.whl
+
+      - name: Smoke test installed command outside checkout
+        shell: bash -el {0}
+        run: |
+          smoke_dir="${RUNNER_TEMP}/edgewarn-package-smoke"
+          cp -R "${GITHUB_WORKSPACE}/config" "${smoke_dir}"
+          cd "${RUNNER_TEMP}"
+          edgewarn --help
+           test "$(edgewarn --version)" = "edgewarn 3.0.0"
+          edgewarn configure --config-path "${smoke_dir}" \
+            runtime.run.disable_nexrad true
+
+      - name: Run installed-command and supervisor tests
+        shell: bash -el {0}
+        run: |
+          python -m pytest \
+            tests/integration/test_installed_command.py \
+            tests/unit/test_package_run.py \
+            tests/unit/test_run_all_launcher.py

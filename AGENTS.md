@@ -10,7 +10,7 @@ Current codebase capabilities include:
 - Historical reprocessing via `src/process_historical.py`
 - Filesystem-first runtime using a configurable base directory, with remote ingestion from NOAA/AWS/HTTP sources
 
-The current package version defined in `package.json` is **2.7.0**.
+The current package version defined in `package.json` is **3.0.0**.
 
 ## Technology Stack
 - **API Services**: Node.js with Express.js and ES modules

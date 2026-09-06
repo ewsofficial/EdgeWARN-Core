@@ -20,6 +20,31 @@ Flag definitions only. Resolution of YAML defaults happens through
 import argparse
 
 
+def build_service_parser(service, *, add_help=True):
+    """Build the argument grammar for one realtime service without resolving it."""
+    parser = argparse.ArgumentParser(add_help=add_help, allow_abbrev=False)
+    if service == "edgewarn":
+        add_primary_domain_flags(parser)
+        add_base_directory_flags(parser)
+        add_primary_processing_flags(parser)
+        add_ctam_diagnostic_flags(parser)
+        add_service_enablement_flags(parser)
+        add_mrms_core_only_flag(parser)
+    elif service == "ewmrs":
+        add_base_directory_flags(parser)
+        parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
+        for flag in ("disable-metar", "disable-nws", "disable-wpc", "disable-goes"):
+            parser.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None)
+        add_mrms_core_only_flag(parser)
+    elif service == "nexrad":
+        add_base_directory_flags(parser)
+        parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
+        add_mrms_core_only_flag(parser)
+    else:
+        raise ValueError(f"unknown service parser {service!r}")
+    return parser
+
+
 def add_base_directory_flags(parser):
     """Flags every service owns: where the runtime tree lives."""
     parser.add_argument("--base_dir", "--base-dir", dest="base_dir", type=str, default=None, help="Custom base directory for input/output data")

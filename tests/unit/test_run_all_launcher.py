@@ -145,6 +145,37 @@ class TestFlagRouting:
         )
         assert "--no-profile" in commands["ewmrs"]
 
+    def test_scoped_argv_is_appended_once_and_config_is_canonical(self, src_root):
+        commands = run_all.build_service_commands(
+            _args(config_dir="/cfg"),
+            ["edgewarn", "ewmrs"],
+            src_root,
+            service_argv={
+                "edgewarn": ("--lat_limits", "20", "55"),
+                "ewmrs": ("--disable-wpc",),
+            },
+        )
+
+        assert commands["edgewarn"][-5:] == [
+            "--lat_limits", "20", "55", "--config-dir", "/cfg"
+        ]
+        assert commands["ewmrs"][-3:] == ["--disable-wpc", "--config-dir", "/cfg"]
+        assert commands["edgewarn"].count("--config-dir") == 1
+        assert commands["ewmrs"].count("--config-dir") == 1
+
+    @pytest.mark.parametrize(
+        "forwarded",
+        [("--config-dir", "/other"), ("--config-path=/other",)],
+    )
+    def test_scoped_argv_cannot_override_config(self, src_root, forwarded):
+        with pytest.raises(ValueError, match="cannot override"):
+            run_all.build_service_commands(
+                _args(config_dir="/cfg"),
+                ["edgewarn"],
+                src_root,
+                service_argv={"edgewarn": forwarded},
+            )
+
 
 def _sleeper(tmp_path, *, name="sleeper.py", code=None, trap=False):
     """A child that sleeps until terminated (or exits with *code*)."""
@@ -171,6 +202,103 @@ def _sleeper(tmp_path, *, name="sleeper.py", code=None, trap=False):
 
 
 class TestSupervision:
+    def test_child_startup_exit_returns_nonzero_and_reaps_other_children(
+        self, tmp_path, src_root, monkeypatch
+    ):
+        sleeper = _sleeper(tmp_path)
+        missing = str(tmp_path / "missing.py")
+        monkeypatch.setattr(
+            run_all,
+            "SERVICE_SCRIPTS",
+            {"edgewarn": sleeper, "ewmrs": missing},
+        )
+        commands = run_all.build_service_commands(
+            _args(), ["edgewarn", "ewmrs"], src_root
+        )
+
+        assert run_all.supervise(commands, src_root=src_root) == 1
+
+    def test_popen_failure_returns_nonzero(self, src_root, monkeypatch):
+        def fail_to_start(*_args, **_kwargs):
+            raise OSError("cannot exec")
+
+        monkeypatch.setattr(run_all.subprocess, "Popen", fail_to_start)
+        commands = run_all.build_service_commands(_args(), ["edgewarn"], src_root)
+
+        assert run_all.supervise(commands, src_root=src_root) == 1
+
+    def test_stop_request_during_startup_prevents_remaining_spawns(
+        self, src_root, monkeypatch
+    ):
+        stop_event = threading.Event()
+        spawned = []
+
+        class Child:
+            pid = 1234
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def send_signal(self, _signum):
+                self.returncode = 0
+
+            def wait(self, timeout):
+                return self.returncode
+
+        def spawn(command, **_kwargs):
+            spawned.append(command)
+            stop_event.set()
+            return Child()
+
+        monkeypatch.setattr(run_all.subprocess, "Popen", spawn)
+        commands = {
+            "edgewarn": ["edgewarn"],
+            "ewmrs": ["ewmrs"],
+            "nexrad": ["nexrad"],
+        }
+
+        assert run_all.supervise(
+            commands, src_root=src_root, stop_event=stop_event
+        ) == 0
+        assert spawned == [["edgewarn"]]
+
+    def test_unexpected_supervisor_error_terminates_and_reaps_children(
+        self, src_root, monkeypatch
+    ):
+        class Child:
+            pid = 1234
+
+            def __init__(self):
+                self.returncode = None
+                self.signals = []
+                self.waits = []
+
+            def poll(self):
+                return self.returncode
+
+            def send_signal(self, signum):
+                self.signals.append(signum)
+                self.returncode = 0
+
+            def wait(self, timeout):
+                self.waits.append(timeout)
+                return self.returncode
+
+        child = Child()
+        monkeypatch.setattr(run_all.subprocess, "Popen", lambda *_a, **_k: child)
+        monkeypatch.setattr(
+            run_all.time, "sleep", lambda _seconds: (_ for _ in ()).throw(
+                RuntimeError("supervisor failed")
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="supervisor failed"):
+            run_all.supervise({"edgewarn": ["edgewarn"]}, src_root=src_root)
+
+        assert child.signals == [signal.SIGTERM]
+        assert child.waits == [run_all.STOP_GRACE_SECONDS]
+
     def test_signal_driven_shutdown_terminates_children_cleanly(self, tmp_path, src_root):
         """End-to-end: SIGINT reaches the launcher's children through the driver."""
         sleeper = _sleeper(tmp_path, name="run_edgewarn.py")
@@ -202,6 +330,66 @@ class TestSupervision:
 
         # Clean signal shutdown exits zero even though the children were killed.
         assert code == 0
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX signal return code")
+    def test_signal_driven_shutdown_accepts_raw_sigterm_exit(
+        self, tmp_path, src_root
+    ):
+        sleeper = tmp_path / "run_edgewarn.py"
+        sleeper.write_text("import time\ntime.sleep(300)\n", encoding="utf-8")
+        driver = tmp_path / "driver.py"
+        repo_src = str(Path(__file__).resolve().parents[2] / "src")
+        driver.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {repo_src!r})\n"
+            "import run_all\n"
+            f"run_all.SERVICE_SCRIPTS['edgewarn'] = {str(sleeper)!r}\n"
+            "sys.exit(run_all.main(['--services', 'edgewarn']))\n",
+            encoding="utf-8",
+        )
+
+        launcher = subprocess.Popen([sys.executable, str(driver)])
+        try:
+            time.sleep(1.0)
+            launcher.send_signal(signal.SIGTERM)
+            assert launcher.wait(timeout=10) == 0
+        finally:
+            if launcher.poll() is None:
+                launcher.kill()
+                launcher.wait()
+
+    def test_signal_driven_shutdown_reports_child_cleanup_failure(
+        self, tmp_path, src_root
+    ):
+        failing_child = tmp_path / "run_edgewarn.py"
+        failing_child.write_text(
+            "import signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, lambda *_a: sys.exit(7))\n"
+            "\nwhile True:\n"
+            "    time.sleep(0.1)\n"
+        )
+        driver = tmp_path / "driver.py"
+        repo_src = str(Path(__file__).resolve().parents[2] / "src")
+        driver.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {repo_src!r})\n"
+            "import run_all\n"
+            f"run_all.SERVICE_SCRIPTS['edgewarn'] = {str(failing_child)!r}\n"
+            "sys.exit(run_all.main(['--services', 'edgewarn']))\n"
+        )
+
+        proc = subprocess.Popen(
+            [sys.executable, str(driver)], start_new_session=True
+        )
+        try:
+            time.sleep(1.0)
+            proc.send_signal(signal.SIGTERM)
+            code = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            pytest.fail("launcher did not exit after SIGTERM")
+
+        assert code == 1
 
     def test_unexpected_child_exit_is_nonzero(self, tmp_path, src_root, monkeypatch):
         quitter = _sleeper(tmp_path, name="quitter.py", code=3)
@@ -240,6 +428,55 @@ class TestSupervision:
             time.sleep(0.2)
 
         assert not thread.is_alive()
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX process-group contract")
+    def test_shutdown_kills_descendant_after_service_leader_exits(
+        self, tmp_path, src_root
+    ):
+        descendant_pid = tmp_path / "descendant.pid"
+        worker = tmp_path / "run_edgewarn.py"
+        worker.write_text(
+            "import pathlib, signal, subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', "
+            "'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "time.sleep(300)'])\n"
+            f"pathlib.Path({str(descendant_pid)!r}).write_text(str(child.pid))\n"
+            "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(0))\n"
+            "while True:\n"
+            "    time.sleep(0.05)\n",
+            encoding="utf-8",
+        )
+        driver = tmp_path / "driver.py"
+        repo_src = str(Path(__file__).resolve().parents[2] / "src")
+        driver.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {repo_src!r})\n"
+            "import run_all\n"
+            "run_all.STOP_GRACE_SECONDS = 0.5\n"
+            f"run_all.SERVICE_SCRIPTS['edgewarn'] = {str(worker)!r}\n"
+            "sys.exit(run_all.main(['--services', 'edgewarn']))\n",
+            encoding="utf-8",
+        )
+
+        launcher = subprocess.Popen([sys.executable, str(driver)])
+        try:
+            deadline = time.time() + 10
+            while not descendant_pid.exists() and time.time() < deadline:
+                time.sleep(0.05)
+            assert descendant_pid.exists()
+            pid = int(descendant_pid.read_text())
+
+            launcher.send_signal(signal.SIGTERM)
+            assert launcher.wait(timeout=10) == 1
+
+            deadline = time.time() + 5
+            while Path(f"/proc/{pid}").exists() and time.time() < deadline:
+                time.sleep(0.05)
+            assert not Path(f"/proc/{pid}").exists()
+        finally:
+            if launcher.poll() is None:
+                launcher.kill()
+                launcher.wait()
 
 
 def test_launcher_imports_no_pipeline_module():

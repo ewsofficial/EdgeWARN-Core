@@ -67,8 +67,8 @@ See `docs/core/goes_pipeline.md` for the end-to-end GOES readiness and render fl
 `src/common/ingest/nws/main.py` downloads active alerts from `https://api.weather.gov/alerts/active`, applies GeoMapper processing, and updates the alert registry.
 
 Before starting a pipeline that ingests NWS alerts, synchronize the required
-zone assets with `python scripts/sync_nws_zones.py`. The pipeline fails with a
-clear preflight error if no zone assets are available. The script wraps the NWS
+zone assets with `edgewarn sync-nws-zones --apply`. The pipeline fails with a
+clear preflight error if no zone assets are available. The command wraps the NWS
 asset maintenance utility and supports:
 
 - `--assets-dir`
@@ -78,9 +78,9 @@ asset maintenance utility and supports:
 - `--max-workers`
 - `--pause-seconds`
 - `--progress` / `--no-progress`
-- `--apply` (accepted for compatibility; the script always writes updates)
+- `--apply` (without it, the command performs a dry run)
 - `--report-path`
-- `--config-dir`
+- `--config-path`
 
 Key behavior:
 

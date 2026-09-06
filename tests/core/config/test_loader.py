@@ -47,6 +47,25 @@ def test_valid_document_passes(config_dir):
     assert loaded["a"] == 1
 
 
+def test_validate_document_uses_the_same_schema_and_error_paths(config_dir, monkeypatch):
+    schema = {
+        "type": "object",
+        "required": ["a"],
+        "additionalProperties": False,
+        "properties": {"a": {"type": "integer", "minimum": 1}},
+    }
+    _write(config_dir, "sample", {"a": 1}, schema)
+    monkeypatch.setattr(config_loader, "CONFIG_NAMES", (*config_loader.CONFIG_NAMES, "sample"))
+
+    config_loader.validate_document("sample", {"a": 2}, config_dir=config_dir)
+    with pytest.raises(config_loader.ConfigError) as excinfo:
+        config_loader.validate_document("sample", {"a": 0}, config_dir=config_dir)
+
+    assert excinfo.value.filename == "sample.yaml"
+    assert excinfo.value.dotted_path == "a"
+    assert excinfo.value.message == "must be >= 1"
+
+
 def test_missing_required_property_raises(config_dir):
     schema = {
         "type": "object",

@@ -13,7 +13,7 @@ For backing file schemas, see `docs/api/data_keys.md`.
 - Version behavior:
   - `2.x` when `NODE_ENV=production` (`api.yaml`
     `server.production_version_label`)
-  - the `package.json` version otherwise, currently `2.7.0`
+  - the `package.json` version otherwise, currently `3.0.0`
 
 Every route in this document is a compatibility adapter. Each response carries
 `Deprecation: true` and `Link: </api/v3/openapi.json>; rel="deprecation"`, and
@@ -52,7 +52,7 @@ Response:
 ```json
 {
   "service": "EdgeWARN Unified API",
-  "version": "2.7.0",
+  "version": "3.0.0",
   "links": {
     "api": "/api/v3",
     "openapi": "/api/v3/openapi.json"
@@ -69,7 +69,7 @@ Response:
 ```json
 {
   "message": "EdgeWARN API v2",
-  "version": "2.7.0",
+  "version": "3.0.0",
   "endpoints": {
     "features": {
       "cells": "/api/v2/features/cells[?id={int}]",

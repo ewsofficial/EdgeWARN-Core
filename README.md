@@ -40,6 +40,16 @@ conda activate EdgeWARN-dev
 npm install
 ```
 
+4. Register the Python package command in the active Conda environment:
+
+```bash
+python -m pip install --no-deps -e .
+edgewarn --version
+```
+
+`environment.yml` is the runtime dependency authority; `--no-deps` prevents
+pip from creating a second dependency set.
+
 Detailed setup and runtime notes are in `INSTALLATION.md`.
 
 ## Running Services
@@ -52,6 +62,44 @@ npm run debug:api
 ```
 
 ## Running Python Pipelines
+
+The installed command validates the complete configuration tree before it
+starts a process. It is the preferred service entry point:
+
+```bash
+edgewarn run                                      # all three services
+edgewarn run core                                 # primary analysis only
+edgewarn run ewmrs                                # primary producer + EWMRS
+edgewarn run nexrad                               # NEXRAD ingest + rendering
+edgewarn run core --config-path /etc/edgewarn/config
+edgewarn run ewmrs \
+  --args core '["--lat_limits", "20", "55"]' \
+  --args ewmrs '["--disable-wpc"]'
+```
+
+`--args WORKER JSON_ARGV` is repeatable. `WORKER` is `core`, `ewmrs`, or
+`nexrad`, and `JSON_ARGV` must be an array of strings; arguments are sent only
+to that worker without shell parsing. The `ewmrs` mode always includes its
+primary EdgeWARN producer dependency. The `nexrad` mode starts both Level-II
+ingest and NEXRAD rendering.
+
+Configuration can be edited as a validated YAML scalar or through a terminal
+UI:
+
+```bash
+edgewarn configure ewmrs_pipeline.workers.budget_mb.goes 2048
+edgewarn configure --config-path /etc/edgewarn/config \
+  runtime.run.disable_nexrad true
+edgewarn configure --config-path /etc/edgewarn/config  # TTY only
+```
+
+The TUI first selects a file and then displays its editable leaves. `Enter`
+opens a value, `Ctrl+S` validates and saves it, `Esc` goes back, and `q` quits
+when no editor is open. Exit status `0` means success or clean signal shutdown,
+`1` means a worker or write/rollback failure, and `2` means invalid command,
+configuration, YAML, or schema input.
+
+The source launchers remain available for development and troubleshooting.
 
 Three independently operable real-time services run from `src/`:
 
@@ -90,6 +138,21 @@ when omitted, and each accepts a `--no-` form to re-enable. The primary
 service normalizes `--lon_limits` into the `0-360` domain internally.
 
 Historical runs persist the final stormcell artifacts to `<BASE_DIR>/data/stormcells/` using the runtime timestamped filenames.
+
+## Containers
+
+The supplied image installs the built Python wheel and uses the registered
+command directly:
+
+```dockerfile
+ENTRYPOINT ["edgewarn"]
+CMD ["run", "--config-path", "/etc/edgewarn/config"]
+```
+
+`compose.yaml` mounts runtime output at `/var/lib/edgewarn` and mounts the
+production configuration read-only at `/etc/edgewarn/config`. Use the
+`admin`-profile configuration container for intentional read-write edits. See
+`INSTALLATION.md` for build, specialized-mode, and administrative examples.
 
 ## Runtime Base Directory
 
@@ -139,6 +202,6 @@ python -m pytest tests/
 
 ## Release
 
-Current package version: **2.7.0**
+Current package version: **3.0.0**
 
 See `CHANGELOG.md` for release history.

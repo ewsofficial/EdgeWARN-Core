@@ -1,8 +1,6 @@
-name: EdgeWARN-dev
+name: EdgeWARN
 channels:
-  - anaconda
   - conda-forge
-  - defaults
 dependencies:
   - python=3.13
   - pyyaml
@@ -22,6 +20,8 @@ dependencies:
   - proj
   - psutil
   - ijson
+  - ruamel.yaml
+  - textual
   - pip:
     - gputil
     - pytest
