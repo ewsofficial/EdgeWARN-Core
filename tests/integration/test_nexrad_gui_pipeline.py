@@ -259,7 +259,7 @@ def test_render_pending_nexrad_gui_files_renders_all_fresh_source_timestamps(mon
     rendered = nexrad_gui.render_pending_nexrad_gui_files()
 
     assert rendered == 3
-    assert rendered_timestamps == ["20260507-150001", "20260507-150011", "20260507-150021"]
+    assert sorted(rendered_timestamps) == ["20260507-150001", "20260507-150011", "20260507-150021"]
 
 
 

@@ -54,6 +54,48 @@ class TestAssetsDirOwnership:
         finally:
             config_loader.reset_cache()
 
+    def test_assets_dir_falls_back_to_bundled_container_snapshot(
+        self, tmp_path, monkeypatch
+    ):
+        alt_repo = tmp_path / "alt_repo"
+        alt_config = alt_repo / "config"
+        shutil.copytree(Path(__file__).resolve().parents[4] / "config", alt_config)
+        bundled = tmp_path / "bundled"
+        state_dir = bundled / "TX"
+        state_dir.mkdir(parents=True)
+        (state_dir / "zones.json").write_text("[]", encoding="utf-8")
+
+        monkeypatch.setenv("EDGEWARN_CONFIG_DIR", str(alt_config))
+        monkeypatch.setenv("EDGEWARN_BUNDLED_NWS_ZONES_DIR", str(bundled))
+        config_loader.reset_cache()
+        try:
+            assert _assets_dir() == bundled
+        finally:
+            config_loader.reset_cache()
+
+    def test_operator_assets_override_bundled_container_snapshot(
+        self, tmp_path, monkeypatch
+    ):
+        alt_repo = tmp_path / "alt_repo"
+        alt_config = alt_repo / "config"
+        shutil.copytree(Path(__file__).resolve().parents[4] / "config", alt_config)
+        configured = alt_repo / "assets" / "nws_zones"
+        state_dir = configured / "TX"
+        state_dir.mkdir(parents=True)
+        (state_dir / "zones.json").write_text("[]", encoding="utf-8")
+        bundled = tmp_path / "bundled"
+        bundled_state = bundled / "OK"
+        bundled_state.mkdir(parents=True)
+        (bundled_state / "zones.json").write_text("[]", encoding="utf-8")
+
+        monkeypatch.setenv("EDGEWARN_CONFIG_DIR", str(alt_config))
+        monkeypatch.setenv("EDGEWARN_BUNDLED_NWS_ZONES_DIR", str(bundled))
+        config_loader.reset_cache()
+        try:
+            assert _assets_dir() == configured
+        finally:
+            config_loader.reset_cache()
+
 
 class TestZoneLookup:
     """Tests for ZoneLookup class"""
@@ -131,7 +173,9 @@ class TestZoneLookup:
         
         with patch.object(ZoneLookup, '_cache', {}):
             with patch('EdgeWARN.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
-                with pytest.raises(RuntimeError, match=r"scripts/sync_nws_zones\.py"):
+                with pytest.raises(
+                    RuntimeError, match=r"edgewarn sync-nws-zones --apply"
+                ):
                     ZoneLookup.get_polygon("XXC001")
 
     def test_public_preflight_accepts_existing_zone_assets(self, tmp_path):

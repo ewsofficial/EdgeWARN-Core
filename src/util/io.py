@@ -210,11 +210,7 @@ class IOManager:
         args.drop_offset = overlay.resolve(args.drop_offset, yaml_value=detection_cfg["drop_offset"], key="detection.drop_offset")
 
     def get_args(self):
-        parser = argparse.ArgumentParser(description="EdgeWARN modifier specification")
-        cli.add_primary_domain_flags(parser)
-        self._add_common_processing_args(parser)
-        cli.add_service_enablement_flags(parser)
-        cli.add_mrms_core_only_flag(parser)
+        parser = cli.build_service_parser("edgewarn")
         args = parser.parse_args()
         self._export_config_dir(args)
         self._run_ctam_diagnostics(args)

@@ -71,7 +71,7 @@ timestamp through `round_to_nearest_even_minute`
 ever select an even minute and a cycle can arrive at most every 120 seconds.
 `src/common/ingest/manifest.py:222-227` calls this "the normal two-minute scan
 window" and enforces it with `min(120.0, self.mrms_tolerance_seconds)`.
-`config/lineage.yaml:43` sets `scan_interval_seconds: 120.0` on the same basis,
+`config/lineage.yaml:17` sets `scan_interval_seconds: 120.0` on the same basis,
 and `config/detection.yaml:34` uses `fallback_dt_seconds: 120.0` as the assumed
 inter-scan delta. 120 seconds is therefore the hard outer ceiling on everything
 CTAM does.
@@ -102,10 +102,10 @@ tests rather than treat them as a passing baseline.
 ### Maximum module count
 
 **Proposed, by analogy.** The repository caps independently scheduled work units
-at 3 (`config/detection.yaml:51`), 4 (`config/nexrad.yaml:68`), 8
-(`config/ewmrs_pipeline.yaml:51`), 16 (`config/nws.yaml:157`), and 24
-(`config/nexrad.yaml:66`). None of these is a plugin count, so none of them
-derives a module count. 8 is taken from `config/ewmrs_pipeline.yaml:51` as the
+at 3 (`config/detection.yaml:21`), 4 (`config/nexrad.yaml:41`), 8
+(`config/ewmrs_pipeline.yaml:22`), 16 (`config/nws.yaml:70`), and 24
+(`config/nexrad.yaml:39`). None of these is a plugin count, so none of them
+derives a module count. 8 is taken from `config/ewmrs_pipeline.yaml:22` as the
 nearest analogy: a bounded set of independent jobs inside one scheduled phase.
 
 The stage deadline, not the count, is the binding constraint. At the 1-second
@@ -124,8 +124,8 @@ which constrains `worker_timeout_seconds` with `"minimum": 1`. That is the only
 existing schema-level lower bound on a worker timeout in the repository.
 
 The maximum of 30 seconds is the repository's standing outbound timeout: 30
-seconds at `config/nws.yaml:155`, 30 seconds at `config/wpc.yaml:31`, and
-`request_timeout_ms: 30000` at `config/api.yaml:27`. It also matches the plan's
+seconds at `config/nws.yaml:68`, 30 seconds at `config/wpc.yaml:17`, and
+`request_timeout_ms: 30000` at `config/api.yaml:10`. It also matches the plan's
 own manifest example (`plans/modular-ctam-internal-api-plan.md:273`).
 
 The default of 10 seconds when a manifest omits `timeout_seconds` comes from
@@ -140,7 +140,7 @@ validation and the second is skipped at runtime with a deadline reason.
 Termination follows the existing supervisor escalation exactly:
 `process.terminate()`, join for `stop_join_timeout_seconds: 5`, then
 `process.kill()` and join for `stop_kill_join_timeout_seconds: 1`
-(`config/runtime.yaml:154-155`, implemented at
+(`config/runtime.yaml:59-60`, implemented at
 `src/util/runtime/processes.py:23-30`).
 
 ### Request body size
@@ -161,7 +161,7 @@ the files CTAM publishes. `src/api/services/analysis.js:17,24` read
 (`src/api/repositories/artifactRepository.js:115`) and rejects them with
 `INVALID_ARTIFACT` when `stat.size` exceeds the limit for that kind
 (`src/api/repositories/artifactRepository.js:79`). That limit is
-`size_limits_bytes.json: 8388608` at `config/api.yaml:109`. A published
+`size_limits_bytes.json: 8388608` at `config/api.yaml:50`. A published
 stormcell snapshot larger than 8 MiB is unreadable by the API that serves it, so
 8 MiB is a real, already-enforced ceiling on what module patches may grow the
 snapshot to.
@@ -188,7 +188,7 @@ The remaining three numbers follow arithmetically:
   budget still cannot produce an unreadable snapshot. The 200-cell worst case at
   the per-operation limit is 200 * 16384 = 3276800 bytes, which fits.
 - 1000 staged operations per transaction, from `list_limit: 1000` at
-  `config/api.yaml:111` and `max_limit: 1000` at `config/api.yaml:120`, the
+  `config/api.yaml:52` and `max_limit: 1000` at `config/api.yaml:58`, the
   repository's standing collection-size ceiling. The worst case is one
   stormcell operation plus one history operation per cell, 2 * 200 = 400, plus
   staged alerts.
@@ -213,7 +213,7 @@ module writes. 256 is the next power of two above that floor.
 Module ID length of 128 characters matches `LAYER_ID` at
 `src/api/services/validation.js:4`, the repository's existing bound on a
 filename-safe public identifier. The 256-character key and string bound is
-`query.max_value_length: 256` at `config/api.yaml:136`.
+`query.max_value_length: 256` at `config/api.yaml:67`.
 
 ### History window
 
@@ -236,7 +236,7 @@ comment at `config/integration.yaml:12-15` states that a `max_payloads` key was
 removed because it was fabricated. Cleanup deletes whole files rather than
 trimming entries: `cleanup_inactive_cells` unlinks
 `data/cells/<cell-id>.json` once a cell has been *inactive* for
-`inactive_cell_max_age_minutes: 120` (`config/api_index.yaml:38`, applied at
+`inactive_cell_max_age_minutes: 120` (`config/api_index.yaml:16`, applied at
 `src/EdgeWARN/api_integration/index_manager.py:177,186-189`). A cell that stays
 active is never expired and never trimmed, so its history file can hold far more
 than 120 minutes of entries.
@@ -267,7 +267,7 @@ records a larger figure, roughly 784 MB, but that is the decoded float64 array
 in memory rather than the file on disk, so it does not bound a streamed read.
 
 The internal limit deliberately does **not** reuse the public API's binary
-artifact limit of `134217728` bytes, 128 MiB, at `config/api.yaml:109`. That
+artifact limit of `134217728` bytes, 128 MiB, at `config/api.yaml:50`. That
 value sits below the documented 200 MB upper bound for a single uncompressed
 MRMS field, so the public API cannot serve the largest raw input even today. The
 internal API streams raw ingest artifacts that the public API never exposes, so
@@ -309,7 +309,7 @@ repository. Each needs a decision before the phase that depends on it.
    change unless the built-in adapter is exempted. See the history section above.
 
 3. **The 8 MiB public JSON artifact ceiling is not mentioned anywhere in the
-   plan.** `config/api.yaml:109` already bounds the published stormcell snapshot
+   plan.** `config/api.yaml:50` already bounds the published stormcell snapshot
    and cell-history files at 8388608 bytes, enforced at
    `src/api/repositories/artifactRepository.js:79`. Every patch-size limit in
    this document is derived from it. Phase 3's publication coordinator should

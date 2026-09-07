@@ -64,6 +64,33 @@ _ROUTING = {
 _LIST_FLAGS = {"--lat_limits", "--lon_limits"}
 
 
+def resolve_services(args, requested):
+    """Apply environment/YAML topology settings to requested services."""
+    run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
+    omit_ewmrs = bool(overlay.resolve(
+        args.disable_ewmrs, env_names=["EDGEWARN_DISABLE_EWMRS"],
+        yaml_value=run_cfg["disable_ewmrs"], key="run.disable_ewmrs",
+    ))
+    omit_nexrad = bool(overlay.resolve(
+        args.disable_nexrad, env_names=["EDGEWARN_DISABLE_NEXRAD"],
+        yaml_value=run_cfg["disable_nexrad"], key="run.disable_nexrad",
+    ))
+    services = list(requested)
+    if omit_ewmrs:
+        services = [name for name in services if name != "ewmrs"]
+    if omit_nexrad:
+        services = [name for name in services if name != "nexrad"]
+    args.mrms_core_only = bool(overlay.resolve(
+        args.mrms_core_only, yaml_value=run_cfg["mrms_core_only"],
+        key="run.mrms_core_only",
+    ))
+    if args.mrms_core_only:
+        services = [name for name in services if name == "edgewarn"]
+    if not services:
+        raise ValueError("service selection resolved to an empty set")
+    return services
+
+
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Optional supervisor starting the three EdgeWARN services"
@@ -104,48 +131,44 @@ def _parse_args(argv=None):
     # Service omission flags resolve from YAML when not given on the CLI so a
     # deployment unit can pin its topology without repeating flags. The other
     # disable flags are pure pass-through: children keep their own layering.
-    run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
-    omit_ewmrs = bool(overlay.resolve(
-        args.disable_ewmrs,
-        env_names=["EDGEWARN_DISABLE_EWMRS"],
-        yaml_value=run_cfg["disable_ewmrs"],
-        key="run.disable_ewmrs",
-    ))
-    omit_nexrad = bool(overlay.resolve(
-        args.disable_nexrad,
-        env_names=["EDGEWARN_DISABLE_NEXRAD"],
-        yaml_value=run_cfg["disable_nexrad"],
-        key="run.disable_nexrad",
-    ))
-
-    services = list(requested)
-    if omit_ewmrs:
-        services = [name for name in services if name != "ewmrs"]
-    if omit_nexrad:
-        services = [name for name in services if name != "nexrad"]
-    args.mrms_core_only = bool(overlay.resolve(
-        args.mrms_core_only,
-        yaml_value=run_cfg["mrms_core_only"],
-        key="run.mrms_core_only",
-    ))
-    if args.mrms_core_only:
-        # MRMS-core-only implies disabling every non-primary component.
-        services = [name for name in services if name == "edgewarn"]
-
-    if not services:
-        parser.error("service selection resolved to an empty set")
+    try:
+        services = resolve_services(args, requested)
+    except ValueError as exc:
+        parser.error(str(exc))
     return args, services
 
 
-def build_service_commands(args, services, src_root):
-    """Explicit argv per selected service; unset flags are never forwarded."""
+def build_service_commands(args, services, src_root, *, service_argv=None):
+    """Build explicit argv per selected service without shell tokenization.
+
+    ``service_argv`` contains already-validated, service-specific arguments.
+    The configuration path remains launcher-owned and is injected exactly once.
+    """
+    service_argv = service_argv or {}
+    unknown = [service for service in service_argv if service not in services]
+    if unknown:
+        raise ValueError(
+            f"arguments supplied for unselected service(s): {', '.join(unknown)}"
+        )
+    for service, forwarded in service_argv.items():
+        forbidden = next(
+            (
+                item
+                for item in forwarded
+                if item.split("=", 1)[0] in {"--config-dir", "--config-path"}
+            ),
+            None,
+        )
+        if forbidden is not None:
+            raise ValueError(
+                f"service argument {forbidden!r} cannot override --config-dir"
+            )
+
     commands = {}
     for service in services:
         cmd = [sys.executable, str(os.path.join(src_root, SERVICE_SCRIPTS[service]))]
         if args.base_dir is not None:
             cmd += ["--base-dir", args.base_dir]
-        if args.config_dir is not None:
-            cmd += ["--config-dir", args.config_dir]
         for flag, owners in _ROUTING.items():
             if service not in owners:
                 continue
@@ -164,6 +187,9 @@ def build_service_commands(args, services, src_root):
             # Pass the resolved topology to every selected child. This keeps
             # child behavior stable if its inherited config root differs.
             cmd.append("--mrms-core-only")
+        cmd.extend(service_argv.get(service, ()))
+        if args.config_dir is not None:
+            cmd += ["--config-dir", str(args.config_dir)]
         commands[service] = cmd
     return commands
 
@@ -195,16 +221,66 @@ def supervise(commands, *, src_root, stop_event=None):
 
     def _terminate_children(force=False):
         for proc in processes.values():
-            if proc.poll() is None:
+            signum = signal.SIGKILL if force else signal.SIGTERM
+            try:
+                if os.name == "posix":
+                    # Every service is a session/process-group leader. Signal
+                    # the group even if that leader has already exited: CTAM
+                    # modules and other descendants may still be running.
+                    os.killpg(proc.pid, signum)
+                elif proc.poll() is None:
+                    proc.send_signal(signum)
+            except ProcessLookupError:
+                # Test doubles and a concurrently reaped group can have no
+                # process group; retain direct-child behavior when possible.
+                if proc.poll() is None:
+                    try:
+                        proc.send_signal(signum)
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+
+    def _tree_is_alive(proc):
+        # Reap an exited leader before probing its group. Otherwise the leader
+        # remains a zombie and makes killpg(..., 0) report a false survivor.
+        leader_alive = proc.poll() is None
+        if os.name != "posix":
+            return leader_alive
+        try:
+            os.killpg(proc.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def _cleanup_after_error():
+        """Best-effort cleanup that preserves the exception which triggered it."""
+        _terminate_children()
+        for proc in processes.values():
+            try:
+                proc.wait(timeout=STOP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
+            except BaseException:
+                pass
+        forced = any(_tree_is_alive(proc) for proc in processes.values())
+        if forced:
+            _terminate_children(force=True)
+            for proc in processes.values():
                 try:
-                    proc.send_signal(signal.SIGKILL if force else signal.SIGTERM)
-                except OSError:
+                    proc.wait(timeout=STOP_GRACE_SECONDS)
+                except BaseException:
                     pass
 
     processes: dict[str, subprocess.Popen] = {}
     exit_code = 0
     try:
         for service, cmd in commands.items():
+            if stop_event.is_set():
+                print("[Launcher] Shutdown requested; not starting remaining services")
+                break
             try:
                 processes[service] = subprocess.Popen(
                     cmd,
@@ -216,11 +292,14 @@ def supervise(commands, *, src_root, stop_event=None):
                     # Windows has no PR_SET_PDEATHSIG equivalent here.
                     preexec_fn=set_parent_death_signal if os.name == "posix" else None,
                 )
-            except Exception:
-                print(f"[Launcher] Failed to start '{service}'; stopping started children")
+            except Exception as exc:
+                print(
+                    f"[Launcher] Failed to start '{service}': {exc}; "
+                    "stopping started children"
+                )
+                exit_code = 1
                 stop_event.set()
-                _terminate_children()
-                raise
+                break
         print(f"[Launcher] Started: {', '.join(f'{s} (pid {p.pid})' for s, p in processes.items())}")
 
         while not stop_event.is_set():
@@ -249,10 +328,10 @@ def supervise(commands, *, src_root, stop_event=None):
         _terminate_children()
         deadline = time.monotonic() + STOP_GRACE_SECONDS
         while time.monotonic() < deadline:
-            if all(proc.poll() is not None for proc in processes.values()):
+            if all(not _tree_is_alive(proc) for proc in processes.values()):
                 break
             time.sleep(0.2)
-        survivors = [s for s, p in processes.items() if p.poll() is None]
+        survivors = [s for s, p in processes.items() if _tree_is_alive(p)]
         if survivors:
             print(f"[Launcher] Escalating to SIGKILL for: {', '.join(survivors)}")
             _terminate_children(force=True)
@@ -260,11 +339,22 @@ def supervise(commands, *, src_root, stop_event=None):
 
         for service, proc in processes.items():
             try:
-                proc.wait(timeout=STOP_GRACE_SECONDS)
+                returncode = proc.wait(timeout=STOP_GRACE_SECONDS)
             except subprocess.TimeoutExpired:
                 print(f"[Launcher] Service '{service}' did not exit after SIGKILL")
                 exit_code = 1
-            print(f"[Launcher] Service '{service}' terminated (rc={proc.returncode})")
+                continue
+            print(f"[Launcher] Service '{service}' terminated (rc={returncode})")
+            expected_signal_exit = (
+                os.name == "posix"
+                and returncode == -signal.SIGTERM
+                and exit_code == 0
+            )
+            if returncode != 0 and not expected_signal_exit:
+                exit_code = 1
+    except BaseException:
+        _cleanup_after_error()
+        raise
     finally:
         try:
             signal.signal(signal.SIGINT, original_int)

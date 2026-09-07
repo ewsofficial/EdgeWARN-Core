@@ -282,7 +282,7 @@ Not in the plan, and it constrains Phase 3.
 `kind: 'json'` (`src/api/repositories/artifactRepository.js:115`) and rejects them
 when `stat.size` exceeds the configured limit
 (`src/api/repositories/artifactRepository.js:79`). That limit is
-`size_limits_bytes.json: 8388608` at `config/api.yaml:109`.
+`size_limits_bytes.json: 8388608` at `config/api.yaml:50`.
 
 So a transaction can be individually valid — every operation inside the
 per-operation and per-transaction limits — and still publish a snapshot the public
@@ -307,7 +307,7 @@ that pairing is not behavior-preserving for the built-in module.
 - Nothing trims an active cell's history file. `history.py` appends or replaces the
   last entry and writes the whole list back with no cap. The only removal is
   whole-file deletion after a cell has been inactive for
-  `inactive_cell_max_age_minutes: 120` (`config/api_index.yaml:38`, applied at
+  `inactive_cell_max_age_minutes: 120` (`config/api_index.yaml:16`, applied at
   `src/EdgeWARN/api_integration/index_manager.py:177`).
 
 Phase 5 must therefore exempt the in-process StormCast adapter from the default

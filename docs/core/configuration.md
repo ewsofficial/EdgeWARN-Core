@@ -47,3 +47,57 @@ PYTHONPATH=src python -m common.config.validate
 The GUI renderer writes float16 chunk artifacts and JSON indexes under
 `<BASE_DIR>/gui`; PNG routes are compatibility endpoints only where legacy PNG
 artifacts exist.
+
+## Package command
+
+Install the command into the active `EdgeWARN-dev` environment without asking
+pip to resolve runtime dependencies:
+
+```bash
+python -m pip install --no-deps -e .
+```
+
+All package-run modes validate this entire catalog before any child starts:
+
+```bash
+edgewarn run                                      # core + EWMRS + NEXRAD
+edgewarn run core                                 # primary only
+edgewarn run ewmrs                                # primary + EWMRS
+edgewarn run nexrad                               # NEXRAD ingest + render
+edgewarn run core --config-path /etc/edgewarn/config
+edgewarn run ewmrs \
+  --args core '["--lat_limits", "20", "55"]' \
+  --args ewmrs '["--disable-wpc"]'
+```
+
+`--args WORKER JSON_ARGV` accepts only a JSON array of strings and routes it to
+one selected worker without shell parsing. The EWMRS mode includes its primary
+producer dependency, and the NEXRAD mode includes both ingest and rendering.
+
+## Validated edits
+
+Use a filename stem, dotted leaf path, and one YAML scalar:
+
+```bash
+edgewarn configure ewmrs_pipeline.workers.budget_mb.goes 2048
+edgewarn configure --config-path /etc/edgewarn/config \
+  runtime.run.disable_nexrad true
+```
+
+The command validates the whole existing tree, locks and re-reads it, preserves
+round-trip YAML details, validates the proposed document, atomically replaces
+the target with its permission bits intact, and validates the full on-disk tree
+again. Invalid paths, collections, tags, aliases, schema violations, symlink
+escapes, and read-only files do not produce a partial edit.
+
+Without a dotted assignment, `edgewarn configure` opens a TTY-only two-screen
+editor. Choose a file, then choose a leaf; `Ctrl+S` validates and saves, `Esc`
+returns to the previous screen, and `q` quits when no editor is open. A
+validation error remains visible without changing the file. Noninteractive
+containers must use the dotted form.
+
+Package-command status `0` means success or clean shutdown, `1` means a worker
+or write/rollback failure, and `2` means usage or configuration validation
+failure. Production containers mount this directory read-only; only the
+administrative `edgewarn configure` container should mount it read-write. See
+`INSTALLATION.md` and `compose.yaml` for the complete container commands.

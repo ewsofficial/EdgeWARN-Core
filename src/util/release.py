@@ -3,16 +3,24 @@ from __future__ import annotations
 import json
 import os
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version as distribution_version
 from pathlib import Path
 
 from common.config.loader import load_config
 
 
 _PACKAGE_JSON = Path(__file__).resolve().parents[2] / "package.json"
+_DISTRIBUTION_NAME = "edgewarn-core"
 
 
 @lru_cache(maxsize=1)
 def get_release_version() -> str:
+    """Return installed package metadata, falling back for source checkouts."""
+    try:
+        return distribution_version(_DISTRIBUTION_NAME)
+    except PackageNotFoundError:
+        pass
+
     try:
         with _PACKAGE_JSON.open("r", encoding="utf-8") as handle:
             package_json = json.load(handle)
