@@ -1,23 +1,28 @@
 name: EdgeWARN
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
   - python=3.13
+  # Keep the geospatial ABI on one reproducible Brotli generation.  Older
+  # environments could retain libbrotlicommon 1.0 symlinks beside 1.2 decoders,
+  # causing rasterio/netCDF4/pyproj imports to fail during pytest collection.
+  - libbrotli=1.2.0
+  - rasterio=1.5.0
+  - netcdf4=1.7.2
+  - pyproj=3.7.2
+  - proj=9.7.1
   - pyyaml
   - aioboto3
   - affine
   - boto3
   - cfgrib
   - numpy
-  - netcdf4
   - rioxarray
   - scikit-image
   - scipy
   - shapely
-  - rasterio
   - xarray
-  - pyproj
-  - proj
   - psutil
   - ijson
   - ruamel.yaml

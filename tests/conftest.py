@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 import pytest
@@ -38,14 +37,30 @@ def mock_fs(tmp_path):
     return tmp_path
 
 @pytest.fixture(autouse=True)
-def mock_env_vars(monkeypatch):
-    """Set mock environment variables for testing."""
+def isolated_runtime(monkeypatch, tmp_path):
+    """Give every correctness test a disposable, fully restored runtime root."""
     monkeypatch.setenv("EDGEWARN_ENV", "test")
-    # io.py's arg parsers export the resolved config root. Registering the key
-    # here means a test that parses --config-dir cannot leak that root into
-    # every test that runs after it.
     from common.config import loader as config_loader
-    monkeypatch.setenv(
-        "EDGEWARN_CONFIG_DIR",
-        os.environ.get("EDGEWARN_CONFIG_DIR") or str(config_loader.config_root()),
-    )
+    from common.config import overlay
+    from util import file as fs
+
+    config_root = project_root / "config"
+    monkeypatch.setenv("EDGEWARN_CONFIG_DIR", str(config_root))
+    monkeypatch.setenv("EDGEWARN_BASE_DIR", str(tmp_path / "runtime"))
+    monkeypatch.delenv("BASE_DIR", raising=False)
+
+    path_state = {
+        name: value
+        for name, value in vars(fs).items()
+        if name.isupper() and isinstance(value, Path)
+    }
+    config_loader.reset_cache()
+    overlay.reset_origins()
+    fs.initialize_filesystem(tmp_path / "runtime")
+
+    yield
+
+    for name, value in path_state.items():
+        setattr(fs, name, value)
+    config_loader.reset_cache()
+    overlay.reset_origins()

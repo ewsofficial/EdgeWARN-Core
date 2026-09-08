@@ -13,5 +13,5 @@ Repository test suites and benchmark helpers.
 
 ## Agent guidance
 - Use targeted tests for local changes first, then broader suites as needed.
-- Run Python tests in the `EdgeWARN-dev` conda environment.
+- Run Python tests in the `EdgeWARN` conda environment.
 - Keep test data small and deterministic.

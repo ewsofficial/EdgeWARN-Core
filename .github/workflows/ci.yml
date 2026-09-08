@@ -41,9 +41,17 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-activate-base: false
-          activate-environment: EdgeWARN-dev
+          activate-environment: EdgeWARN
           environment-file: environment.yml
           python-version: '3.13'
+
+      - name: Verify native scientific imports
+        shell: bash -el {0}
+        run: python -c "import netCDF4, pyproj, rasterio"
+
+      - name: Collect offline correctness suite
+        shell: bash -el {0}
+        run: python -m pytest --collect-only
 
       - name: Validate config files
         shell: bash -el {0}
@@ -67,7 +75,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-activate-base: false
-          activate-environment: EdgeWARN-dev
+          activate-environment: EdgeWARN
           environment-file: environment.yml
           python-version: '3.13'
 

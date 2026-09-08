@@ -442,5 +442,9 @@ npm run test:coverage
 Python tests (with `EdgeWARN` active):
 
 ```bash
-python -m pytest tests/
+conda activate EdgeWARN
+python -m pytest
 ```
+
+The default command is the deterministic offline correctness suite. Performance
+benchmarks and live compatibility probes must be selected explicitly.

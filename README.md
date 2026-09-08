@@ -194,10 +194,11 @@ npm run test:watch
 npm run test:coverage
 ```
 
-Python (with `EdgeWARN-dev` active):
+Python (with `EdgeWARN` active):
 
 ```bash
-python -m pytest tests/
+conda activate EdgeWARN
+python -m pytest
 ```
 
 ## Release
