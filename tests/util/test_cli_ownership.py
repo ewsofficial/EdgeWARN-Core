@@ -69,7 +69,7 @@ class TestSharedDefinitions:
 
     def test_boolean_switches_cannot_express_unset(self):
         """Owned switches default to None so overlay.resolve can see 'not given'."""
-        from tests.core.config.source_inspect import argparse_defaults
+        from tests.architecture.source_inspect import argparse_defaults
 
         defaults = argparse_defaults("util/cli.py")
         for flag in (

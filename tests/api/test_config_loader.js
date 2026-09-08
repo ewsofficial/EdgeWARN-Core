@@ -9,7 +9,7 @@ const validatorVectors = JSON.parse(
   await fs.readFile(new URL('../fixtures/config/validator_vectors.json', import.meta.url), 'utf8'),
 );
 
-// Mirrors tests/core/config/test_loader.py -- same hand-rolled validator,
+// Mirrors tests/unit/config/test_loader.py -- same hand-rolled validator,
 // same keyword set, ported test-for-test so the two loaders stay in sync.
 
 async function makeConfigDir() {

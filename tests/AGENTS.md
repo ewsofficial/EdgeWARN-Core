@@ -5,7 +5,8 @@ Repository test suites and benchmark helpers.
 
 ## Layout
 - `api/`: Jest/Supertest coverage for Node services.
-- `benchmarks/`: Python benchmark and performance-oriented checks.
+- `benchmarks/`: top-level opt-in Python benchmark and performance helpers
+  (excluded from default pytest discovery).
 - `core/`: module-level Python tests.
 - `integration/`: cross-module pipeline tests.
 - `unit/`: focused regression and algorithm tests.

@@ -24,7 +24,7 @@ from common.config import loader as config_loader
 from common.config import overlay
 
 # Named here rather than spelled at the read site so the inventory in
-# ``tests/core/config/test_surface_baseline.py`` can resolve it, and so the one
+# ``tests/architecture/test_surface_baseline.py`` can resolve it, and so the one
 # writer (:func:`export_ctam_module_dir`) and the one reader (the ``env_names``
 # below) cannot drift apart.
 CTAM_MODULE_DIR_ENV = "EDGEWARN_CTAM_MODULE_DIR"

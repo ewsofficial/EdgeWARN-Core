@@ -190,6 +190,6 @@ jobs:
         shell: bash -el {0}
         run: |
           python -m pytest \
-            tests/integration/test_installed_command.py \
-            tests/unit/test_package_run.py \
-            tests/unit/test_run_all_launcher.py
+            tests/packaging/test_installed_command.py \
+            tests/integration/processes/test_package_run.py \
+            tests/integration/processes/test_run_all_launcher.py

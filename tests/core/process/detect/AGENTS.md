@@ -1,7 +1,0 @@
-# AGENTS Guide for `tests/core/process/detect/`
-
-## Purpose
-Detection pipeline tests for save, tracking, gate mapping, alert matching, and supporting helpers.
-
-## Agent guidance
-- Detection tests often validate output shape and geometry assumptions relied on by integration.

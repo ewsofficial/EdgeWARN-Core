@@ -11,7 +11,7 @@ Regenerating is only correct when the source change was an intentional
 behavior change; an unexplained diff here is the regression the plan is
 guarding against.
 
-Sibling of ``tests/core/config/baseline.py``, with three additions the CTAM
+Sibling of ``tests/architecture/baseline.py``, with three additions the CTAM
 payloads require: ``datetime`` values (alert effective/expiry times), non-finite
 floats (``max_refl`` and ``centroid`` are ``NaN`` for a degenerate cell), and
 float rounding.

@@ -7,7 +7,7 @@ repo-root anchoring must be unconditional, because accessory children are
 spawned without argv or a predictable working directory, so a relative value
 has to name one fixed place.
 
-``tests/core/config/test_surface_baseline.py`` scans ``src/`` for environment
+``tests/architecture/test_surface_baseline.py`` scans ``src/`` for environment
 variables, and ``EDGEWARN_CTAM_MODULE_DIR`` is picked up from the native
 ``env_names`` tuple in ``resolve_ctam_module_dir`` in that inventory. These
 tests cover the resolver's actual precedence and anchoring behavior.
