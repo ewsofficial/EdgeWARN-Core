@@ -338,26 +338,33 @@ class StormCellIntegrator:
 
         features = probsevere_data["features"]
 
-        feature_lookup = {
-            str(f.get("id") or f.get("properties", {}).get("ID")): f.get("properties", {})
-            for f in features
-        }
+        feature_lookup = {}
+        for feature in features:
+            properties = feature.get("properties", {})
+            identifier = feature.get("id")
+            if identifier is None:
+                identifier = properties.get("ID")
+            if identifier is not None:
+                feature_lookup[str(identifier)] = properties
 
         field_map = probsevere_field_map()
         for cell in storm_cells:
-            cell_id = str(cell.get("id"))
+            cell_id = cell.get("id")
 
             if "properties" not in cell:
                 cell["properties"] = {}
 
-            match = feature_lookup.get(cell_id)
+            match = None if cell_id is None else feature_lookup.get(str(cell_id))
             if not match:
                 continue
 
             for target_key, source_key in field_map.items():
                 try:
-                    cell["properties"][target_key] = float(match.get(source_key, 0))
+                    raw_value = match[source_key]
+                    cell["properties"][target_key] = float(raw_value)
                 except (TypeError, ValueError):
+                    cell["properties"][target_key] = "MATCH_ERROR"
+                except KeyError:
                     cell["properties"][target_key] = "MATCH_ERROR"
 
         return storm_cells

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "inclusive numeric boundaries",
+    "document": {"value": 0},
+    "schema": {"type": "object", "properties": {"value": {"type": "number", "minimum": 0, "maximum": 0}}},
+    "valid": true
+  },
+  {
+    "name": "exclusive boundary",
+    "document": {"value": 0},
+    "schema": {"type": "object", "properties": {"value": {"type": "number", "exclusiveMinimum": 0}}},
+    "valid": false
+  },
+  {
+    "name": "oversized array",
+    "document": {"value": [1, 2, 3]},
+    "schema": {"type": "object", "properties": {"value": {"type": "array", "maxItems": 2}}},
+    "valid": false
+  },
+  {
+    "name": "duplicate array items",
+    "document": {"value": [1, 1]},
+    "schema": {"type": "object", "properties": {"value": {"type": "array", "uniqueItems": true}}},
+    "valid": false
+  },
+  {
+    "name": "pattern mismatch",
+    "document": {"value": "red"},
+    "schema": {"type": "object", "properties": {"value": {"type": "string", "pattern": "^#[0-9A-F]{6}$"}}},
+    "valid": false
+  },
+  {
+    "name": "enum mismatch",
+    "document": {"value": "unknown"},
+    "schema": {"type": "object", "properties": {"value": {"enum": ["active", "disabled"]}}},
+    "valid": false
+  },
+  {
+    "name": "unsupported keyword",
+    "document": {"value": 1},
+    "schema": {"type": "object", "properties": {"value": {"type": "number", "multipleOf": 1}}},
+    "valid": false
+  },
+  {
+    "name": "nonfinite number",
+    "document_token": "nan",
+    "schema": {"type": "object", "properties": {"value": {"type": "number"}}},
+    "valid": false
+  }
+]

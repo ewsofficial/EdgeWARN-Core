@@ -131,6 +131,10 @@ class TestHybridAssignmentIntegration:
         # Should have 2 active cells
         assert len(result) == 2
         assert all(c['tracking_mode'] == 'active' for c in result)
+        assert {cell['id']: cell['centroid'] for cell in result} == {
+            1: [35.005, -97.005],
+            2: [36.005, -98.005],
+        }
     
     def test_new_cell_detection(self, hybrid_tracker, sample_entries):
         """Test detection of new cells."""
@@ -220,6 +224,9 @@ class TestHybridAssignmentIntegration:
         # Check that re-acquisition happened
         info_messages = io_manager.get_info_messages()
         assert any('re-acquired' in msg.lower() for msg in info_messages)
+        assert [(cell['id'], cell['centroid'], cell['tracking_mode']) for cell in result] == [
+            (1, [35.025, -97.025], 'active')
+        ]
 
 
 class TestCrossedPathsScenario:
@@ -317,6 +324,10 @@ class TestCrossedPathsScenario:
         # Should have 2 active cells
         assert len(result) == 2
         assert all(c['tracking_mode'] == 'active' for c in result)
+        assert {cell['id']: cell['centroid'] for cell in result} == {
+            1: [35.0, -96.85],
+            2: [35.0, -96.15],
+        }
 
 
 class TestStormSplitScenario:
@@ -381,8 +392,11 @@ class TestStormSplitScenario:
             entries, updated_data, timestamp='2026-02-18T12:00:00'
         )
         
-        # Should have 2 cells (1 matched + 1 new)
-        assert len(result) == 2
+        assert {cell['id']: cell['centroid'] for cell in result} == {
+            1: [35.0, -96.998],
+            101: [35.0, -97.002],
+        }
+        assert all(cell['tracking_mode'] == 'active' for cell in result)
 
 
 class TestStormMergeScenario:
@@ -453,9 +467,14 @@ class TestStormMergeScenario:
             entries, updated_data, timestamp='2026-02-18T12:00:00'
         )
         
-        # Should have at least 1 active cell
+        # A merged detection can update only one track. The other track must
+        # remain a distinct prediction or terminate; it must never receive the
+        # same observation as a second active match.
         active = [c for c in result if c.get('tracking_mode') == 'active']
-        assert len(active) >= 1
+        assert [(cell['id'], cell['centroid']) for cell in active] == [
+            (1, [35.0, -96.95]),
+        ]
+        assert len({cell['id'] for cell in result}) == len(result)
 
 
 class TestTrackingContinuity:
@@ -484,7 +503,7 @@ class TestTrackingContinuity:
         
         Simulates:
         1. Initial detection
-        2. Drop for 2 scans
+        2. Drop for one scan
         3. Re-detection
         """
         # Initial entry
@@ -510,26 +529,11 @@ class TestTrackingContinuity:
             entries, [], timestamp='2026-02-18T12:02:00', dt_seconds=120.0
         )
         
-        # If no tracks survive prediction mode, that's acceptable behavior
-        # The key test is that when we have a re-detection, it works
-        if len(result1) == 0:
-            # Cell was terminated due to low confidence or other factors
-            # This is acceptable - test passes
-            return
-        
-        assert result1[0]['tracking_mode'] == 'predicted'
-        
-        # Scan 2: Still no detection
-        result2 = tracker.update_cells(
-            result1, [], timestamp='2026-02-18T12:04:00', dt_seconds=120.0
-        )
-        
-        if len(result2) == 0:
-            return
-        
-        assert result2[0]['tracking_mode'] == 'predicted'
-        
-        # Scan 3: Re-detection close to predicted position
+        assert [(cell['id'], cell['tracking_mode']) for cell in result1] == [
+            (1, 'predicted'),
+        ]
+
+        # Scan 2: Re-detection has a new detector ID but remains track 1.
         updated_data = [
             {
                 'id': 101,
@@ -539,12 +543,13 @@ class TestTrackingContinuity:
             },
         ]
         
-        result3 = tracker.update_cells(
-            result2, updated_data, timestamp='2026-02-18T12:06:00', dt_seconds=120.0
+        result2 = tracker.update_cells(
+            result1, updated_data, timestamp='2026-02-18T12:04:00', dt_seconds=120.0
         )
-        
-        # Should have at least one cell (re-acquired or new)
-        assert len(result3) >= 1
+
+        assert [(cell['id'], cell['centroid'], cell['tracking_mode']) for cell in result2] == [
+            (1, [35.02, -96.98], 'active'),
+        ]
     
     def test_termination_after_timeout(self, tracker):
         """Test that storm is terminated after max prediction time."""

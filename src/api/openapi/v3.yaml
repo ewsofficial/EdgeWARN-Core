@@ -3,7 +3,7 @@
   "info": {"title": "EdgeWARN Unified API", "version": "3.0.0", "description": "The versioned, read-only EdgeWARN and EWMRS public API."},
   "servers": [{"url": "/"}],
   "paths": {
-    "/api/v3": {"get": {"operationId": "getApiDiscovery", "responses": {"200": {"description": "Capability document"}}}},
+    "/api/v3": {"get": {"operationId": "getApiDiscovery", "responses": {"200": {"description": "Capability document", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResourceEnvelope"}}}}}}},
     "/api/v3/openapi.json": {"get": {"operationId": "getOpenApi", "responses": {"200": {"description": "OpenAPI document"}}}},
     "/health/live": {"get": {"operationId": "getLiveness", "responses": {"200": {"description": "Live"}}}},
     "/health/ready": {"get": {"operationId": "getReadiness", "responses": {"200": {"description": "Ready"}, "503": {"description": "Producer roots unavailable"}}}},
@@ -37,6 +37,30 @@
     "/api/v3/styles/colormaps": {"get": {"operationId": "listColormaps", "responses": {"200": {"description": "Colormap collection"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}}
   },
   "components": {
+    "schemas": {
+      "ResourceEnvelope": {
+        "type": "object",
+        "required": ["data", "meta"],
+        "additionalProperties": false,
+        "properties": {
+          "data": {"type": "object"},
+          "meta": {"type": "object"}
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "required": ["type", "title", "status", "detail", "instance", "requestId"],
+        "properties": {
+          "type": {"type": "string"},
+          "title": {"type": "string"},
+          "status": {"type": "integer", "minimum": 400, "maximum": 599},
+          "detail": {"type": "string"},
+          "instance": {"type": "string"},
+          "requestId": {"type": "string"},
+          "code": {"type": "string"}
+        }
+      }
+    },
     "parameters": {
       "cellId": {"name": "cellId", "in": "path", "required": true, "schema": {"type": "string"}},
       "alertId": {"name": "alertId", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -50,6 +74,6 @@
       "x": {"name": "x", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 0}},
       "y": {"name": "y", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 0}}
     },
-    "responses": {"Problem": {"description": "RFC 9457 problem detail", "content": {"application/problem+json": {}}}, "ServiceNotEnabled": {"description": "Required service is not active (SERVICE_NOT_ENABLED; carries service, state, and lastSeen extension members)", "content": {"application/problem+json": {}}}}
+    "responses": {"Problem": {"description": "RFC 9457 problem detail", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}}, "ServiceNotEnabled": {"description": "Required service is not active (SERVICE_NOT_ENABLED; carries service, state, and lastSeen extension members)", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}}}
   }
 }

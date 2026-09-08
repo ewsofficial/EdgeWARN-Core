@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { PassThrough, Readable } from 'stream';
 import { ArtifactRepository } from '../../src/api/repositories/artifactRepository.js';
 import { createAnalysisService } from '../../src/api/services/analysis.js';
 import { createRenderService } from '../../src/api/services/renders.js';
 import { createAncillaryServices } from '../../src/api/services/ancillary.js';
+import { streamArtifact } from '../../src/api/streamArtifact.js';
 
 // api.yaml is the only base default for the repository budgets, so the
 // constructor no longer fills them in and every caller states them.
@@ -87,6 +89,25 @@ describe('unified API services', () => {
     };
     const service = createAncillaryServices(repository, ANCILLARY_CONFIG);
     await expect(service.rapData('CAPE', '20260317-200000')).rejects.toMatchObject({ code: 'IN_PROGRESS' });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes an artifact handle when a disconnected stream fails', async () => {
+    const close = jest.fn().mockResolvedValue();
+    const source = new Readable({
+      read() { this.destroy(new Error('client disconnected')); },
+    });
+    const response = new PassThrough();
+    response.set = jest.fn(() => response);
+    response.type = jest.fn(() => response);
+    response.destroyed = true;
+    const request = { destroyed: true, fresh: false, method: 'GET' };
+
+    await expect(streamArtifact(request, response, {
+      handle: { createReadStream: () => source, close },
+      headers: {},
+      size: 4,
+    }, 'application/octet-stream')).resolves.toBeUndefined();
     expect(close).toHaveBeenCalledTimes(1);
   });
 

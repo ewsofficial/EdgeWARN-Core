@@ -5,6 +5,10 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { ConfigError, loadConfig, resetCache } from '../../src/config/loader.js';
 
+const validatorVectors = JSON.parse(
+  await fs.readFile(new URL('../fixtures/config/validator_vectors.json', import.meta.url), 'utf8'),
+);
+
 // Mirrors tests/core/config/test_loader.py -- same hand-rolled validator,
 // same keyword set, ported test-for-test so the two loaders stay in sync.
 
@@ -36,6 +40,18 @@ describe('config loader hand-rolled validator', () => {
     const loaded = loadConfig('sample', { configDir: dir });
 
     expect(loaded.a).toBe(1);
+  });
+
+  it.each(validatorVectors)('matches the shared vector: $name', async (vector) => {
+    dir = await makeConfigDir();
+    const document = vector.document_token === 'nan' ? { value: Number.NaN } : vector.document;
+    await writeSample(dir, document, vector.schema);
+
+    if (vector.valid) {
+      expect(loadConfig('sample', { configDir: dir }).value).toBe(0);
+    } else {
+      expect(() => loadConfig('sample', { configDir: dir })).toThrow(ConfigError);
+    }
   });
 
   it('rejects a missing required property', async () => {

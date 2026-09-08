@@ -402,37 +402,20 @@ def build_filtered_cost_matrix(tracks: List[Dict[str, Any]],
           already computed during single-candidate gating, so callers don't need
           to recompute it.
     """
-    # First, handle single-candidate tracks (direct assignment)
+    # Every candidate participates in the same one-to-one solve.  Assigning a
+    # single-candidate track eagerly is unsafe because several tracks can have
+    # the same sole candidate (a common merge shape), which would assign one
+    # detection more than once.
     single_assignments = []
     single_assignment_costs: Dict[Tuple[int, int], float] = {}
     multi_candidate_tracks = []
     all_candidate_detections = set()
 
     calculator = AssignmentCostCalculator(config)
-    config = calculator.config
-    max_shape_cost = config.costs.reflectivity_diff_cap + config.costs.size_cost_cap
 
     for track in tracks:
         track_id = int(track['id'])
         candidates = track_candidates.get(track_id, [])
-
-        if len(candidates) == 1:
-            # Single candidate - check gating AND total cost
-            kf = kalman_filters.get(track_id)
-            if kf is not None:
-                if calculator.is_within_gate(track, candidates[0], kf):
-                    # M5 Fix: Enforce max cost validation for single candidates
-                    cost = calculator.compute_cost(
-                        track, candidates[0], kf, dt_seconds
-                    )
-                    max_cost = (config.weight_position * config.gating_threshold
-                                + config.weight_velocity * MAX_DIRECTIONAL_COST
-                                + config.weight_shape * max_shape_cost)
-                    if cost <= max_cost:
-                        det_id = int(candidates[0]['id'])
-                        single_assignments.append((track_id, det_id))
-                        single_assignment_costs[(track_id, det_id)] = cost
-                        continue
 
         if len(candidates) >= 1:
             multi_candidate_tracks.append(track)

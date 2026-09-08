@@ -7,7 +7,11 @@ export function createCors(allowedOrigins, policy) {
     origin(origin, callback) {
       if (!origin) return callback(null, false);
       if (allowAll) return callback(null, '*');
-      return callback(null, allowed.has(origin) ? origin : false);
+      if (allowed.has(origin)) return callback(null, origin);
+      const error = new Error('Origin is not allowed by CORS policy');
+      error.status = 403;
+      error.code = 'CORS_ORIGIN_DENIED';
+      return callback(error);
     },
     credentials: policy.credentials,
     methods: policy.methods,

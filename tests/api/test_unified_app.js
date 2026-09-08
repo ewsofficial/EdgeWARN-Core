@@ -5,6 +5,23 @@ import path from 'path';
 import request from 'supertest';
 import { createApp } from '../../src/api/app.js';
 
+const openApi = JSON.parse(await fs.readFile(new URL('../../src/api/openapi/v3.yaml', import.meta.url), 'utf8'));
+
+function expectObjectToMatchSchema(value, schema) {
+  expect(value).not.toBeNull();
+  expect(Array.isArray(value)).toBe(false);
+  expect(typeof value).toBe('object');
+  for (const required of schema.required || []) expect(value).toHaveProperty(required);
+  for (const [name, property] of Object.entries(schema.properties || {})) {
+    if (!(name in value)) continue;
+    if (property.type === 'integer') expect(Number.isInteger(value[name])).toBe(true);
+    else expect(typeof value[name]).toBe(property.type);
+  }
+  if (schema.additionalProperties === false) {
+    expect(Object.keys(value).sort()).toEqual(Object.keys(schema.properties).filter((key) => key in value).sort());
+  }
+}
+
 describe('unified API app', () => {
   let baseDir;
   afterEach(async () => { if (baseDir) await fs.rm(baseDir, { recursive: true, force: true }); });
@@ -49,6 +66,11 @@ describe('unified API app', () => {
     await request(app).get('/api/v1/features').expect(410);
     const missing = await request(app).get('/nope').expect(404);
     expect(missing.headers['content-type']).toContain('application/problem+json');
+    const discovery = await request(app).get('/api/v3').expect(200);
+    const discoverySchema = openApi.components.schemas.ResourceEnvelope;
+    const problemSchema = openApi.components.schemas.Problem;
+    expectObjectToMatchSchema(discovery.body, discoverySchema);
+    expectObjectToMatchSchema(missing.body, problemSchema);
   });
 
   it('serves every v3 resource family from one configured runtime tree', async () => {
@@ -133,15 +155,32 @@ describe('unified API app', () => {
     expect(v2.body.version).toBe('2.x');
   });
 
-  it('uses exact CORS origins without credentials and limits legacy health aliases', async () => {
+  it('allows configured CORS origins and rejects other origins independently', async () => {
     baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-security-'));
     await Promise.all(['data', 'gui', 'wpc'].map((directory) => fs.mkdir(path.join(baseDir, directory))));
-    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, ALLOWED_ORIGINS: 'https://console.example', RATE_LIMIT_MAX_SEC: '1', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
+    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, ALLOWED_ORIGINS: 'https://console.example', RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
     const cors = await request(app).get('/').set('Origin', 'https://console.example').expect(200);
     expect(cors.headers['access-control-allow-origin']).toBe('https://console.example');
     expect(cors.headers['access-control-allow-credentials']).toBeUndefined();
-    await request(app).get('/').set('Origin', 'https://other.example').expect(429);
-    await request(app).get('/health').set('x-internal-check', 'true').expect(429);
+    const denied = await request(app).get('/').set('Origin', 'https://other.example').expect(403).expect('Content-Type', /application\/problem\+json/);
+    expect(denied.body).toMatchObject({ status: 403, code: 'CORS_ORIGIN_DENIED', title: 'Forbidden' });
+  });
+
+  it('answers allowed CORS preflight with configured methods', async () => {
+    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-preflight-'));
+    await Promise.all(['data', 'gui', 'wpc'].map((directory) => fs.mkdir(path.join(baseDir, directory))));
+    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, ALLOWED_ORIGINS: 'https://console.example', RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
+    const response = await request(app).options('/api/v3').set('Origin', 'https://console.example').set('Access-Control-Request-Method', 'GET').expect(204);
+    expect(response.headers['access-control-allow-origin']).toBe('https://console.example');
+    expect(response.headers['access-control-allow-methods']).toContain('GET');
+  });
+
+  it('rate limits independently of CORS and route aliases', async () => {
+    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-rate-limit-'));
+    await Promise.all(['data', 'gui', 'wpc'].map((directory) => fs.mkdir(path.join(baseDir, directory))));
+    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '1', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
+    await request(app).get('/').expect(200);
+    await request(app).get('/health').expect(429);
   });
 
   it('preserves distinct legacy health response shapes', async () => {

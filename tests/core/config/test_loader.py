@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 import yaml
 
 from common.config import loader as config_loader
+
+
+VALIDATOR_VECTORS = (
+    Path(__file__).parents[2] / "fixtures" / "config" / "validator_vectors.json"
+)
 
 
 def _config_dir(tmp_path):
@@ -25,6 +31,25 @@ def _config_dir(tmp_path):
 def _write(config_dir, name, document, schema):
     (config_dir / f"{name}.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
     (config_dir / "schema" / f"{name}.schema.json").write_text(json.dumps(schema), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "vector",
+    json.loads(VALIDATOR_VECTORS.read_text()),
+    ids=lambda vector: vector["name"],
+)
+def test_language_neutral_validator_vectors(tmp_path, vector):
+    """Python and Node execute the same one-constraint-at-a-time cases."""
+    config_dir = _config_dir(tmp_path / "vectors")
+    document = vector.get("document", {"value": float("nan")})
+    _write(config_dir, "sample", document, vector["schema"])
+    config_loader.reset_cache()
+
+    if vector["valid"]:
+        assert config_loader.load_config("sample", config_dir=config_dir)["value"] == 0
+    else:
+        with pytest.raises(config_loader.ConfigError):
+            config_loader.load_config("sample", config_dir=config_dir)
 
 
 @pytest.fixture
