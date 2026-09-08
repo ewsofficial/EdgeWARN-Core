@@ -408,7 +408,7 @@ class TestCTAMPerformance:
         if sample_storm_cells is None or len(sample_storm_cells) == 0:
             pytest.skip("No sample storm cells available")
         
-        from EdgeWARN.ctam.modules.stormcast import StormCastModule
+        from EdgeWARN.ctam.modules.StormCast import StormCastModule
         
         result = PerformanceResult("StormCast Module")
         result.start()

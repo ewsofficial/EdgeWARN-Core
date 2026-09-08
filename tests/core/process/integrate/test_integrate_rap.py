@@ -1,6 +1,4 @@
 import pytest
-import numpy as np
-import xarray as xr
 from unittest.mock import MagicMock, patch
 from EdgeWARN.process.integrate.integrate_rap import integrate_rap
 from EdgeWARN.process.integrate.config import get_rap_products
@@ -14,79 +12,6 @@ def mock_io_manager():
     io.write_error = MagicMock()
     return io
 
-
-@pytest.fixture
-def mock_datasets():
-    """
-    Create mock datasets matching cfgrib.open_datasets output structure.
-    The find_dataset_for_product function checks:
-    1. level_type in ds.coords (e.g., 'isobaricInhPa', 'heightAboveGround')
-    2. var_name in ds.data_vars (e.g., 'u', 'v', 't2m')
-    """
-    # Grid: 10x10 covering CONUS subset
-    lats = np.linspace(30, 40, 10)
-    lons = np.linspace(260, 270, 10)  # 0-360 format (will be converted)
-    
-    levels = np.array([850, 700, 500, 250])
-    
-    # U-wind: varies by level
-    u_data = np.zeros((4, 10, 10))
-    u_data[0, :, :] = 10.0  # 850
-    u_data[1, :, :] = 15.0  # 700
-    u_data[2, :, :] = 25.0  # 500
-    u_data[3, :, :] = 40.0  # 250
-    
-    # V-wind
-    v_data = np.zeros((4, 10, 10))
-    v_data[:] = 5.0
-    
-    # Isobaric dataset (u, v at multiple levels)
-    # Key: 'isobaricInhPa' must be a coordinate
-    ds_isobaric = xr.Dataset(
-        {
-            "u": (("isobaricInhPa", "y", "x"), u_data),
-            "v": (("isobaricInhPa", "y", "x"), v_data)
-        },
-        coords={
-            "isobaricInhPa": levels,
-            "latitude": (("y", "x"), np.broadcast_to(lats[:, None], (10, 10))),
-            "longitude": (("y", "x"), np.broadcast_to(lons[None, :], (10, 10)))
-        }
-    )
-    
-    # Surface 2m dataset
-    # Key: 'heightAboveGround' must be a scalar coordinate with value 2
-    temp_data = np.full((10, 10), 300.0)  # 300 K = 26.85 C
-    dewpoint_data = np.full((10, 10), 290.0)  # 290 K = 16.85 C
-    
-    ds_surface = xr.Dataset(
-        {
-            "t2m": (("y", "x"), temp_data),
-            "d2m": (("y", "x"), dewpoint_data)
-        },
-        coords={
-            "heightAboveGround": 2,
-            "latitude": (("y", "x"), np.broadcast_to(lats[:, None], (10, 10))),
-            "longitude": (("y", "x"), np.broadcast_to(lons[None, :], (10, 10)))
-        }
-    )
-    
-    # Freezing level dataset
-    # Key: 'isothermZero' must be a coordinate
-    fl_data = np.full((10, 10), 3500.0)  # 3500m
-    
-    ds_freezing = xr.Dataset(
-        {
-            "gh": (("y", "x"), fl_data)
-        },
-        coords={
-            "isothermZero": 0,
-            "latitude": (("y", "x"), np.broadcast_to(lats[:, None], (10, 10))),
-            "longitude": (("y", "x"), np.broadcast_to(lons[None, :], (10, 10)))
-        }
-    )
-    
-    return [ds_isobaric, ds_surface, ds_freezing]
 
 
 @pytest.fixture

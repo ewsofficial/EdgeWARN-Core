@@ -5,7 +5,6 @@ from pathlib import Path
 
 import netCDF4
 import numpy as np
-import pytest
 import util.file as fs
 import xarray as xr
 from NEXRAD.render import NEXRAD_FIELD_MAGIC, serialize_nexrad_elevation_artifacts
@@ -33,13 +32,6 @@ class _Tree:
         return _Group(self._dataset)
 
 
-class _ParsedTree:
-    def __init__(self, dataset):
-        self._dataset = dataset
-
-    def __getitem__(self, key):
-        assert key == "/sweep_00"
-        return _Group(self._dataset)
 
 
 def _read_nexrad_bin(path: Path):
@@ -214,194 +206,6 @@ def test_write_grouped_netcdf_preserves_all_variables(tmp_path):
         reopened.close()
 
 
-@pytest.mark.skip(reason="retired intermediate serializer")
-def test_serialize_nexrad_render_intermediate_writes_dense_range_azimuth_files(tmp_path):
-    fs.initialize_filesystem(tmp_path)
-    dataset = xr.Dataset(
-        {
-            "DBZH": (("azimuth", "range"), np.array([[1.5, np.nan, 2.5], [3.5, 4.5, 5.5]], dtype=np.float32)),
-            "VRADH": (("azimuth", "range"), np.array([[10.0, 11.0, 12.0], [13.0, 14.0, 15.0]], dtype=np.float32)),
-            "noise": (("azimuth", "range"), np.array([[5.0, 6.0, 7.0], [8.0, 9.0, 10.0]], dtype=np.float32)),
-        },
-        coords={
-            "azimuth": np.array([0.0, 90.0], dtype=np.float32),
-            "range": np.array([1000.0, 2000.0, 3000.0], dtype=np.float32),
-        },
-    )
-    parsed = type(
-        "ParsedVolumeFixture",
-        (),
-        {
-            "scan_name": "VCP-212",
-            "dynamic_scan_type": "standard",
-            "sweeps": [type("SweepFixture", (), {"group_name": "/sweep_00", "fixed_angle": 0.5, "waveform": "contiguous_surveillance"})()],
-            "datatree": _ParsedTree(dataset),
-        },
-    )()
-    volume_path = tmp_path / "KTLH_20260507-150000_999.ar2v"
-    volume_path.parent.mkdir(parents=True, exist_ok=True)
-    volume_path.write_bytes(b"volume")
-
-    manifest_path = serialize_nexrad_render_intermediate("KTLH", "999", "20260507-150000", volume_path, parsed)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    assert [layer["variable_name"] for layer in manifest["layers"]] == ["DBZH", "VRADH", "noise"]
-    assert manifest["layers"][0]["data_shape"] == [3, 2]
-    assert manifest["layers"][0]["name"] == "NEXRAD_DBZH_SWEEP_00"
-    assert manifest["layers"][0]["canonical_elevation"] == "0.5"
-
-    layer = manifest["layers"][0]
-    assert layer["bin_path"].endswith("/gui/NEXRAD/KTLH/0.5/KTLH_DBZH_0.5_20260507-150000.bin.gz")
-    assert layer["colormap_key"] == "NWS_Reflectivity"
-    assert manifest["layers"][1]["colormap_key"] == "VRADH"
-    assert manifest["layers"][2]["colormap_key"] is None
-    assert "variable_dir" not in layer
-    assert "azimuths_path" not in layer
-    assert "ranges_path" not in layer
-    assert "data_path" not in layer
-    assert "binary_layout" not in layer
-    assert "data_order" not in manifest["layers"][0]
-    assert "served_dir" not in manifest["layers"][0]
-    assert "outdir" not in manifest["layers"][0]
-    assert not (Path(layer["bin_path"]).parent / "DBZH").exists()
-
-    raw_file = Path(layer["bin_path"]).read_bytes()
-    assert raw_file[:2] == b"\x1f\x8b"
-
-    with gzip.open(layer["bin_path"], "rb") as handle:
-        raw = handle.read()
-
-    assert raw.startswith(NEXRAD_FIELD_MAGIC)
-
-    count_start = len(NEXRAD_FIELD_MAGIC)
-    count_end = count_start + 2 * np.dtype("<u4").itemsize
-    azimuth_count, range_count = np.frombuffer(raw[count_start:count_end], dtype="<u4")
-
-    assert int(azimuth_count) == layer["azimuth_count"]
-    assert int(range_count) == layer["range_count"]
-
-    data_shape = (int(range_count), int(azimuth_count))
-    assert data_shape == tuple(layer["data_shape"])
-    data_count = data_shape[0] * data_shape[1]
-
-    data_byte_length = data_count * np.dtype("<f2").itemsize
-    azimuth_byte_length = int(azimuth_count) * np.dtype("<f4").itemsize
-    range_byte_length = int(range_count) * np.dtype("<f4").itemsize
-
-    data_start = count_end
-    data_end = data_start + data_byte_length
-    data = np.frombuffer(raw[data_start:data_end], dtype="<f2").reshape(data_shape)
-    azimuth_start = data_end
-    azimuth_end = azimuth_start + azimuth_byte_length
-    azimuths = np.frombuffer(raw[azimuth_start:azimuth_end], dtype="<f4")
-    range_start = azimuth_end
-    range_end = range_start + range_byte_length
-    ranges = np.frombuffer(raw[range_start:range_end], dtype="<f4")
-
-    assert len(raw) == range_end
-
-    assert azimuths.dtype == np.dtype("<f4")
-    assert ranges.dtype == np.dtype("<f4")
-    assert data.dtype == np.dtype("<f2")
-    assert azimuths.tolist() == [0.0, 90.0]
-    assert ranges.tolist() == [1000.0, 2000.0, 3000.0]
-    assert data.shape == (3, 2)
-    expected = np.array([[1.5, 3.5], [np.nan, 4.5], [2.5, 5.5]], dtype=np.float16)
-    np.testing.assert_allclose(data, expected, equal_nan=True)
-
-
-@pytest.mark.skip(reason="retired intermediate serializer")
-def test_serialize_nexrad_render_intermediate_skips_dbzh_for_contiguous_doppler_sweeps(tmp_path):
-    fs.initialize_filesystem(tmp_path)
-    dataset = xr.Dataset(
-        {
-            "DBZH": (("azimuth", "range"), np.array([[1.0, 2.0]], dtype=np.float32)),
-            "VRADH": (("azimuth", "range"), np.array([[3.0, 4.0]], dtype=np.float32)),
-            "WRADH": (("azimuth", "range"), np.array([[5.0, 6.0]], dtype=np.float32)),
-        },
-        coords={
-            "azimuth": np.array([0.0], dtype=np.float32),
-            "range": np.array([1000.0, 2000.0], dtype=np.float32),
-        },
-    )
-    parsed = type(
-        "ParsedVolumeFixture",
-        (),
-        {
-            "scan_name": "VCP-212",
-            "dynamic_scan_type": "standard",
-            "sweeps": [type("SweepFixture", (), {"group_name": "/sweep_00", "fixed_angle": 0.5, "waveform": "contiguous_doppler"})()],
-            "datatree": _ParsedTree(dataset),
-        },
-    )()
-    volume_path = tmp_path / "KTLH_20260507-150000_999.ar2v"
-    volume_path.parent.mkdir(parents=True, exist_ok=True)
-    volume_path.write_bytes(b"volume")
-
-    manifest_path = serialize_nexrad_render_intermediate("KTLH", "999", "20260507-150000", volume_path, parsed)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    assert [layer["variable_name"] for layer in manifest["layers"]] == ["VRADH", "WRADH"]
-    assert all(layer["canonical_elevation"] == "0.5" for layer in manifest["layers"])
-    assert [layer["colormap_key"] for layer in manifest["layers"]] == ["VRADH", "WRADH"]
-
-
-@pytest.mark.skip(reason="retired intermediate serializer")
-def test_serialize_nexrad_render_intermediate_normalizes_azimuth_order_for_consistent_orientation(tmp_path):
-    fs.initialize_filesystem(tmp_path)
-    dataset = xr.Dataset(
-        {
-            "DBZH": (
-                ("azimuth", "range"),
-                np.array(
-                    [
-                        [1.0, 2.0],
-                        [3.0, 4.0],
-                        [5.0, 6.0],
-                        [7.0, 8.0],
-                    ],
-                    dtype=np.float32,
-                ),
-            ),
-        },
-        coords={
-            "azimuth": np.array([180.0, 270.0, 0.0, 90.0], dtype=np.float32),
-            "range": np.array([1000.0, 2000.0], dtype=np.float32),
-        },
-    )
-    parsed = type(
-        "ParsedVolumeFixture",
-        (),
-        {
-            "scan_name": "VCP-212",
-            "dynamic_scan_type": "standard",
-            "sweeps": [type("SweepFixture", (), {"group_name": "/sweep_00", "fixed_angle": 0.5, "waveform": "contiguous_surveillance"})()],
-            "datatree": _ParsedTree(dataset),
-        },
-    )()
-    volume_path = tmp_path / "KTLH_20260507-150000_999.ar2v"
-    volume_path.parent.mkdir(parents=True, exist_ok=True)
-    volume_path.write_bytes(b"volume")
-
-    manifest_path = serialize_nexrad_render_intermediate("KTLH", "999", "20260507-150000", volume_path, parsed)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    data, azimuths, ranges = _read_nexrad_bin(Path(manifest["layers"][0]["bin_path"]))
-
-    np.testing.assert_allclose(azimuths, np.array([0.0, 90.0, 180.0, 270.0], dtype=np.float32))
-    np.testing.assert_allclose(ranges, np.array([1000.0, 2000.0], dtype=np.float32))
-    np.testing.assert_allclose(
-        data,
-        np.array(
-            [
-                [5.0, 7.0, 1.0, 3.0],
-                [6.0, 8.0, 2.0, 4.0],
-            ],
-            dtype=np.float16,
-        ),
-    )
-
-
 def test_serialize_nexrad_elevation_artifacts_uses_artifact_timestamp_and_new_gui_layout(tmp_path):
     fs.initialize_filesystem(tmp_path)
     artifact_path = tmp_path / "data" / "NEXRAD_Level2" / "KTLH" / "0.5" / "KTLH_0.5_20260507-150001.ar2v"
@@ -554,6 +358,59 @@ def test_serialize_nexrad_elevation_artifacts_decodes_grouped_ar2v_directly(tmp_
     np.testing.assert_allclose(phidp_ranges, np.array([1000.0, 2000.0, 3000.0], dtype=np.float32))
     np.testing.assert_allclose(dbzh_data, np.array([[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]], dtype=np.float16))
     np.testing.assert_allclose(phidp_data, np.array([[0.5, 2.0], [1.0, 2.5], [1.5, 3.0]], dtype=np.float16))
+
+
+def test_current_nexrad_serializer_normalizes_azimuth_orientation(tmp_path):
+    """The served range-major grid follows ascending azimuth, not record order."""
+    fs.initialize_filesystem(tmp_path)
+    artifact_path = (
+        tmp_path / "data" / "NEXRAD_Level2" / "KTLH" / "0.5"
+        / "KTLH_0.5_20260507-150001.ar2v"
+    )
+    records = []
+    for index, (azimuth, values) in enumerate([
+        (180.0, [68, 70]),
+        (270.0, [72, 74]),
+        (0.0, [76, 78]),
+        (90.0, [80, 82]),
+    ]):
+        records.append(_build_msg31_record(
+            radial_status=0 if index == 0 else (2 if index == 3 else 1),
+            azimuth_angle=azimuth,
+            elevation_angle=0.5,
+            block_payloads=[_build_generic_block(b"DREF", values)],
+        ))
+    _write_grouped_ar2v(artifact_path, records)
+    artifact = ElevationArtifact(
+        site="KTLH",
+        volume_id="999",
+        volume_timestamp="20260507-150000",
+        scan_timestamp="20260507-150000",
+        elevation="0.5",
+        elevation_timestamp="20260507-150001",
+        first_sweep_index=0,
+        last_sweep_index=0,
+        first_sweep_timestamp=None,
+        last_sweep_timestamp=None,
+        member_group_names=["/sweep_0"],
+        member_sweeps=[],
+        waveforms_present={"contiguous_surveillance"},
+        supplemental=False,
+        ar2v_path=str(artifact_path),
+    )
+
+    manifest_path = serialize_nexrad_elevation_artifacts(
+        "KTLH", "999", "20260507-150000", [artifact]
+    )
+    layer = json.loads(manifest_path.read_text())["layers"][0]
+    data, azimuths, ranges = _read_nexrad_bin(Path(layer["bin_path"]))
+
+    np.testing.assert_array_equal(azimuths, [0.0, 90.0, 180.0, 270.0])
+    np.testing.assert_array_equal(ranges, [1000.0, 2000.0])
+    np.testing.assert_array_equal(
+        data,
+        np.array([[5.0, 7.0, 1.0, 3.0], [6.0, 8.0, 2.0, 4.0]], dtype=np.float16),
+    )
 
 
 def test_serialize_nexrad_elevation_artifacts_matches_grouped_ar2v_by_member_sweep_index(tmp_path):
