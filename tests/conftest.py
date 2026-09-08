@@ -8,6 +8,34 @@ project_root = Path(__file__).parent.parent
 src_path = project_root / "src"
 sys.path.insert(0, str(src_path))
 
+_PROCESS_TEST_FILES = {
+    "test_worker_pool_recovery.py",
+    "test_runtime.py",
+    "test_runtime_correctness_reproductions.py",
+    "test_run_all_launcher.py",
+    "test_package_run.py",
+    "test_runner.py",
+}
+_CONNECTED_CORE_FILES = {
+    "test_durable_handoff_wiring.py",
+    "test_publication.py",
+    "test_read_only_api.py",
+    "test_transaction_concurrency.py",
+}
+
+
+def pytest_collection_modifyitems(items):
+    """Apply mutually understandable lane markers from stable ownership."""
+    for item in items:
+        relative = Path(str(item.path)).resolve().relative_to(project_root)
+        if "integration" in relative.parts or relative.name in _CONNECTED_CORE_FILES:
+            item.add_marker(pytest.mark.integration)
+        else:
+            item.add_marker(pytest.mark.unit)
+        if relative.name in _PROCESS_TEST_FILES:
+            item.add_marker(pytest.mark.process)
+            item.add_marker(pytest.mark.slow)
+
 @pytest.fixture
 def mock_io_manager():
     """Mock IOManager to capturing log outputs."""

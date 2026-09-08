@@ -30,6 +30,7 @@ dependencies:
   - pip:
     - gputil
     - pytest
+    - pytest-cov
     - pytest-mock
     - pytest-asyncio
     - aiofiles

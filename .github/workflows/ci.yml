@@ -8,7 +8,7 @@ on:
   pull_request:
 
 jobs:
-  node-tests:
+  node-api-contracts:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,10 +27,20 @@ jobs:
       - name: Validate config files
         run: npm run validate-config
 
-      - name: Run Node.js tests
-        run: npm test
+      - name: Run Node.js contracts with coverage
+        run: |
+          mkdir -p reports
+          npm run test:coverage -- --runInBand --coverageReporters=text --coverageReporters=lcov --coverageReporters=json-summary --json --outputFile=reports/jest-results.json
 
-  python-tests:
+      - name: Publish Node coverage and results
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-api-reports
+          path: |
+            coverage/
+            reports/jest-results.json
+
+  python-fast-correctness:
     runs-on: ubuntu-latest
 
     steps:
@@ -57,14 +67,86 @@ jobs:
         shell: bash -el {0}
         run: PYTHONPATH=src python -m common.config.validate
 
-      - name: Run Python tests
+      - name: Run fast offline correctness with coverage
         shell: bash -el {0}
         env:
           PYTHONUNBUFFERED: "1"
-        run: python -m pytest -o faulthandler_timeout=120
+        run: |
+          mkdir -p reports
+          python -m pytest -m "not integration and not process" \
+            --junitxml=reports/python-fast.xml \
+            --cov --cov-report=term --cov-report=xml --cov-report=html:reports/python-coverage-html \
+            --cov-fail-under=60 -o faulthandler_timeout=120
         timeout-minutes: 25
 
+      - name: Publish Python coverage and results
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-fast-reports
+          path: reports/
+
+  python-connected-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          activate-environment: EdgeWARN
+          environment-file: environment.yml
+          python-version: '3.13'
+      - name: Run connected integration lane
+        shell: bash -el {0}
+        run: python -m pytest -m "integration and not process" --junitxml=python-integration.xml -o faulthandler_timeout=120
+        timeout-minutes: 20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-integration-results
+          path: python-integration.xml
+
+  python-process-restart:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          activate-environment: EdgeWARN
+          environment-file: environment.yml
+          python-version: '3.13'
+      - name: Run process, restart, and signal lane
+        shell: bash -el {0}
+        run: python -m pytest -m process --junitxml=python-process.xml -o faulthandler_timeout=120
+        timeout-minutes: 20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-process-results
+          path: python-process.xml
+
+  build-wheel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          activate-environment: EdgeWARN
+          environment-file: environment.yml
+          python-version: '3.13'
+      - name: Build wheel once
+        shell: bash -el {0}
+        run: python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edgewarn-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
   package-command:
+    needs: build-wheel
     runs-on: ubuntu-latest
 
     steps:
@@ -79,11 +161,19 @@ jobs:
           environment-file: environment.yml
           python-version: '3.13'
 
-      - name: Build and install wheel
+      - name: Download exact built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: edgewarn-wheel
+          path: dist
+
+      - name: Install built wheel
         shell: bash -el {0}
         run: |
-          python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
-          python -m pip install --no-deps --force-reinstall dist/edgewarn_core-*.whl
+          wheel_path="$(find "${GITHUB_WORKSPACE}/dist" -maxdepth 1 -name 'edgewarn_core-*.whl' -print -quit)"
+          test -n "${wheel_path}"
+          echo "EDGEWARN_TEST_WHEEL=${wheel_path}" >> "${GITHUB_ENV}"
+          python -m pip install --no-deps --force-reinstall "${wheel_path}"
 
       - name: Smoke test installed command outside checkout
         shell: bash -el {0}

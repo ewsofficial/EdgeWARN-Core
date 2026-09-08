@@ -73,7 +73,8 @@ def test_a_yaml_value_is_recorded_but_not_reported_as_an_override():
     assert overlay.origins() == {"cycle.retry.max_attempts": "yaml"}
 
 
-def test_base_dir_resolution_uses_only_platform_defaults():
+def test_base_dir_resolution_uses_only_platform_defaults(monkeypatch):
+    monkeypatch.delenv("EDGEWARN_BASE_DIR", raising=False)
     defaults = {"posix": "~/EdgeWARN_input", "windows": r"C:\\EdgeWARN_input"}
 
     assert overlay.resolve_base_dir(None, defaults, system="Linux") == Path.home() / "EdgeWARN_input"

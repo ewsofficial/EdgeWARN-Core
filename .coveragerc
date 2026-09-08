@@ -1,0 +1,15 @@
+[run]
+branch = True
+concurrency = multiprocessing
+parallel = True
+relative_files = True
+source = src
+
+[report]
+exclude_also =
+    if TYPE_CHECKING:
+    raise NotImplementedError
+show_missing = True
+
+[xml]
+output = reports/python-coverage.xml

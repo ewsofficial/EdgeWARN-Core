@@ -27,26 +27,31 @@ def installed_command(tmp_path_factory):
     root = tmp_path_factory.mktemp("installed-edgewarn")
     wheel_dir = root / "wheel"
     wheel_dir.mkdir()
-    build = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "wheel",
-            "--no-deps",
-            "--no-build-isolation",
-            "--wheel-dir",
-            str(wheel_dir),
-            ".",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-    assert build.returncode == 0, build.stdout + build.stderr
-    wheel = next(wheel_dir.glob("edgewarn_core-*.whl"))
+    supplied_wheel = os.environ.get("EDGEWARN_TEST_WHEEL")
+    if supplied_wheel:
+        wheel = Path(supplied_wheel).resolve()
+        assert wheel.is_file(), f"EDGEWARN_TEST_WHEEL does not exist: {wheel}"
+    else:
+        build = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "wheel",
+                "--no-deps",
+                "--no-build-isolation",
+                "--wheel-dir",
+                str(wheel_dir),
+                ".",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+        assert build.returncode == 0, build.stdout + build.stderr
+        wheel = next(wheel_dir.glob("edgewarn_core-*.whl"))
 
     environment = root / "venv"
     venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment)
