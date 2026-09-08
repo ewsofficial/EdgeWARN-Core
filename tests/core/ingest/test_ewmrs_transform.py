@@ -134,7 +134,7 @@ class TestOverlayManifestUtils:
     def test_add_layer_invalid_bounds_falls_back_to_default(self, capsys):
         utils = tools.OverlayManifestUtils()
         utils.add_layer("TestLayer", "TestCmap", "/path/to/latest.png", "20260317-200000", bounds="bad")
-        assert utils.get_layers()[0]["bounds"] == "bad"
+        assert utils.get_layers()[0]["bounds"] == utils.bounds
         captured = capsys.readouterr()
         assert "defaulting to default bounds" in captured.out
 

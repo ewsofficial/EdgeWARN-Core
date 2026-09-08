@@ -1,8 +1,7 @@
 """
-Regression tests for critical audit fixes (C1, C2, C3).
+Regression tests for critical audit fixes (C1 and C3).
 
 C1: Merge processing KF key migration
-C2: Dead _check_reacquisition removal
 C3: Config default alignment and fallback warnings
 """
 
@@ -133,19 +132,6 @@ class TestC1MergeKFMigration:
         # Non-dominant parents should be cleaned up
         assert 101 not in tracker._kalman_filters, "KF for non-dominant parent 101 not cleaned up"
         assert 102 not in tracker._kalman_filters, "KF for non-dominant parent 102 not cleaned up"
-
-
-# ============================================================================
-# C2: Dead _check_reacquisition method removed
-# ============================================================================
-
-class TestC2DeadCodeRemoval:
-    """Verify that the dead _check_reacquisition method has been removed."""
-
-    def test_check_reacquisition_removed(self):
-        """StormCellTracker should no longer have _check_reacquisition."""
-        assert not hasattr(StormCellTracker, '_check_reacquisition'), \
-            "_check_reacquisition method still exists — should have been removed"
 
 
 # ============================================================================

@@ -224,6 +224,7 @@ class OverlayManifestUtils:
                 self.validate_bounds(bounds)
         except Exception as e:
             io_manager.write_warning(f"Error in validating bounds - {e}; defaulting to default bounds")
+            bounds = None
         layer = {
             'name': name,
             'colormap': colormap,

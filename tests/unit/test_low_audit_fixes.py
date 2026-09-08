@@ -10,7 +10,8 @@ L4: Collinear polygon guard in overlap calculation
 import pytest
 from math import cos, radians
 
-from EdgeWARN.process.detect.lineage.buffer import LineageBuffer
+from EdgeWARN.process.detect.lineage.buffer import LineageBuffer, PendingMerge
+from EdgeWARN.process.detect.lineage import buffer as buffer_module
 from EdgeWARN.process.detect.kalman.state import CovarianceMatrix
 from EdgeWARN.process.detect.kalman.assignment import (
     run_greedy_assignment,
@@ -31,11 +32,24 @@ class TestL1BufferScanInterval:
         buf = LineageBuffer()
         assert buf.scan_interval_seconds == 120.0
 
-    def test_prune_threshold_matches_reality(self):
-        """Prune threshold with defaults should be 5 × 120 = 600 seconds."""
-        buf = LineageBuffer()  # defaults: prune_after_scans=5, scan_interval=120
-        expected = buf.prune_after_scans * buf.scan_interval_seconds
-        assert expected == 600.0
+    @pytest.mark.parametrize(
+        ("age", "is_pruned"),
+        [(599.999, False), (600.0, False), (600.001, True)],
+        ids=["just-before-expiry", "exactly-at-expiry", "just-after-expiry"],
+    )
+    def test_pending_merge_pruning_boundary(self, monkeypatch, age, is_pruned):
+        """Pending events expire only after the configured inactivity window."""
+        now = 10_000.0
+        monkeypatch.setattr(buffer_module.time, "time", lambda: now)
+        buf = LineageBuffer(prune_after_scans=5, scan_interval_seconds=120)
+        buf.pending_merges[7] = PendingMerge(
+            child_id=7,
+            parent_ids={1, 2},
+            last_seen=now - age,
+        )
+
+        assert buf.prune_inactive() == int(is_pruned)
+        assert (7 not in buf.pending_merges) is is_pruned
 
 
 # ─── L2: Hardcoded Latitude ──────────────────────────────────────────────────

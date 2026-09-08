@@ -176,5 +176,7 @@ class TestDetectionDataHandler:
         
         result = handler.load_probsevere()
         
-        # Should include the feature since 265 is within 260-270
-        assert len(result) == 1
+        assert [feature["properties"]["ID"] for feature in result["features"]] == [1]
+        assert result["features"][0]["geometry"]["coordinates"] == [
+            [[-95, 35], [-95, 36], [-94, 36], [-94, 35], [-95, 35]]
+        ]

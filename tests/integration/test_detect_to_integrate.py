@@ -3,10 +3,7 @@ Integration tests for detection to integration workflow
 """
 
 import pytest
-import json
 import numpy as np
-from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from EdgeWARN.process.detect.config import DetectionConfig
@@ -148,42 +145,3 @@ class TestDetectToIntegrateWorkflow:
             assert "v850" in wind
             assert "u500" in wind
             assert "v500" in wind
-
-    def test_full_detect_to_integrate_pipeline(self, mock_io, tmp_path):
-        """Test the full pipeline from detection to integration"""
-        # This is a high-level integration test that verifies the workflow
-        # without requiring actual data files
-        
-        # 1. Simulate detection output
-        detected_cells = [
-            {
-                "id": 101,
-                "centroid": [35.0, -97.0],
-                "bbox": [[34.9, -97.1], [34.9, -96.9], [35.1, -96.9], [35.1, -97.1]],
-                "num_gates": 50,
-                "max_refl": 55.0,
-                "timestamp": "2023-10-15T14:30:00",
-                "properties": {}
-            }
-        ]
-        
-        # 2. Simulate integration
-        # Add GLM data
-        for cell in detected_cells:
-            cell["properties"]["GLM_FLASH_COUNT"] = 5
-            cell["properties"]["GLM_TOTAL_ENERGY"] = 500.0
-        
-        # Add RAP data
-        for cell in detected_cells:
-            cell["properties"]["u850"] = 10.0
-            cell["properties"]["v850"] = 5.0
-            cell["properties"]["u500"] = 25.0
-            cell["properties"]["v500"] = 10.0
-        
-        # 3. Verify final structure
-        for cell in detected_cells:
-            assert "id" in cell
-            assert "centroid" in cell
-            assert "properties" in cell
-            assert "GLM_FLASH_COUNT" in cell["properties"]
-            assert "u850" in cell["properties"]

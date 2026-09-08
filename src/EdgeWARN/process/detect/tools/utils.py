@@ -17,6 +17,20 @@ _TIMESTAMP_PATTERNS = [
 
 _DETECTION_IO = IOManager("[CellDetection]")
 
+
+def _normalize_geojson_longitudes(coordinates):
+    """Return GeoJSON coordinates with longitude expressed in [-180, 180)."""
+    if (
+        isinstance(coordinates, (list, tuple))
+        and len(coordinates) >= 2
+        and isinstance(coordinates[0], (int, float))
+        and isinstance(coordinates[1], (int, float))
+    ):
+        return [((coordinates[0] + 180) % 360) - 180, *coordinates[1:]]
+    if isinstance(coordinates, (list, tuple)):
+        return [_normalize_geojson_longitudes(value) for value in coordinates]
+    return coordinates
+
 class DetectionDataHandler:
     def __init__(self, radar_path, ps_path, preciptype_path, io_manager, lat_min, lat_max, lon_min, lon_max, 
                  radar_obj=None, ps_obj=None, preciptype_obj=None):
@@ -125,7 +139,12 @@ class DetectionDataHandler:
             if not geometry:
                 continue
 
-            geom = shape(geometry)
+            normalized_geometry = dict(geometry)
+            if 'coordinates' in normalized_geometry:
+                normalized_geometry['coordinates'] = _normalize_geojson_longitudes(
+                    normalized_geometry['coordinates']
+                )
+            geom = shape(normalized_geometry)
             if geom.is_empty:
                 continue
 
@@ -137,7 +156,9 @@ class DetectionDataHandler:
                 and min_lat <= lat_max
                 and max_lat >= lat_min
             ):
-                filtered_features.append(feature)
+                normalized_feature = dict(feature)
+                normalized_feature['geometry'] = normalized_geometry
+                filtered_features.append(normalized_feature)
 
         filtered_data = dict(data)
         filtered_data['features'] = filtered_features
