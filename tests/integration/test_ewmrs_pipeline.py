@@ -4,6 +4,9 @@ import os
 from datetime import datetime, timezone
 
 import EWMRS.pipeline as ewmrs_pipeline
+import numpy as np
+import rasterio.transform
+import xarray as xr
 from common.ingest.manifest import CycleInputManifest
 from common.ingest.manifest import staged_input_from_path
 
@@ -146,6 +149,46 @@ def test_run_render_pipeline_binds_manifest_path_before_worker_submit(
 
     assert submitted[0]["input_path"] == str(pinned)
     assert submitted[0]["input_manifest_bound"] is True
+
+
+def test_real_render_executor_publishes_chunk_and_index(monkeypatch, tmp_path):
+    import EWMRS.render.config as render_config
+    source_dir = tmp_path / "source"
+    output_dir = tmp_path / "gui" / "CompRefQC"
+    source_dir.mkdir()
+    source = source_dir / "MRMS_MergedReflectivityQC_20260317-200000.nc"
+    xr.Dataset(
+        {"unknown": (("latitude", "longitude"), np.array([[20.0, 30.0], [40.0, 50.0]], dtype=np.float32))},
+        coords={"latitude": [35.1, 35.0], "longitude": [-97.1, -97.0]},
+    ).to_netcdf(source)
+
+    bounds = (-10_810_000.0, 4_160_000.0, -10_790_000.0, 4_180_000.0)
+    monkeypatch.setattr(ewmrs_pipeline, "WEB_MERCATOR_SHAPE", (4, 4))
+    monkeypatch.setattr(
+        ewmrs_pipeline,
+        "WEB_MERCATOR_TRANSFORM",
+        rasterio.transform.from_bounds(*bounds, 4, 4),
+    )
+    monkeypatch.setattr(render_config, "tile_size", lambda: 4)
+
+    result = ewmrs_pipeline.run_render_pipeline(
+        datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc),
+        layers=[{
+            "name": "MRMS_MergedReflectivityQC",
+            "colormap_key": "NWS_Reflectivity",
+            "filepath": source_dir,
+            "outdir": output_dir,
+        }],
+        cleanup_after=False,
+    )
+
+    chunks = result["MRMS_MergedReflectivityQC"]
+    assert chunks and all(path.is_file() for path in chunks)
+    timestamp_index = json.loads((output_dir / "20260317-200000" / "index.json").read_text())
+    product_index = json.loads((output_dir / "index.json").read_text())
+    assert timestamp_index["chunks"] == [[0, 0]]
+    assert timestamp_index["tile_grid"] == {"rows": 1, "cols": 1, "tile_size": 4}
+    assert product_index["timestamps"] == ["20260317-200000"]
 
 
 def test_render_layer_skips_partial_pinned_input(tmp_path):

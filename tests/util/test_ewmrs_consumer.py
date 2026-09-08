@@ -172,6 +172,59 @@ def test_render_failure_retries_without_advancing(tmp_path, fake_render, monkeyp
     assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
 
 
+def test_restart_replays_render_interrupted_before_checkpoint_once(tmp_path, monkeypatch):
+    cycle_id = _commit(tmp_path, CYCLE_DT, with_rap=False)
+    output_dir = tmp_path / "gui" / "CompRefQC"
+    attempts = []
+
+    def publish_render(dt, max_entries=None, input_manifest=None):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        artifact = output_dir / f"{canonical_cycle_id(dt)}.bin"
+        artifact.write_bytes(b"complete")
+        (output_dir / "index.json").write_text(
+            json.dumps({"timestamps": [canonical_cycle_id(dt)]}),
+            encoding="utf-8",
+        )
+        attempts.append(canonical_cycle_id(dt))
+        return {"CompRefQC": [artifact]}
+
+    import EWMRS.render.config as ewmrs_render_config
+    monkeypatch.setattr(ewmrs_pipeline, "run_mrms_render_pipeline", publish_render)
+    monkeypatch.setattr(
+        ewmrs_render_config,
+        "get_mrms_file_list",
+        lambda: [
+            {"name": product, "filepath": str(tmp_path / "mrms" / product)}
+            for product in ("Detection", "Integration")
+        ],
+    )
+
+    import util.runtime.ewmrs_consumer as consumer_module
+
+    first = EwmrsRecordConsumer(tmp_path)
+    original_record = consumer_module.ConsumerCheckpointStore.record
+    interrupted = False
+
+    def interrupt_before_checkpoint(store, processed_cycle_id):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise RuntimeError("process interrupted after publication")
+        return original_record(store, processed_cycle_id)
+
+    monkeypatch.setattr(consumer_module.ConsumerCheckpointStore, "record", interrupt_before_checkpoint)
+    assert first.process_pending_once() == (0, 0)
+    assert first.checkpoint_for("mrms-ready") is None
+
+    monkeypatch.setattr(consumer_module.ConsumerCheckpointStore, "record", original_record)
+    restarted = EwmrsRecordConsumer(tmp_path)
+    assert restarted.process_pending_once() == (1, 0)
+    assert restarted.checkpoint_for("mrms-ready").last_processed_cycle_id == cycle_id
+    assert attempts == [cycle_id, cycle_id]
+    assert [path.name for path in output_dir.glob("*.bin")] == [f"{cycle_id}.bin"]
+    assert json.loads((output_dir / "index.json").read_text())["timestamps"] == [cycle_id]
+
+
 def test_malformed_record_stops_drain_preserving_order(tmp_path, fake_render):
     later = CYCLE_DT.replace(hour=21)
     _commit(tmp_path, CYCLE_DT)
