@@ -2,6 +2,7 @@ import json
 import copy
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
@@ -384,11 +385,16 @@ def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_m
         from EdgeWARN.ctam.run import run_ctam
 
         io_manager.write_info(f"Running CTAM modules for {len(cells)} cells")
+        cycle_id = timestamp
+        try:
+            cycle_id = datetime.fromisoformat(str(timestamp)).strftime("%Y%m%d-%H%M%S")
+        except (TypeError, ValueError):
+            pass
         cells = _run_step(
             "Integration - CTAM",
             lambda: run_ctam(
                 cells,
-                timestamp=timestamp,
+                timestamp=cycle_id,
                 json_path=json_path,
                 input_manifest=input_manifest,
                 disable_ctam_modules=disable_ctam_modules,

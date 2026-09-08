@@ -1,0 +1,33 @@
+{
+  "type": "FeatureCollection",
+  "features": [{
+    "type": "Feature",
+    "id": "17",
+    "properties": {
+      "ID": 17,
+      "ProbSevere": "82",
+      "ProbWind": "61",
+      "ProbHail": "47",
+      "ProbTor": "12",
+      "MLCAPE": "1800",
+      "MUCAPE": "2200",
+      "MLCIN": "-24",
+      "DCAPE": "880",
+      "CAPE_M10M30": "740",
+      "LCL": "1100",
+      "WETBULB_0C_HGT": "3100",
+      "EBSHEAR": "42",
+      "COMPREF": "50",
+      "EchoTop_50": "8",
+      "FLASH_RATE": "6",
+      "FLASH_DENSITY": "2"
+    },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [[
+        [-97.4, 34.6], [-96.6, 34.6], [-96.6, 35.4],
+        [-97.4, 35.4], [-97.4, 34.6]
+      ]]
+    }
+  }]
+}

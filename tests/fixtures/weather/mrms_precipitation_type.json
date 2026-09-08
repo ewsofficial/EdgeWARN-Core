@@ -1,0 +1,11 @@
+{
+  "product": "PrecipFlag_00.00",
+  "coordinates": {
+    "latitude": {"start": 34.0, "stop": 36.0, "count": 21},
+    "longitude": {"start": 262.0, "stop": 264.0, "count": 21}
+  },
+  "units": "category",
+  "fill_value": 0,
+  "background": 1,
+  "patches": [{"rows": [9, 12], "columns": [9, 12], "value": 6}]
+}

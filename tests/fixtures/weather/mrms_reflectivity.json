@@ -1,0 +1,11 @@
+{
+  "product": "MergedReflectivityQCComposite_00.50",
+  "coordinates": {
+    "latitude": {"start": 34.0, "stop": 36.0, "count": 21},
+    "longitude": {"start": 262.0, "stop": 264.0, "count": 21}
+  },
+  "units": "dBZ",
+  "fill_value": -999.0,
+  "background": 0.0,
+  "patches": [{"rows": [6, 15], "columns": [6, 15], "value": 50.0}]
+}

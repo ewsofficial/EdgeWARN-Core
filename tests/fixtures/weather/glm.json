@@ -1,0 +1,8 @@
+{
+  "units": {"flash_energy": "J"},
+  "flashes": [
+    {"latitude": 35.0, "longitude": -97.0, "energy": 100.0},
+    {"latitude": 35.1, "longitude": -96.9, "energy": 50.0},
+    {"latitude": 30.0, "longitude": -90.0, "energy": 999.0}
+  ]
+}

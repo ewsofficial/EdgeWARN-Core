@@ -1,7 +1,6 @@
 import pytest
 import numpy as np
 import xarray as xr
-from shapely.geometry import Polygon
 from unittest.mock import MagicMock, patch
 from EdgeWARN.process.integrate.integrate_glm import integrate_glm
 
@@ -40,9 +39,8 @@ def storm_cells():
     # 1. Active Cell: Circle-ish around (34.0, -97.0)
     # Using bbox polygon for simplicity (square)
     # Bounds: 33.9 to 34.1, 262.9 to 263.1 (approx -97.1 to -96.9)
-    # Note: GLM integration converts flash lons to 0-360. 
-    # -97.0 becomes 263.0.
-    # So our cell bbox needs to be in 0-360 space to catch it.
+    # Detection stores longitudes in 0-360; the shared polygon helper and GLM
+    # loader both normalize them to -180..180 for geometric comparison.
     
     bbox_poly = [
         [33.9, 262.9], [34.1, 262.9], [34.1, 263.1], [33.9, 263.1]
@@ -61,22 +59,7 @@ def storm_cells():
 def test_integrate_glm_basic(mock_io_manager, glm_file, storm_cells):
     """Test basic GLM integration."""
     
-    # We need to mock create_cell_polygon because it likely depends on 'bbox' format
-    # In my fixture bbox is list of lists.
-    # The actual code likely expects whatever GateMapper produces.
-    # Let's see detect.py: bbox is list of [lat, lon].
-    # So my fixture is correct.
-    # But integrate_glm uses StormIntegrationUtils.create_cell_polygon
-    
-    # Let's mock create_cell_polygon to return Shapely polygons directly
-    # based on the bbox in the cell.
-    
-    def mock_create_poly(cell):
-        coords = [(lon, lat) for lat, lon in cell['bbox']] # Shapely uses (lon, lat)
-        return Polygon(coords)
-    
-    with patch("EdgeWARN.process.integrate.integrate_glm.StormIntegrationUtils.create_cell_polygon", side_effect=mock_create_poly), \
-         patch("EdgeWARN.process.integrate.integrate_glm.io_manager", mock_io_manager):
+    with patch("EdgeWARN.process.integrate.integrate_glm.io_manager", mock_io_manager):
         
         results = integrate_glm(storm_cells, glm_file)
         
@@ -110,16 +93,10 @@ def test_glm_bin_size_does_not_change_flash_counts(
     that, so a bin size an operator considers reasonable could silently drop
     flashes near a bin edge.
     """
-    def mock_create_poly(cell):
-        return Polygon([(lon, lat) for lat, lon in cell["bbox"]])
-
     def run(bin_size):
         override_integration_config("glm", "bin_size_degrees", bin_size)
         cells = [dict(cell, properties={}) for cell in storm_cells]
-        with patch(
-            "EdgeWARN.process.integrate.integrate_glm.StormIntegrationUtils.create_cell_polygon",
-            side_effect=mock_create_poly,
-        ), patch("EdgeWARN.process.integrate.integrate_glm.io_manager", mock_io_manager):
+        with patch("EdgeWARN.process.integrate.integrate_glm.io_manager", mock_io_manager):
             return [cell["properties"] for cell in integrate_glm(cells, glm_file)]
 
     coarse = run(5.0)
