@@ -624,39 +624,19 @@ def test_binary_reader_never_observes_partial_nexrad_artifact(monkeypatch, tmp_p
     started = threading.Event()
     release = threading.Event()
 
-    class SlowHandle:
-        def __init__(self, target):
-            self.handle = open(target, "wb")
-            self.first = True
+    from util.atomic import atomic_output_path
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_exc):
-            self.handle.close()
-            return False
-
-        def write(self, payload):
-            written = self.handle.write(payload)
-            self.handle.flush()
-            if self.first:
-                self.first = False
+    def slow_atomic_write(dest, payload):
+        with atomic_output_path(dest) as temporary:
+            with open(temporary, "wb") as handle:
+                handle.write(bytes(payload[:8]))
+                handle.flush()
                 started.set()
                 release.wait(timeout=2)
-            return written
+                handle.write(bytes(payload[8:]))
+                handle.flush()
 
-    class ValidatedHandle:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_exc):
-            return False
-
-        def read(self, _size):
-            return nexrad.NEXRAD_FIELD_MAGIC
-
-    monkeypatch.setattr(nexrad.gzip, "open", lambda target, _mode: SlowHandle(target))
-    monkeypatch.setattr(nexrad.gzip, "GzipFile", lambda **_kwargs: ValidatedHandle())
+    monkeypatch.setattr(nexrad, "atomic_write_bytes", slow_atomic_write)
     writer = threading.Thread(
         target=nexrad._write_nexrad_variable_bin,
         args=(
