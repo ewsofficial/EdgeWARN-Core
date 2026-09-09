@@ -56,9 +56,11 @@ COPY --from=runtime-build /etc/edgewarn/config /etc/edgewarn/config
 COPY --from=nws-zones /opt/edgewarn/nws-zones /opt/edgewarn/nws-zones
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends apache2-utils \
+    && apt-get install -y --no-install-recommends apache2-utils tini \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/log/edgewarn
+
+COPY --chmod=0755 docker/edgewarn-entrypoint.sh /usr/local/bin/edgewarn-entrypoint
 
 ENV PATH="/opt/conda/envs/EdgeWARN/bin:${PATH}" \
     EDGEWARN_BASE_DIR="/var/lib/edgewarn" \
@@ -71,5 +73,5 @@ WORKDIR /opt/edgewarn
 VOLUME ["/var/lib/edgewarn", "/var/log/edgewarn"]
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]
-CMD ["trap 'kill -TERM 0 >/dev/null 2>&1 || true' TERM; exec edgewarn run --config-path /etc/edgewarn/config 2>&1 | rotatelogs -L \"${EDGEWARN_LOG_DIR}/edgewarn.current.log\" -l \"${EDGEWARN_LOG_DIR}/edgewarn.%Y%m%d-%H.log\" 3600"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/edgewarn-entrypoint"]
+CMD ["edgewarn", "run", "--config-path", "/etc/edgewarn/config"]

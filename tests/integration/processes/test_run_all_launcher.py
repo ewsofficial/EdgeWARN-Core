@@ -467,7 +467,9 @@ class TestSupervision:
             pid = int(descendant_pid.read_text())
 
             launcher.send_signal(signal.SIGTERM)
-            assert launcher.wait(timeout=10) == 1
+            # The service leader handled TERM cleanly. Bounded SIGKILL of its
+            # deliberately stubborn descendant is successful containment.
+            assert launcher.wait(timeout=10) == 0
 
             deadline = time.time() + 5
             while Path(f"/proc/{pid}").exists() and time.time() < deadline:

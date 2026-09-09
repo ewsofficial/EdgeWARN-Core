@@ -16,9 +16,15 @@ def test_container_uses_installed_exec_form_package_command():
         (REPO_ROOT / "environment.yml").read_text(encoding="utf-8")
     )["name"]
 
-    assert 'ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]' in dockerfile
-    assert "exec edgewarn run --config-path /etc/edgewarn/config" in dockerfile
-    assert "rotatelogs" in dockerfile
+    assert (
+        'ENTRYPOINT ["/usr/bin/tini", "--", '
+        '"/usr/local/bin/edgewarn-entrypoint"]' in dockerfile
+    )
+    assert (
+        'CMD ["edgewarn", "run", "--config-path", '
+        '"/etc/edgewarn/config"]' in dockerfile
+    )
+    assert "apache2-utils tini" in dockerfile
     assert "python src/run_" not in dockerfile
     assert "STOPSIGNAL SIGTERM" in dockerfile
     assert "pip wheel" in dockerfile

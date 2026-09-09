@@ -2,7 +2,7 @@
 
 Phase 9 secondary coverage: the shipped ``Dockerfile`` defines the runtime
 contract (pinned Conda base, ``VOLUME`` for the runtime and log trees,
-``STOPSIGNAL SIGTERM``, and an entrypoint that pipes the installed
+``STOPSIGNAL SIGTERM``, and a reaping entrypoint that pipes the installed
 ``edgewarn`` command through ``rotatelogs``), but nothing pinned it, so a
 Dockerfile edit that dropped a volume or changed the stop signal would
 ship silently.
@@ -20,7 +20,10 @@ Two lanes, matching the suite's opt-in philosophy for heavyweight checks:
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -52,15 +55,21 @@ class TestDockerfileContract:
             "supervisors send SIGTERM; the image must not override it"
         )
 
-    def test_entrypoint_pipes_installed_command_through_rotatelogs(self):
+    def test_entrypoint_uses_init_and_pipes_through_rotatelogs(self):
         text = _dockerfile_text()
-        assert re.search(
-            r'^ENTRYPOINT \["/bin/bash", "-o", "pipefail", "-c"\]',
-            text,
-            re.MULTILINE,
+        assert (
+            'ENTRYPOINT ["/usr/bin/tini", "--", '
+            '"/usr/local/bin/edgewarn-entrypoint"]' in text
         )
-        assert "exec edgewarn run" in text
-        assert "rotatelogs" in text
+        assert (
+            'CMD ["edgewarn", "run", "--config-path", '
+            '"/etc/edgewarn/config"]' in text
+        )
+        entrypoint = (REPO_ROOT / "docker" / "edgewarn-entrypoint.sh").read_text(
+            encoding="utf-8"
+        )
+        assert 'kill "-${signum}" "${supervisor_pid}"' in entrypoint
+        assert "rotatelogs" in entrypoint
 
     def test_wheel_is_built_and_installed_without_dep_resolution(self):
         text = _dockerfile_text()
@@ -72,6 +81,61 @@ class TestDockerfileContract:
         assert "cp -a config /etc/edgewarn/config" in text
         # No COPY of a runtime tree: state must arrive via the volume mount.
         assert not re.search(r"^COPY .*(data/|gui/|wpc/)", text, re.MULTILINE)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signal contract")
+def test_entrypoint_forwards_term_and_drains_logger(tmp_path):
+    """Exercise the PID-tracking wrapper without building the full image."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_rotatelogs = bin_dir / "rotatelogs"
+    fake_rotatelogs.write_text(
+        "#!/usr/bin/env bash\n"
+        "output=''\n"
+        "while (($#)); do\n"
+        "  if [[ $1 == '-L' ]]; then output=$2; shift 2; else shift; fi\n"
+        "done\n"
+        "cat >\"${output}\"\n",
+        encoding="utf-8",
+    )
+    fake_rotatelogs.chmod(0o755)
+
+    worker = tmp_path / "worker.py"
+    worker.write_text(
+        "import signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(0))\n"
+        "print('worker-ready', flush=True)\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n",
+        encoding="utf-8",
+    )
+    log_dir = tmp_path / "logs"
+    entrypoint = REPO_ROOT / "docker" / "edgewarn-entrypoint.sh"
+    proc = subprocess.Popen(
+        ["bash", str(entrypoint), sys.executable, str(worker)],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "EDGEWARN_LOG_DIR": str(log_dir),
+        },
+    )
+    current_log = log_dir / "edgewarn.current.log"
+    deadline = time.monotonic() + 10
+    while (
+        (not current_log.exists() or "worker-ready" not in current_log.read_text())
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.05)
+
+    try:
+        assert current_log.exists()
+        proc.send_signal(signal.SIGTERM)
+        assert proc.wait(timeout=10) == 0
+        assert "worker-ready" in current_log.read_text(encoding="utf-8")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
 
 
 def _docker_available():
@@ -89,6 +153,7 @@ def test_container_run_with_disposable_mount_and_sigterm(tmp_path):
     mount = tmp_path / "edgewarn-data"
     mount.mkdir()
     image = "edgewarn-core-smoke:latest"
+    container = f"edgewarn-core-smoke-{os.getpid()}"
     subprocess.run(
         ["docker", "build", "-t", image, str(REPO_ROOT)],
         check=True,
@@ -96,20 +161,39 @@ def test_container_run_with_disposable_mount_and_sigterm(tmp_path):
         capture_output=True,
     )
     try:
-        proc = subprocess.Popen(
-            ["docker", "run", "--rm", "-v", f"{mount}:/var/lib/edgewarn",
-             "--entrypoint", "edgewarn", image, "run", "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+        subprocess.run(
+            [
+                "docker", "run", "-d", "--name", container,
+                "-v", f"{mount}:/var/lib/edgewarn", image,
+                "python", "-c",
+                "import signal,sys,time; "
+                "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
+                "print('ready', flush=True); time.sleep(300)",
+            ],
+            check=True,
+            timeout=60,
+            capture_output=True,
         )
-        try:
-            out, _ = proc.communicate(timeout=300)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            out, _ = proc.communicate(timeout=60)
-            pytest.fail(f"container did not exit after SIGTERM: {out!r}")
-        assert proc.returncode == 0, out
+        subprocess.run(
+            ["docker", "stop", "-t", "25", container],
+            check=True,
+            timeout=30,
+            capture_output=True,
+        )
+        state = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.ExitCode}}", container],
+            check=True,
+            timeout=30,
+            capture_output=True,
+            text=True,
+        )
+        assert state.stdout.strip() == "0"
         # The disposable mount must not leak image state back out.
         assert mount.is_dir()
     finally:
+        subprocess.run(
+            ["docker", "rm", "-f", "-v", container],
+            capture_output=True,
+            timeout=60,
+        )
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True, timeout=300)

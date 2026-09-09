@@ -290,17 +290,17 @@ docker run --rm --name edgewarn \
   edgewarn-core:3.0.0
 ```
 
-The image installs a built wheel and pipes the installed `edgewarn` command
-through `rotatelogs` for persisted, rotated logs:
+The image installs a built wheel. `tini` runs as PID 1 and the entrypoint pipes
+the installed `edgewarn` command through `rotatelogs` for persisted, rotated
+logs:
 
 ```dockerfile
-ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]
-CMD ["trap 'kill -TERM 0 >/dev/null 2>&1 || true' TERM; exec edgewarn run --config-path /etc/edgewarn/config 2>&1 | rotatelogs -L \"${EDGEWARN_LOG_DIR}/edgewarn.current.log\" -l \"${EDGEWARN_LOG_DIR}/edgewarn.%Y%m%d-%H.log\" 3600"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/edgewarn-entrypoint"]
+CMD ["edgewarn", "run", "--config-path", "/etc/edgewarn/config"]
 ```
 
 Override the entrypoint back to `edgewarn` to select a specialized topology
-(the default entrypoint is the log-piping shell, so `run ...` arguments on
-their own would be interpreted by `bash`):
+without log rotation:
 
 ```bash
 docker run --rm \
@@ -337,10 +337,14 @@ docker compose build edgewarn
 docker compose --profile admin run --rm edgewarn-configure
 ```
 
-`docker stop` sends `SIGTERM` to the container entrypoint, which traps it and
-forwards it to the `edgewarn` supervisor pipeline. The supervisor forwards the
-signal to every selected service, waits up to its bounded grace period,
-escalates survivors, reaps every child, and exits `0` for a clean stop.
+`docker stop` sends `SIGTERM` to `tini`, which forwards it to the entrypoint.
+The entrypoint signals the tracked `edgewarn` supervisor PID; the supervisor
+signals every selected service process group, including descendants whose
+service leader has already exited. It allows 20 seconds for graceful service
+cleanup before escalating surviving groups to `SIGKILL`. Compose's 25-second
+grace leaves five seconds for escalation, reaping, final `rotatelogs` draining,
+and entrypoint teardown. The entrypoint returns the supervisor status and a
+clean signal-driven stop exits `0`.
 
 ## Running Historical Reprocessing
 

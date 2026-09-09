@@ -40,7 +40,9 @@ SERVICE_SCRIPTS = {
 }
 
 #: Bounded shutdown: SIGTERM first, then SIGKILL after this many seconds.
-STOP_GRACE_SECONDS = 10.0
+#: Compose allows 25 seconds in total; retain five seconds outside this budget
+#: for forced cleanup, child reaping, log draining, and entrypoint teardown.
+STOP_GRACE_SECONDS = 20.0
 
 # Flag routing (plans/realtime-runner-decomposition-plan.md, CLI contract):
 # each entry maps a launcher flag to the services that own it.
@@ -198,8 +200,9 @@ def supervise(commands, *, src_root, stop_event=None):
     """Start every command, forward signals, and wait; returns an exit code.
 
     A child exiting unexpectedly stops the launcher with a nonzero code after
-    terminating the remaining children; a signal-driven shutdown exits zero
-    when every child terminated within the grace window.
+    terminating the remaining children. A signal-driven shutdown exits zero
+    when every service leader reports clean termination; bounded escalation of
+    a leftover descendant is successful containment, not a service failure.
     """
     if stop_event is None:
         stop_event = threading.Event()
@@ -335,7 +338,6 @@ def supervise(commands, *, src_root, stop_event=None):
         if survivors:
             print(f"[Launcher] Escalating to SIGKILL for: {', '.join(survivors)}")
             _terminate_children(force=True)
-            exit_code = exit_code or 1
 
         for service, proc in processes.items():
             try:
