@@ -78,10 +78,10 @@ CTAM does.
 
 CTAM does not get the whole cycle. It is stage 6 of 9 inside integration
 (`docs/core/integration.md:52-62`), and integration as a whole is asserted to
-finish in under 30 seconds at `tests/benchmarks/test_performance.py:182`. The
+finish in under 30 seconds at `benchmarks/test_performance.py:182`. The
 current CTAM stage is asserted at under 2 seconds
-(`tests/benchmarks/test_performance.py:402`) and StormCast alone at under 1
-second (`tests/benchmarks/test_performance.py:423`).
+(`benchmarks/test_performance.py:402`) and StormCast alone at under 1
+second (`benchmarks/test_performance.py:423`).
 
 The CTAM stage ceiling is set to 30 seconds. CTAM runs inside integration, so it
 cannot be permitted to exceed the budget of the stage that contains it, and 30
@@ -92,7 +92,7 @@ stages plus detection and ingest. With StormCast's existing 2 seconds reserved,
 Read the 2-second figure with care. The former in-package registry did not
 provide a stable module API, so StormCast is now the only bundled built-in and
 all optional modules use manifests. The stage-level benchmark reads
-`data.get("cells", [])` at `tests/benchmarks/test_performance.py:381`, but the
+`data.get("cells", [])` at `benchmarks/test_performance.py:381`, but the
 snapshot envelope key is `features`
 (`src/EdgeWARN/process/detect/tools/save.py:33`), so the fixture always returns
 an empty list and the test always skips. The 2-second budget is recorded intent,
@@ -168,8 +168,8 @@ snapshot to.
 
 The largest storm-cell count configured anywhere in the repository is 200, in
 the "Large MRMS-like grid" benchmark case at
-`tests/benchmarks/benchmark_grid_index.py:186`; the other cases are 50 and 100,
-and `tests/benchmarks/benchmark_lazy_loading.py:183` defaults to 100. Taking 200
+`benchmarks/benchmark_grid_index.py:186`; the other cases are 50 and 100,
+and `benchmarks/benchmark_lazy_loading.py:183` defaults to 100. Taking 200
 as the worst-case snapshot width, 8388608 / 200 gives 41943 bytes per feature for
 the entire entry, including everything detection and integration already wrote.
 
@@ -258,11 +258,11 @@ raise this bound; it must not quietly clamp StormCast.
 ### Streamed file size
 
 256 MiB is derived from the only documented statement of real MRMS field size in
-the repository: `tests/benchmarks/benchmark_lazy_loading.py:114-117` records
+the repository: `benchmarks/benchmark_lazy_loading.py:114-117` records
 MRMS grids as roughly 3500 by 7000 points with a "File size: ~100-200MB per
 uncompressed field", and MRMS files are stored decompressed locally
 (`config/ingest.yaml:18-22` sizes the local gzip expansion). 256 MiB covers the
-200 MB upper end with headroom. `tests/benchmarks/test_performance.py:128`
+200 MB upper end with headroom. `benchmarks/test_performance.py:128`
 records a larger figure, roughly 784 MB, but that is the decoded float64 array
 in memory rather than the file on disk, so it does not bound a streamed read.
 

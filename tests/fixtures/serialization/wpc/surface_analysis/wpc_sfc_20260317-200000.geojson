@@ -1,0 +1,170 @@
+{
+  "type": "FeatureCollection",
+  "properties": {
+    "valid_time": "2026-03-17T20:00:00+00:00",
+    "source": "WPC",
+    "product": "Surface Analysis"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -80.0,
+            35.0
+          ],
+          [
+            -79.0,
+            34.0
+          ],
+          [
+            -78.0,
+            33.0
+          ]
+        ]
+      },
+      "properties": {
+        "feature_type": "COLD",
+        "name": "Cold Front",
+        "color": "#0000FF"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -85.0,
+            30.0
+          ],
+          [
+            -84.0,
+            29.5
+          ]
+        ]
+      },
+      "properties": {
+        "feature_type": "WARM",
+        "name": "Warm Front",
+        "color": "#FF0000"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -90.0,
+            28.0
+          ],
+          [
+            -89.0,
+            27.5
+          ]
+        ]
+      },
+      "properties": {
+        "feature_type": "STNRY",
+        "name": "Stationary Front",
+        "color": "#800080"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -70.0,
+            45.0
+          ],
+          [
+            -69.0,
+            44.0
+          ]
+        ]
+      },
+      "properties": {
+        "feature_type": "OCFNT",
+        "name": "Occluded Front",
+        "color": "#800080"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.0,
+            32.0
+          ],
+          [
+            -81.0,
+            31.0
+          ]
+        ]
+      },
+      "properties": {
+        "feature_type": "TROF",
+        "name": "Trough",
+        "color": "#8B4513"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -78.7,
+          33.8
+        ]
+      },
+      "properties": {
+        "feature_type": "HIGH",
+        "name": "High Pressure",
+        "color": "#0000FF",
+        "pressure": 1027,
+        "label": "H"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -95.0,
+          40.2
+        ]
+      },
+      "properties": {
+        "feature_type": "HIGH",
+        "name": "High Pressure",
+        "color": "#0000FF",
+        "pressure": 1024,
+        "label": "H"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -72.0,
+          41.2
+        ]
+      },
+      "properties": {
+        "feature_type": "LOW",
+        "name": "Low Pressure",
+        "color": "#FF0000",
+        "pressure": 1008,
+        "label": "L"
+      }
+    }
+  ]
+}

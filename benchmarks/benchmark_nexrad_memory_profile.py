@@ -8,7 +8,7 @@ Breaks down memory usage at each stage:
 5. Final peak
 
 Usage:
-    PYTHONPATH=src python benchmarks/benchmark_nexrad_memory_profile.py
+    PYTHONPATH=src python benchmarks/benchmark_nexrad_memory_profile.py --output-dir /tmp/nexrad_profile
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import multiprocessing as mp
 import os
 import resource
 import tracemalloc
+from argparse import ArgumentParser
 from pathlib import Path
 import tempfile
 import time
@@ -101,8 +102,8 @@ class _Tree:
 
 
 def _child_profile(site: str, volume_id: str, output_root: str, volume_path: str, result_queue) -> None:
-    from common.ingest.nexrad.parser import RawSweep, RawVolume
-    import common.ingest.nexrad.worker as worker
+    from types import SimpleNamespace
+
     from common.ingest.nexrad.grouping import group_sweeps_by_elevation, elevation_group_key
     from common.ingest.nexrad.writer import (
         _write_elevation_netcdf, _sanitize_dataset, _slim_dataset_from_node,
@@ -125,19 +126,23 @@ def _child_profile(site: str, volume_id: str, output_root: str, volume_path: str
         "/sweep_1": _make_dataset(0.9, "contiguous_doppler", 1),
     }
     tree = _Tree(groups)
-    raw_volume = RawVolume(
+    # Attribute-only stand-in for the removed parser RawVolume model: the
+    # stages below read sweep attributes and the datatree, never AR2V bytes.
+    raw_volume = SimpleNamespace(
         volume_header=b"AR2V" + (b"\x00" * 20),
         site=site,
         sweeps=[
-            RawSweep(
+            SimpleNamespace(
                 index=0, group_name="/sweep_0", elevation_number=1,
                 fixed_angle=0.5, first_timestamp="2026-05-19T15:00:00Z",
-                last_timestamp="2026-05-19T15:00:59Z", radial_count=AZIMUTH_COUNT, complete=True,
+                last_timestamp="2026-05-19T15:00:59Z", radial_count=AZIMUTH_COUNT,
+                waveform=None, complete=True,
             ),
-            RawSweep(
+            SimpleNamespace(
                 index=1, group_name="/sweep_1", elevation_number=2,
                 fixed_angle=0.9, first_timestamp="2026-05-19T15:01:00Z",
-                last_timestamp="2026-05-19T15:01:59Z", radial_count=AZIMUTH_COUNT, complete=True,
+                last_timestamp="2026-05-19T15:01:59Z", radial_count=AZIMUTH_COUNT,
+                waveform=None, complete=True,
             ),
         ],
     )
@@ -151,10 +156,8 @@ def _child_profile(site: str, volume_id: str, output_root: str, volume_path: str
         for s in tm_top[:3]
     ]
 
-    # Stage 2: parse raw volume (mocked)
-    worker.parse_raw_volume_file = lambda _path: raw_volume
-
-    raw_vol = worker.parse_raw_volume_file(volume_path)
+    # Stage 2: the volume is already materialized above; no parse to mock.
+    raw_vol = raw_volume
     stages["after_parse_raw_rss_mb"] = _rss_mb()
 
     # Stage 3: group sweeps
@@ -239,8 +242,8 @@ def _child_profile(site: str, volume_id: str, output_root: str, volume_path: str
     })
 
 
-def run_profile():
-    with tempfile.TemporaryDirectory(prefix="nexrad_profile_", dir="/tmp/kilo") as tmp_dir:
+def run_profile(output_dir: Path):
+    with tempfile.TemporaryDirectory(prefix="nexrad_profile_", dir=str(output_dir)) as tmp_dir:
         base = Path(tmp_dir)
         result_queue = mp.Queue()
         processes = []
@@ -265,7 +268,13 @@ def run_profile():
 
 
 def main():
-    results = run_profile()
+    parser = ArgumentParser(description="NEXRAD memory profiler")
+    parser.add_argument("--output-dir", required=True, type=Path, help="Root directory for benchmark artifacts")
+    args = parser.parse_args()
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results = run_profile(output_dir)
 
     for result in results:
         print(f"\n=== Memory profile for {result['site']} ===")

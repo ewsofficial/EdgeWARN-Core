@@ -1,10 +1,15 @@
-"""Benchmark live NEXRAD full-volume parse: subprocess vs pool memory.
+"""Live NEXRAD full-volume parse: subprocess vs pool memory.
 
 Measures system-level memory (not per-process RSS) to properly account
 for copy-on-write page sharing in the pool approach.
 
+Opt-in live benchmark: downloads real Level-II volumes from AWS, so it
+requires network access and never runs in the default suite. The unified
+``benchmarks/benchmark_nexrad.py`` sampler covers the synthetic path; this
+script keeps the live path with the same explicit ``--output-dir`` contract.
+
 Usage:
-    PYTHONPATH=src python benchmarks/benchmark_nexrad_live_pool_memory.py
+    PYTHONPATH=src python benchmarks/benchmark_nexrad_live_pool_memory.py --output-dir /tmp/nexrad_live_pool
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import os
 import resource
 import subprocess
 import sys
+from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 import tempfile
@@ -303,11 +309,11 @@ def run_pool_benchmark(selected: list[dict], simultaneous_volumes: int, src_root
     }
 
 
-async def _async_main() -> tuple[list[dict], list[dict]]:
+async def _async_main(output_dir: Path) -> tuple[list[dict], list[dict]]:
     max_count = max(SIMULTANEOUS_COUNTS)
     src_root = str(Path(__file__).parent.parent.parent / "src")
 
-    with tempfile.TemporaryDirectory(prefix="nexrad_live_pool_", dir="/tmp/kilo") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="nexrad_live_pool_", dir=str(output_dir)) as tmp_dir:
         root = Path(tmp_dir)
         print(f"Discovering {max_count} live volumes...")
         selected = await select_live_volumes(max_count)
@@ -346,7 +352,11 @@ async def _async_main() -> tuple[list[dict], list[dict]]:
 
 
 def main() -> int:
-    sub_summaries, pool_summaries = asyncio.run(_async_main())
+    parser = ArgumentParser(description="Live NEXRAD full-volume parse: subprocess vs pool memory")
+    parser.add_argument("--output-dir", required=True, type=Path, help="Root directory for benchmark artifacts")
+    args = parser.parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    sub_summaries, pool_summaries = asyncio.run(_async_main(args.output_dir))
 
     print("=" * 90)
     print("SUMMARY: subprocess vs pool (live data)")

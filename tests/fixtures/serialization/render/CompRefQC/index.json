@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "timestamps": [
+    "20260317-200000"
+  ],
+  "representation": "binary_chunks",
+  "chunk_format": {
+    "version": 2,
+    "encoding": "float16",
+    "file_suffix": ".f16.gz",
+    "compression": "gzip",
+    "channels": 1,
+    "value_kind": "scalar",
+    "no_data": "nan",
+    "bytes_per_component": 2,
+    "pixel_row_order": "top_to_bottom",
+    "grid_origin": "bottom_left",
+    "media_type": "application/octet-stream"
+  },
+  "tile_grid": {
+    "rows": 1,
+    "cols": 1,
+    "tile_size": 2
+  }
+}

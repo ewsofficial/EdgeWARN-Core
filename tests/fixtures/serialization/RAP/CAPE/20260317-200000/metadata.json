@@ -1,0 +1,27 @@
+{
+  "layer": "CAPE",
+  "timestamp": "20260317-200000",
+  "source_file": "rap_20260317_2000.grib2",
+  "shape": [
+    2,
+    3
+  ],
+  "grid": {
+    "ni": 3,
+    "nj": 2,
+    "point_count": 6
+  },
+  "dtype": "uint16",
+  "byte_order": "little_endian",
+  "scale": {
+    "min": 0.0,
+    "max": 100.0
+  },
+  "missing_value": 65535,
+  "units": "J/kg",
+  "grib": {
+    "shortName": "CAPE",
+    "typeOfLevel": "surface",
+    "level": 0
+  }
+}

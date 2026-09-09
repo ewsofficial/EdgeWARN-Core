@@ -1,4 +1,9 @@
-"""Benchmark live NEXRAD full-volume parse memory.
+"""Live NEXRAD full-volume parse memory.
+
+Opt-in live benchmark: downloads real Level-II volumes from AWS, so it
+requires network access and never runs in the default suite. The unified
+``benchmarks/benchmark_nexrad.py`` sampler covers the synthetic path; this
+script keeps the live path with the same explicit ``--output-dir`` contract.
 
 This benchmark:
 - fetches live radar station metadata
@@ -8,7 +13,7 @@ This benchmark:
 - samples total RSS across parent and child processes
 
 Usage:
-    PYTHONPATH=src python benchmarks/benchmark_nexrad_memory_live.py
+    PYTHONPATH=src python benchmarks/benchmark_nexrad_memory_live.py --output-dir /tmp/nexrad_live
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
+from argparse import ArgumentParser
 
 import psutil
 
@@ -209,9 +215,9 @@ def run_parse_benchmark(selected: list[dict], simultaneous_volumes: int, root: P
     }
 
 
-async def _async_main() -> list[dict]:
+async def _async_main(output_dir: Path) -> list[dict]:
     max_count = max(SIMULTANEOUS_COUNTS)
-    with tempfile.TemporaryDirectory(prefix="nexrad_live_mem_", dir="/tmp/kilo") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="nexrad_live_mem_", dir=str(output_dir)) as tmp_dir:
         root = Path(tmp_dir)
         selected = await select_live_volumes(max_count)
         selected = await download_live_volumes(selected, root)
@@ -223,11 +229,11 @@ async def _async_main() -> list[dict]:
 
 
 def main() -> int:
-    summaries = asyncio.run(_async_main())
-
-    print("Live NEXRAD simultaneous full-volume memory benchmark")
-    print("Memory samples include parent and child parser processes.")
-    print()
+    parser = ArgumentParser(description="Live NEXRAD full-volume parse memory")
+    parser.add_argument("--output-dir", required=True, type=Path, help="Root directory for benchmark artifacts")
+    args = parser.parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    summaries = asyncio.run(_async_main(args.output_dir))
     print(" n | peak_total_mb | delta_mb | mean_child_mb | max_child_mb | duration_s ")
     print("---+---------------+----------+---------------+--------------+-----------")
     for summary in summaries:

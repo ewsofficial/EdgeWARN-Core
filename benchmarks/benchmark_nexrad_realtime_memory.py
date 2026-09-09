@@ -5,10 +5,10 @@ the parent and all child processes, samples memory every 0.1 s, and writes
 results to JSON.
 
 Usage:
-    PYTHONPATH=src python benchmarks/benchmark_nexrad_realtime_memory.py
+    PYTHONPATH=src python benchmarks/benchmark_nexrad_realtime_memory.py --output-dir /tmp/nexrad_realtime
 
 Output:
-    /tmp/kilo/nexrad_realtime_memory_<timestamp>.json
+    <output-dir>/nexrad_realtime_memory_<timestamp>.json
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import time
+from argparse import ArgumentParser
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,7 +28,6 @@ import psutil
 
 SAMPLE_INTERVAL_S = 0.1
 TIMEOUT_S = 120
-OUTPUT_DIR = Path("/tmp/kilo")
 
 WRAPPER_SCRIPT = """
 import sys, os
@@ -81,9 +81,14 @@ def _snapshot_memory(parent_pid: int) -> dict:
 
 
 def main() -> int:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    parser = ArgumentParser(description="NEXRAD realtime memory profiler")
+    parser.add_argument("--output-dir", required=True, type=Path, help="Root directory for benchmark artifacts")
+    args = parser.parse_args()
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output_path = OUTPUT_DIR / f"nexrad_realtime_memory_{timestamp}.json"
+    output_path = output_dir / f"nexrad_realtime_memory_{timestamp}.json"
 
     src_root = str(Path(__file__).parent.parent.parent / "src")
 

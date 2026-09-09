@@ -13,7 +13,7 @@ Audited against `74cc623` on `yuchen-wei3667/modular-ctam`. Package version
 
 | Path | Contents |
 | --- | --- |
-| `tests/core/ctam/baseline.py` | Snapshot harness, sibling of `tests/core/config/baseline.py`. Adds `datetime`, non-finite float, and float-rounding handling. Regenerate with `UPDATE_CTAM_BASELINE=1`. |
+| `tests/core/ctam/baseline.py` | Snapshot harness, sibling of `tests/architecture/baseline.py`. Adds `datetime`, non-finite float, and float-rounding handling. Regenerate with `UPDATE_CTAM_BASELINE=1`. |
 | `tests/core/ctam/test_stormcast_baseline.py` | 29 tests freezing StormCast's success, skipped, error, and alert output, including the `tstm_wind` mapping. |
 | `tests/core/ctam/test_cell_history_baseline.py` | 11 tests over history file format, append/replace semantics, and every skip path. |
 | `tests/ctam_baseline/*.json` | 15 committed snapshots. |
@@ -84,7 +84,7 @@ Linux permits `fsync` on an `O_RDONLY` descriptor. Windows returns `EBADF`. Ever
 fails on Windows, which means cell-history writes, index publication, and alert
 publishing all silently fail there — `CellHistoryManager.update_cell_histories`
 catches the exception and logs it (`history.py:98-99`), and in
-`tests/core/process/integrate/test_history.py` the injected `mock_io_manager` is a
+`tests/unit/enrichment/test_history.py` the injected `mock_io_manager` is a
 `MagicMock`, so even the log message disappears.
 
 Verified fix, one character: open the temporary file `"r+b"` instead of `"rb"`.
@@ -289,7 +289,7 @@ per-operation and per-transaction limits — and still publish a snapshot the pu
 API refuses to serve. The publication coordinator must size-check the serialized
 result *before* atomic replacement, not just bound the patches going in.
 Taking 200 cells as the worst-case snapshot width (the largest count configured
-anywhere, at `tests/benchmarks/benchmark_grid_index.py:186`), 8388608 / 200 leaves
+anywhere, at `benchmarks/benchmark_grid_index.py:186`), 8388608 / 200 leaves
 41943 bytes per feature for everything detection, integration, and modules
 together write.
 
@@ -320,7 +320,7 @@ rather than rejecting it, so the OpenAPI parameter deliberately declares no
 
 They pass by skipping, so they have been reporting success while measuring nothing.
 
-- The shared fixture at `tests/benchmarks/test_performance.py:381` does
+- The shared fixture at `benchmarks/test_performance.py:381` does
   `data.get("cells", [])`, but the snapshot envelope's key is `features`
   (`src/EdgeWARN/process/detect/tools/save.py:28-34`, and §3). It always yields an
   empty list.
@@ -362,7 +362,7 @@ Recorded so later phases can diff failures by test identity rather than count.
 - Excluding those, the suite is **53 failed, 1209 passed, 16 skipped**. None are
   in `tests/core/ctam`. The large majority trace to the `atomic_write_json`
   defect in §1 — 41 failures mention `EBADF` directly, and the 5 in
-  `tests/core/process/integrate/test_history.py` have the same cause with the
+  `tests/unit/enrichment/test_history.py` have the same cause with the
   message swallowed by a `MagicMock`.
 - On Linux CI these numbers should be substantially lower. Do not treat this as a
   target; treat it as the set to diff against.

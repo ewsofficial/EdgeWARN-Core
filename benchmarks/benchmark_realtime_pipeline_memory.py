@@ -34,15 +34,6 @@ import psutil
 
 
 SAMPLE_INTERVAL_S = 0.1
-DEFAULT_OUTPUT_DIR = Path("/tmp/kilo")
-
-_PRIMARY_FLAGS = [
-    "--lat_limits", "20", "55",
-    "--lon_limits", "230", "300",
-    "--disable-ctam",
-    "--disable-tracking",
-    "--disable-goes",
-]
 
 SERVICE_ENTRYPOINTS = {
     "edgewarn": ("run_edgewarn.py", _PRIMARY_FLAGS),
@@ -57,7 +48,7 @@ def parse_args(argv=None):
     parser.add_argument("--entrypoint", default="run_edgewarn.py",
                         help="Entry point profiled in single mode")
     parser.add_argument("--duration", type=float, default=300.0)
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--output-dir", required=True, help="Root directory for benchmark artifacts")
     return parser.parse_args(argv)
 
 

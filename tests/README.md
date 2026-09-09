@@ -27,3 +27,13 @@ threshold so ordinary variance cannot silently erase the baseline. Process
 coverage is reported separately because child-process tracing is platform- and
 start-method-sensitive; the process lane tests the production start method
 directly rather than inflating the ordinary coverage number.
+
+## Supported platforms
+
+Every CI job runs on `ubuntu-latest`; that is the only platform the suite
+verifies. Windows and macOS execution is explicitly not covered: process
+supervision, signal handling, file locking, and multiprocessing start methods
+differ across platforms, and no job exercises those paths elsewhere. The
+shipped container image is likewise Linux-only. Do not assume a green suite
+on Linux implies Windows/macOS support; adding another platform means adding
+a CI job for it, not a documentation claim.
