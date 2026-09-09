@@ -1,5 +1,41 @@
 # PR #97 fix verification
 
+## Shutdown follow-up — September 9, 2026
+
+Finding 5 is resolved by the current worktree. The former Docker command made
+a Bash logging pipeline PID 1 and used `kill -TERM 0`, while `run_all` starts
+each service in a separate session. The trap therefore could not reach those
+service process groups reliably, and the shell did not provide init-style
+orphan reaping. Docker exhausted its 25-second allowance and sent `SIGKILL`,
+producing exit 137.
+
+The image now runs `tini` as PID 1 and a dedicated entrypoint which tracks and
+signals the `edgewarn run` supervisor PID, waits for it, drains `rotatelogs`,
+and preserves its status. The supervisor signals each service process group,
+including descendants after a leader exits, and escalates remaining group
+members after 20 seconds. This leaves five seconds inside Compose's 25-second
+allowance for forced containment, reaping, logging teardown, and status
+propagation. A clean service-leader shutdown remains exit 0 even if a stubborn
+descendant required bounded containment; genuine nonzero service exits remain
+failures.
+
+Verification completed against image `edgewarn-core:shutdown-fix`:
+
+- The focused launcher/packaging suite passed: **31 passed, 1 opt-in Docker
+  test skipped**.
+- The live process tree showed `tini` as PID 1, the entrypoint as its child,
+  the tracked `edgewarn` supervisor, and distinct EdgeWARN/EWMRS/NEXRAD process
+  groups containing their workers.
+- Live ingest and rendering occurred before shutdown, including NEXRAD volume
+  exports and EWMRS MRMS/RAP record consumption.
+- `docker stop -t 25 edgewarn-shutdown-fix-test` completed before Docker's
+  deadline. Final state was `status=exited`, `ExitCode=0`, `OOMKilled=false`.
+- The persisted log ended with all three service leaders terminated at
+  `rc=0`; no work was logged after their shutdown completion.
+
+The September 5 review below is retained as a historical snapshot of the
+earlier commit and therefore still describes finding 5 as open.
+
 Reviewed September 5, 2026 against local commit `d24a1c2ec030cc5c8ec34e2114030bb5e9d01c9a`.
 
 Source: [Pre-release packaging and deployment audit](https://github.com/ewsofficial/EdgeWARN-Core/pull/97#pullrequestreview-5119184493). Finding numbers below refer to that report, not separate GitHub issues. The two automated inline findings duplicate findings 1 and 4.

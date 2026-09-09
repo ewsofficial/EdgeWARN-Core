@@ -174,6 +174,12 @@ class CellDataSaver:
         if not np.any(hail_mask):
             return []
 
+        # skimage.measure.find_contours requires at least a 2x2 input. Small
+        # cells can produce a one-row or one-column bounding slice, in which
+        # case there is no contour to represent as a hail-core polygon.
+        if any(size < 2 for size in hail_mask.shape):
+            return []
+
         # Find contours on the hail mask (local coordinates)
         contours = measure.find_contours(hail_mask.astype(float), hail_cfg["contour_level"])
         if not contours:
@@ -256,6 +262,9 @@ class CellDataSaver:
         precip_slice = self.preciptype_ds['unknown'].values[sl]
         hail_mask = (precip_slice == hail_cfg["preciptype_class"]) & local_mask_slice
         if not np.any(hail_mask):
+            return []
+
+        if any(size < 2 for size in hail_mask.shape):
             return []
 
         contours = measure.find_contours(hail_mask.astype(float), hail_cfg["contour_level"])

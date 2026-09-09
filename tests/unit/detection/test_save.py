@@ -129,6 +129,61 @@ def test_hail_core_detection(synthetic_data):
     # With a single pixel, we should still get a contour
     assert len(hail_core) > 0
 
+
+@pytest.mark.parametrize("use_probsevere_geometry", [False, True])
+def test_hail_core_is_empty_when_contour_input_is_too_small(use_probsevere_geometry):
+    lats = np.array([34.0, 35.0, 36.0])
+    lons = np.array([262.0, 263.0, 264.0])
+    refl = np.zeros((3, 3), dtype=float)
+    refl[1, 1] = 50.0
+    precip = np.zeros((3, 3), dtype=float)
+    precip[1, 1] = 6.0
+    radar_ds = xr.Dataset(
+        {'unknown': (('latitude', 'longitude'), refl)},
+        coords={'latitude': lats, 'longitude': lons},
+    )
+    preciptype_ds = xr.Dataset(
+        {'unknown': (('latitude', 'longitude'), precip)},
+        coords={'latitude': lats, 'longitude': lons},
+    )
+
+    if use_probsevere_geometry:
+        bboxes = None
+        mapped_ds = expanded_ds = None
+        ps_ds = {
+            "features": [{
+                "properties": {"ID": 1},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [262.9, 34.9], [263.1, 34.9], [263.1, 35.1],
+                        [262.9, 35.1], [262.9, 34.9],
+                    ]],
+                },
+            }],
+        }
+    else:
+        polygon_grid = np.zeros((3, 3), dtype=np.int32)
+        polygon_grid[1, 1] = 1
+        mapped_ds = expanded_ds = xr.Dataset(
+            {'PolygonID': (('latitude', 'longitude'), polygon_grid)},
+            coords={'latitude': lats, 'longitude': lons},
+        )
+        bboxes = {1: [[35.0, 263.0]]}
+        ps_ds = {"features": []}
+
+    saver = CellDataSaver(
+        bboxes,
+        radar_ds,
+        mapped_ds,
+        expanded_ds,
+        ps_ds,
+        preciptype_ds,
+        use_probsevere_geometry=use_probsevere_geometry,
+    )
+
+    assert saver.create_entry()[0]['hail_core'] == []
+
 def test_nan_handling_in_centroid(synthetic_data):
     """Test centroid calc when reflectivity has NaNs."""
     bboxes, radar_ds, mapped_ds, expanded_ds, ps_ds, preciptype_ds = synthetic_data
