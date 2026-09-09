@@ -7,7 +7,9 @@ dependencies:
   # Keep the geospatial ABI on one reproducible Brotli generation.  Older
   # environments could retain libbrotlicommon 1.0 symlinks beside 1.2 decoders,
   # causing rasterio/netCDF4/pyproj imports to fail during pytest collection.
-  - libbrotli=1.2.0
+  - libbrotlienc=1.2.0
+  - libbrotlidec=1.2.0
+  - libbrotlicommon=1.2.0
   - rasterio=1.5.0
   - netcdf4=1.7.2
   - pyproj=3.7.2

@@ -141,15 +141,17 @@ Historical runs persist the final stormcell artifacts to `<BASE_DIR>/data/stormc
 
 ## Containers
 
-The supplied image installs the built Python wheel and uses the registered
-command directly:
+The supplied image installs the built Python wheel and pipes the registered
+`edgewarn run` command through `rotatelogs` for persisted, hourly-rotated
+logs:
 
 ```dockerfile
-ENTRYPOINT ["edgewarn"]
-CMD ["run", "--config-path", "/etc/edgewarn/config"]
+ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]
+CMD ["trap 'kill -TERM 0 >/dev/null 2>&1 || true' TERM; exec edgewarn run --config-path /etc/edgewarn/config 2>&1 | rotatelogs -L \"${EDGEWARN_LOG_DIR}/edgewarn.current.log\" -l \"${EDGEWARN_LOG_DIR}/edgewarn.%Y%m%d-%H.log\" 3600"]
 ```
 
-`compose.yaml` mounts runtime output at `/var/lib/edgewarn` and mounts the
+`compose.yaml` mounts runtime output at `/var/lib/edgewarn`, rotated logs at
+`/var/log/edgewarn` (host `./EdgeWARN_logs` by default), and mounts the
 production configuration read-only at `/etc/edgewarn/config`. Use the
 `admin`-profile configuration container for intentional read-write edits. See
 `INSTALLATION.md` for build, specialized-mode, and administrative examples.

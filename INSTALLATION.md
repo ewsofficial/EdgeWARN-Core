@@ -290,27 +290,33 @@ docker run --rm --name edgewarn \
   edgewarn-core:3.0.0
 ```
 
-The image installs a built wheel and has this exec-form process contract:
+The image installs a built wheel and pipes the installed `edgewarn` command
+through `rotatelogs` for persisted, rotated logs:
 
 ```dockerfile
-ENTRYPOINT ["edgewarn"]
-CMD ["run", "--config-path", "/etc/edgewarn/config"]
+ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]
+CMD ["trap 'kill -TERM 0 >/dev/null 2>&1 || true' TERM; exec edgewarn run --config-path /etc/edgewarn/config 2>&1 | rotatelogs -L \"${EDGEWARN_LOG_DIR}/edgewarn.current.log\" -l \"${EDGEWARN_LOG_DIR}/edgewarn.%Y%m%d-%H.log\" 3600"]
 ```
 
-Override the complete `CMD` to select a specialized topology:
+Override the entrypoint back to `edgewarn` to select a specialized topology
+(the default entrypoint is the log-piping shell, so `run ...` arguments on
+their own would be interpreted by `bash`):
 
 ```bash
 docker run --rm \
+  --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
   -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
   edgewarn-core:3.0.0 run core --config-path /etc/edgewarn/config
 docker run --rm \
+  --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
   -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
   edgewarn-core:3.0.0 run ewmrs --config-path /etc/edgewarn/config
 docker run --rm \
+  --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
   -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
@@ -331,9 +337,10 @@ docker compose build edgewarn
 docker compose --profile admin run --rm edgewarn-configure
 ```
 
-`docker stop` sends `SIGTERM` directly to the exec-form `edgewarn` supervisor.
-It forwards the signal to every selected service, waits up to its bounded grace
-period, escalates survivors, reaps every child, and exits `0` for a clean stop.
+`docker stop` sends `SIGTERM` to the container entrypoint, which traps it and
+forwards it to the `edgewarn` supervisor pipeline. The supervisor forwards the
+signal to every selected service, waits up to its bounded grace period,
+escalates survivors, reaps every child, and exits `0` for a clean stop.
 
 ## Running Historical Reprocessing
 

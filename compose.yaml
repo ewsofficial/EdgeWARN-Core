@@ -3,10 +3,10 @@ services:
     build:
       context: .
       args:
-        # Comment EDGEWARN_SYNC_NWS_ZONES to disable NWS zone sync
-        # Disabling this will prevent EWMRS from working
-        # BuildKit downloads it in parallel with the runtime Conda solve.
-        - EDGEWARN_SYNC_NWS_ZONES
+        # NWS zone assets download at build time.  Set
+        # EDGEWARN_SYNC_NWS_ZONES=false to skip; EWMRS requires the assets.
+        # BuildKit downloads them in parallel with the runtime Conda solve.
+        EDGEWARN_SYNC_NWS_ZONES: ${EDGEWARN_SYNC_NWS_ZONES:-true}
     image: edgewarn-core:3.0.0
     environment:
       # Set EDGEWARN_HOST_BASE_DIR to choose the host directory.  The package
@@ -17,11 +17,13 @@ services:
       - ${EDGEWARN_HOST_BASE_DIR:-./EdgeWARN_input}:/var/lib/edgewarn
       - ./config:/etc/edgewarn/config:ro
       - ${EDGEWARN_NWS_ASSETS_DIR:-./assets/nws_zones}:/etc/edgewarn/assets/nws_zones:ro
+      - ${EDGEWARN_LOG_DIR:-./EdgeWARN_logs}:/var/log/edgewarn
     stop_grace_period: 25s
 
   edgewarn-configure:
     image: edgewarn-core:3.0.0
     profiles: ["admin"]
+    entrypoint: ["edgewarn"]
     command: ["configure", "--config-path", "/etc/edgewarn/config"]
     stdin_open: true
     tty: true
@@ -31,6 +33,7 @@ services:
   edgewarn-sync-nws-zones:
     image: edgewarn-core:3.0.0
     profiles: ["admin"]
+    entrypoint: ["edgewarn"]
     command: ["sync-nws-zones", "--apply", "--config-path", "/etc/edgewarn/config"]
     volumes:
       - ./config:/etc/edgewarn/config:ro

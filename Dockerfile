@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG EDGEWARN_SYNC_NWS_ZONES=false
+ARG EDGEWARN_SYNC_NWS_ZONES=true
 
 FROM continuumio/miniconda3:25.3.1-1 AS runtime-build
 
@@ -55,14 +55,21 @@ COPY --from=runtime-build /opt/conda/envs/EdgeWARN /opt/conda/envs/EdgeWARN
 COPY --from=runtime-build /etc/edgewarn/config /etc/edgewarn/config
 COPY --from=nws-zones /opt/edgewarn/nws-zones /opt/edgewarn/nws-zones
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends apache2-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/log/edgewarn
+
 ENV PATH="/opt/conda/envs/EdgeWARN/bin:${PATH}" \
     EDGEWARN_BASE_DIR="/var/lib/edgewarn" \
     EDGEWARN_BUNDLED_NWS_ZONES_DIR="/opt/edgewarn/nws-zones" \
-    EDGEWARN_SYNC_NWS_ZONES="${EDGEWARN_SYNC_NWS_ZONES}"
+    EDGEWARN_SYNC_NWS_ZONES="${EDGEWARN_SYNC_NWS_ZONES}" \
+    PYTHONUNBUFFERED=1 \
+    EDGEWARN_LOG_DIR="/var/log/edgewarn"
 
 WORKDIR /opt/edgewarn
-VOLUME ["/var/lib/edgewarn"]
+VOLUME ["/var/lib/edgewarn", "/var/log/edgewarn"]
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["edgewarn"]
-CMD ["run", "--config-path", "/etc/edgewarn/config"]
+ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]
+CMD ["trap 'kill -TERM 0 >/dev/null 2>&1 || true' TERM; exec edgewarn run --config-path /etc/edgewarn/config 2>&1 | rotatelogs -L \"${EDGEWARN_LOG_DIR}/edgewarn.current.log\" -l \"${EDGEWARN_LOG_DIR}/edgewarn.%Y%m%d-%H.log\" 3600"]

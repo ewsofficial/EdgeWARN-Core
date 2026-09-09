@@ -16,8 +16,9 @@ def test_container_uses_installed_exec_form_package_command():
         (REPO_ROOT / "environment.yml").read_text(encoding="utf-8")
     )["name"]
 
-    assert 'ENTRYPOINT ["edgewarn"]' in dockerfile
-    assert 'CMD ["run", "--config-path", "/etc/edgewarn/config"]' in dockerfile
+    assert 'ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]' in dockerfile
+    assert "exec edgewarn run --config-path /etc/edgewarn/config" in dockerfile
+    assert "rotatelogs" in dockerfile
     assert "python src/run_" not in dockerfile
     assert "STOPSIGNAL SIGTERM" in dockerfile
     assert "pip wheel" in dockerfile
@@ -33,7 +34,9 @@ def test_compose_separates_runtime_and_configuration_mounts():
     compose = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
     services = compose["services"]
 
-    assert services["edgewarn"]["build"]["args"] == ["EDGEWARN_SYNC_NWS_ZONES"]
+    assert services["edgewarn"]["build"]["args"] == {
+        "EDGEWARN_SYNC_NWS_ZONES": "${EDGEWARN_SYNC_NWS_ZONES:-true}"
+    }
 
     production_mounts = services["edgewarn"]["volumes"]
     assert "${EDGEWARN_HOST_BASE_DIR:-./EdgeWARN_input}:/var/lib/edgewarn" in production_mounts

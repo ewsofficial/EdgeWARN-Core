@@ -1,9 +1,10 @@
 """Container smoke contract: disposable mounts and SIGTERM handling.
 
 Phase 9 secondary coverage: the shipped ``Dockerfile`` defines the runtime
-contract (pinned Conda base, ``VOLUME /var/lib/edgewarn``, ``STOPSIGNAL
-SIGTERM``, ``ENTRYPOINT ["edgewarn"]``), but nothing pinned it, so a
-Dockerfile edit that dropped the volume or changed the stop signal would
+contract (pinned Conda base, ``VOLUME`` for the runtime and log trees,
+``STOPSIGNAL SIGTERM``, and an entrypoint that pipes the installed
+``edgewarn`` command through ``rotatelogs``), but nothing pinned it, so a
+Dockerfile edit that dropped a volume or changed the stop signal would
 ship silently.
 
 Two lanes, matching the suite's opt-in philosophy for heavyweight checks:
@@ -43,7 +44,7 @@ class TestDockerfileContract:
 
     def test_runtime_mount_is_a_disposable_volume(self):
         text = _dockerfile_text()
-        assert 'VOLUME ["/var/lib/edgewarn"]' in text
+        assert 'VOLUME ["/var/lib/edgewarn", "/var/log/edgewarn"]' in text
         assert 'EDGEWARN_BASE_DIR="/var/lib/edgewarn"' in text
 
     def test_stop_signal_is_sigterm(self):
@@ -51,8 +52,15 @@ class TestDockerfileContract:
             "supervisors send SIGTERM; the image must not override it"
         )
 
-    def test_entrypoint_is_the_installed_command(self):
-        assert re.search(r'^ENTRYPOINT \["edgewarn"\]', _dockerfile_text(), re.MULTILINE)
+    def test_entrypoint_pipes_installed_command_through_rotatelogs(self):
+        text = _dockerfile_text()
+        assert re.search(
+            r'^ENTRYPOINT \["/bin/bash", "-o", "pipefail", "-c"\]',
+            text,
+            re.MULTILINE,
+        )
+        assert "exec edgewarn run" in text
+        assert "rotatelogs" in text
 
     def test_wheel_is_built_and_installed_without_dep_resolution(self):
         text = _dockerfile_text()
@@ -89,8 +97,8 @@ def test_container_run_with_disposable_mount_and_sigterm(tmp_path):
     )
     try:
         proc = subprocess.Popen(
-            ["docker", "run", "--rm", "-v", f"{mount}:/var/lib/edgewarn", image,
-             "run", "--help"],
+            ["docker", "run", "--rm", "-v", f"{mount}:/var/lib/edgewarn",
+             "--entrypoint", "edgewarn", image, "run", "--help"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
