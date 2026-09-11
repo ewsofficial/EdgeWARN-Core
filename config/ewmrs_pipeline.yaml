@@ -22,6 +22,8 @@ nexrad_gui:
   max_workers: 8
 
 workers:
+  # Hard ceiling, not a target; CPU, layer count, and memory may reduce it.
+  max_workers: 8
   # Per-worker memory estimates; reduce only if the host is memory constrained.
   budget_mb:
     goes: 1200.0

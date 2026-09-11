@@ -31,6 +31,7 @@ from EWMRS.pipeline_config import (
     render_phase_name,
     tile_index_cache_entries,
     worker_budget_mb,
+    worker_max_workers,
     worker_psutil_fallback_max,
     worker_reserve_mb,
 )
@@ -128,7 +129,7 @@ def _adaptive_process_worker_count(layer_count: int, phase_name: str) -> int:
     if layer_count <= 1:
         return 1
 
-    cpu_cap = min(layer_count, max(1, os.cpu_count() or 1))
+    cpu_cap = min(layer_count, max(1, os.cpu_count() or 1), worker_max_workers())
     if cpu_cap <= 1:
         return 1
 

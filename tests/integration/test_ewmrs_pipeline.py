@@ -89,6 +89,29 @@ def test_run_render_pipeline_collects_layer_results(monkeypatch):
     assert cleanup_calls == [120]
 
 
+def test_run_render_pipeline_respects_configured_worker_cap(monkeypatch):
+    dt = datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc)
+    created = {}
+    layers = [{"name": f"Layer{index}"} for index in range(6)]
+
+    monkeypatch.setattr(ewmrs_pipeline, "worker_max_workers", lambda: 3)
+    monkeypatch.setattr(ewmrs_pipeline.os, "cpu_count", lambda: 32)
+    monkeypatch.setattr(ewmrs_pipeline, "worker_budget_mb", lambda _phase: 1.0)
+    monkeypatch.setattr(ewmrs_pipeline, "worker_reserve_mb", lambda: 0.0)
+    monkeypatch.setattr(ewmrs_pipeline, "_render_layer", lambda layer: (layer["name"], ["tile.png"]))
+    monkeypatch.setattr(
+        "concurrent.futures.ProcessPoolExecutor",
+        lambda max_workers, initializer=None: created.setdefault(
+            "executor", _FakeExecutor(max_workers=max_workers, initializer=initializer)
+        ),
+    )
+    monkeypatch.setattr("concurrent.futures.as_completed", lambda futures: list(futures))
+
+    ewmrs_pipeline.run_render_pipeline(dt, layers=layers, cleanup_after=False)
+
+    assert created["executor"].max_workers == 3
+
+
 def test_run_render_pipeline_binds_manifest_path_before_worker_submit(
     monkeypatch,
     tmp_path,

@@ -45,8 +45,9 @@
     "workers": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["budget_mb", "reserve_mb", "psutil_fallback_max", "numeric_thread_caps"],
+      "required": ["max_workers", "budget_mb", "reserve_mb", "psutil_fallback_max", "numeric_thread_caps"],
       "properties": {
+        "max_workers": { "type": "integer", "minimum": 1 },
         "budget_mb": {
           "type": "object",
           "additionalProperties": false,

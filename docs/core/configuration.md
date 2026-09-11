@@ -79,6 +79,7 @@ producer dependency, and the NEXRAD mode includes both ingest and rendering.
 Use a filename stem, dotted leaf path, and one YAML scalar:
 
 ```bash
+edgewarn configure ewmrs_pipeline.workers.max_workers 4
 edgewarn configure ewmrs_pipeline.workers.budget_mb.goes 2048
 edgewarn configure --config-path /etc/edgewarn/config \
   runtime.run.disable_nexrad true

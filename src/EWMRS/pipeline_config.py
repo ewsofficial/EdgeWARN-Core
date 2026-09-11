@@ -133,6 +133,11 @@ def worker_psutil_fallback_max() -> int:
     return _section("workers")["psutil_fallback_max"]
 
 
+def worker_max_workers() -> int:
+    """Hard ceiling on the EWMRS render process pool."""
+    return _section("workers")["max_workers"]
+
+
 def numeric_thread_cap_value() -> int:
     """Per-worker thread cap for the BLAS-family libraries.
 
