@@ -16,8 +16,6 @@ from common.config.overlay import resolve
 _CONFIG_NAME = "ewmrs_pipeline"
 
 GOES_CLEANUP_MIN_INTERVAL_ENV = "EWMRS_GOES_CLEANUP_MIN_INTERVAL_SECONDS"
-WORKER_BUDGET_MB_ENV = "EWMRS_WORKER_BUDGET_MB"
-WORKER_RESERVE_MB_ENV = "EWMRS_WORKER_RESERVE_MB"
 TILE_THREADS_ENV = "EWMRS_TILE_THREADS"
 
 
@@ -32,8 +30,7 @@ def render_phase_name() -> str:
     Only the generic default lives here. ``run_mrms_render_pipeline`` and
     ``run_goes_render_pipeline`` pass "MRMS" and "GOES" as literals because those
     name which caller is running, not a setting an operator would retune -- and
-    :func:`worker_budget_mb` dispatches on the "GOES" prefix, so renaming that
-    phase would silently change the memory budget.
+    Worker sizing is shared by the MRMS and GOES render phases.
     """
     return _section("render")["phase_name"]
 
@@ -97,35 +94,9 @@ def nexrad_render_max_workers() -> int:
     return _section("nexrad_gui")["max_workers"]
 
 
-def worker_budget_mb(phase_name: str) -> float:
-    """Assumed peak memory of one render worker, in MiB.
-
-    GOES workers hold a full-disk ABI array through reprojection, so they get a
-    larger budget than MRMS and everything else. One environment variable covers
-    both, matching the pre-extraction behavior.
-    """
-    budgets = _section("workers")["budget_mb"]
-    default = budgets["goes"] if phase_name.upper().startswith("GOES") else budgets["default"]
-    return float(
-        resolve(
-            None,
-            env_names=(WORKER_BUDGET_MB_ENV,),
-            yaml_value=float(default),
-            key="ewmrs_pipeline.workers.budget_mb",
-        )
-    )
-
-
-def worker_reserve_mb() -> float:
-    """Memory held back for the OS and the parent process, in MiB."""
-    return float(
-        resolve(
-            None,
-            env_names=(WORKER_RESERVE_MB_ENV,),
-            yaml_value=float(_section("workers")["reserve_mb"]),
-            key="ewmrs_pipeline.workers.reserve_mb",
-        )
-    )
+def worker_memory_cap() -> float:
+    """Assumed peak memory of one render worker, in MiB."""
+    return float(_section("workers")["worker_memory_cap"])
 
 
 def worker_psutil_fallback_max() -> int:

@@ -45,19 +45,10 @@
     "workers": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_workers", "budget_mb", "reserve_mb", "psutil_fallback_max", "numeric_thread_caps"],
+      "required": ["max_workers", "worker_memory_cap", "psutil_fallback_max", "numeric_thread_caps"],
       "properties": {
         "max_workers": { "type": "integer", "minimum": 1 },
-        "budget_mb": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["goes", "default"],
-          "properties": {
-            "goes": { "type": "number", "exclusiveMinimum": 0 },
-            "default": { "type": "number", "exclusiveMinimum": 0 }
-          }
-        },
-        "reserve_mb": { "type": "number", "minimum": 0 },
+        "worker_memory_cap": { "type": "number", "exclusiveMinimum": 0 },
         "psutil_fallback_max": { "type": "integer", "minimum": 1 },
         "numeric_thread_caps": {
           "type": "object",

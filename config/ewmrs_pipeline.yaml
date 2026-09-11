@@ -23,12 +23,9 @@ nexrad_gui:
 
 workers:
   # Hard ceiling, not a target; CPU, layer count, and memory may reduce it.
-  max_workers: 8
-  # Per-worker memory estimates; reduce only if the host is memory constrained.
-  budget_mb:
-    goes: 1200.0
-    default: 768.0
-  reserve_mb: 1024.0
+  max_workers: 4
+  # Per-worker memory estimate in MiB; CPU, layer count, and available memory may reduce the pool.
+  worker_memory_cap: 384
   psutil_fallback_max: 2
   numeric_thread_caps:
     # Keep at 1 so process-level parallelism does not oversubscribe CPU threads.

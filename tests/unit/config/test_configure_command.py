@@ -94,16 +94,15 @@ def test_example_edit_preserves_comments_order_permissions_and_newline(config_tr
     mode = stat.S_IMODE(target.stat().st_mode)
 
     result = configure.edit_configuration(
-        config_tree, "ewmrs_pipeline.workers.budget_mb.goes", "2048"
+        config_tree, "ewmrs_pipeline.workers.worker_memory_cap", "512"
     )
 
     after = target.read_text(encoding="utf-8")
     loaded = yaml.safe_load(after)
-    assert result.old_value == 1200.0
-    assert result.new_value == 2048
-    assert loaded["workers"]["budget_mb"]["goes"] == 2048
-    assert "# Per-worker memory estimates" in after
-    assert after.index("goes:") < after.index("default:")
+    assert result.old_value == 384
+    assert result.new_value == 512
+    assert loaded["workers"]["worker_memory_cap"] == 512
+    assert "# Per-worker memory estimate" in after
     assert after.endswith("\n") == before.endswith("\n")
     assert stat.S_IMODE(target.stat().st_mode) == mode
 

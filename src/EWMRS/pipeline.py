@@ -30,10 +30,9 @@ from EWMRS.pipeline_config import (
     render_cleanup_after,
     render_phase_name,
     tile_index_cache_entries,
-    worker_budget_mb,
     worker_max_workers,
+    worker_memory_cap,
     worker_psutil_fallback_max,
-    worker_reserve_mb,
 )
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
@@ -133,16 +132,14 @@ def _adaptive_process_worker_count(layer_count: int, phase_name: str) -> int:
     if cpu_cap <= 1:
         return 1
 
-    budget_mb = worker_budget_mb(phase_name)
-    reserve_mb = worker_reserve_mb()
+    memory_cap_mb = worker_memory_cap()
 
     try:
         import psutil
 
         available_mb = psutil.virtual_memory().available / (1024.0 * 1024.0)
-        usable_mb = max(0.0, available_mb - reserve_mb)
-        memory_cap = max(1, int(usable_mb // max(1.0, budget_mb)))
-        return max(1, min(cpu_cap, memory_cap))
+        memory_workers = max(1, int(available_mb // max(1.0, memory_cap_mb)))
+        return max(1, min(cpu_cap, memory_workers))
     except Exception:
         return max(1, min(cpu_cap, worker_psutil_fallback_max()))
 

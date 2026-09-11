@@ -1993,61 +1993,24 @@ def test_ewmrs_goes_cleanup_interval_is_read_per_call_not_frozen_at_import():
     assert goes_cleanup_min_interval_seconds() == 300.0
 
 
-def test_ewmrs_worker_budget_is_coupled_to_the_goes_phase_name():
-    """DECISION PRESERVED: the memory budget is selected by a phase-name prefix.
-
-    `worker_budget_mb` dispatches on `phase_name.upper().startswith("GOES")`, so
-    the phase label is not a free-form string -- renaming the GOES phase would
-    silently halve its budget. `render.phase_name` is pinned here alongside the
-    budgets to make that coupling fail loudly rather than quietly.
-    """
-    from EWMRS.pipeline_config import render_phase_name, worker_budget_mb
-
-    recorded = _ewmrs_pipeline_yaml()
-    assert render_phase_name() == recorded["render"]["phase_name"] == "EWMRS"
-    assert not render_phase_name().upper().startswith("GOES")
-
-    assert worker_budget_mb("GOES") == recorded["workers"]["budget_mb"]["goes"] == 1200.0
-    assert worker_budget_mb("MRMS") == recorded["workers"]["budget_mb"]["default"] == 768.0
-    assert worker_budget_mb(render_phase_name()) == 768.0
-
-    source = _ewmrs_pipeline_source()
-    assert "1200.0" not in source
-    assert "768.0" not in source
-
-
-def test_ewmrs_worker_memory_env_vars_still_outrank_the_catalog():
-    """RESOLVED: both budgets kept their environment overrides.
-
-    One variable covers the GOES and default budgets, which means setting it
-    flattens the distinction the catalog draws. That is the pre-extraction
-    behavior and is preserved rather than split, because splitting it would
-    invent a variable no deployment sets.
-    """
+def test_ewmrs_worker_memory_cap_is_catalog_owned():
+    """The single per-worker memory cap is read from the EWMRS catalog."""
     from EWMRS.pipeline_config import (
-        WORKER_BUDGET_MB_ENV,
-        WORKER_RESERVE_MB_ENV,
-        worker_budget_mb,
+        worker_max_workers,
+        worker_memory_cap,
         worker_psutil_fallback_max,
-        worker_reserve_mb,
     )
 
     recorded = _ewmrs_pipeline_yaml()
-    assert worker_reserve_mb() == recorded["workers"]["reserve_mb"] == 1024.0
+    assert worker_max_workers() == recorded["workers"]["max_workers"]
+    assert worker_memory_cap() == recorded["workers"]["worker_memory_cap"] == 384.0
     assert worker_psutil_fallback_max() == recorded["workers"]["psutil_fallback_max"] == 2
 
-    with mock.patch.dict("os.environ", {WORKER_BUDGET_MB_ENV: "256.5"}):
-        assert worker_budget_mb("GOES") == 256.5
-        assert worker_budget_mb("MRMS") == 256.5
-    with mock.patch.dict("os.environ", {WORKER_RESERVE_MB_ENV: "64"}):
-        assert worker_reserve_mb() == 64.0
-
-    # 1024.0 is not asserted absent: the bytes-to-MiB conversion legitimately
-    # uses it twice, and that arithmetic is not a tunable.
     source = _ewmrs_pipeline_source()
-    assert "worker_reserve_mb()" in source
-    assert "worker_psutil_fallback_max()" in source
-    assert "EWMRS_WORKER" not in source
+    assert "worker_max_workers()" in source
+    assert "worker_memory_cap()" in source
+    assert "budget_mb" not in source
+    assert "reserve_mb" not in source
 
 
 def test_ewmrs_numeric_thread_caps_are_one_value_across_a_fixed_list():

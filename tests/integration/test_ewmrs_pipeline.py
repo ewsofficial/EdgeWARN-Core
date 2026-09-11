@@ -96,8 +96,7 @@ def test_run_render_pipeline_respects_configured_worker_cap(monkeypatch):
 
     monkeypatch.setattr(ewmrs_pipeline, "worker_max_workers", lambda: 3)
     monkeypatch.setattr(ewmrs_pipeline.os, "cpu_count", lambda: 32)
-    monkeypatch.setattr(ewmrs_pipeline, "worker_budget_mb", lambda _phase: 1.0)
-    monkeypatch.setattr(ewmrs_pipeline, "worker_reserve_mb", lambda: 0.0)
+    monkeypatch.setattr(ewmrs_pipeline, "worker_memory_cap", lambda: 1.0)
     monkeypatch.setattr(ewmrs_pipeline, "_render_layer", lambda layer: (layer["name"], ["tile.png"]))
     monkeypatch.setattr(
         "concurrent.futures.ProcessPoolExecutor",
