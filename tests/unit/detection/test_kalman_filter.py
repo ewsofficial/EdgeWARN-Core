@@ -342,28 +342,41 @@ class TestKalmanFilterWithCell:
         assert abs(kf.state.u - 12.5) < 0.1
         assert abs(kf.state.v - 800/120) < 0.1
     
-    def test_initialize_from_cell_with_stormcast(self):
-        """Test initialization with StormCast velocity."""
+    def test_initialize_from_cell_with_stormprob(self, monkeypatch):
+        """Only promoted 15-minute StormProb displacement controls velocity."""
         cell = {
             'centroid': [35.0, -97.0],
             'dx': 1500.0,
             'dy': 800.0,
             'dt': 120.0,
             'modules': {
-                'StormCast': {
+                'StormProb': {
                     'status': 'success',
-                    'u': 15.0,
-                    'v': 10.0
+                    'leads': [{'lead_minutes': 15, 'east_km': 13.5,
+                               'north_km': 9.0}]
                 }
             }
         }
         
+        monkeypatch.setenv('STORMPROB_MODE', 'promoted')
         kf = KalmanFilter()
         kf.initialize_from_cell(cell)
         
-        # Should use StormCast velocity
+        # 15-minute displacement divided by 900 seconds.
         assert kf.state.u == 15.0
         assert kf.state.v == 10.0
+
+        monkeypatch.setenv('STORMPROB_MODE', 'shadow')
+        shadow = KalmanFilter()
+        shadow.initialize_from_cell(cell)
+        assert shadow.state.u == 12.5
+        assert shadow.state.v == pytest.approx(800 / 120)
+
+        monkeypatch.setenv('STORMPROB_MODE', 'rollback')
+        cell['modules']['StormCast'] = {'status': 'success', 'u': 8.0, 'v': -4.0}
+        legacy = KalmanFilter()
+        legacy.initialize_from_cell(cell)
+        assert (legacy.state.u, legacy.state.v) == (8.0, -4.0)
 
 
 if __name__ == '__main__':

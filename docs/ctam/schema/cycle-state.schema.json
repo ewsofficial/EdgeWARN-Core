@@ -30,7 +30,7 @@
         "catalog_building",
         "requirements_evaluated",
         "not_ready",
-        "stormcast_running",
+        "stormprob_running",
         "external_modules_running",
         "committing",
         "completed",
@@ -38,7 +38,7 @@
       ]
     },
     "ctam_ready": {
-      "description": "True only after the catalog is frozen, current stormcells are in memory, and every StormCast base requirement has been evaluated. Does not imply every optional source exists.",
+      "description": "True only after the catalog is frozen, current stormcells are in memory, and every StormProb base requirement has been evaluated. Does not imply every optional source exists.",
       "type": "boolean"
     },
     "module_state": {

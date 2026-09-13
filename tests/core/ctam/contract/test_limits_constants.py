@@ -211,10 +211,10 @@ def test_max_module_id_length_matches_the_frozen_pattern_quantifier():
 def test_reserved_module_ids_is_exactly_the_builtin_adapter():
     """Reserving more ids than the plan states would silently forbid legal names.
 
-    ``stormcast`` is reserved because a module shadowing it would replace the
-    forecast producer the alerts stage consumes; nothing else has that property.
+    ``stormprob`` is the built-in; ``stormcast`` stays reserved during migration
+    so an external module cannot impersonate the retired producer.
     """
-    assert RESERVED_MODULE_IDS == frozenset({"stormcast"})
+    assert RESERVED_MODULE_IDS == frozenset({"stormprob", "stormcast"})
 
 
 def test_every_reserved_module_id_is_a_legal_module_id():

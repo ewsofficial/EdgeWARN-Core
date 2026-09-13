@@ -19,7 +19,7 @@ from .manifest import ModuleManifest
 from .api.models import APIError
 
 _PATCH_OPS = frozenset({"add", "replace", "test"})
-_RESERVED_MODULE_KEYS = frozenset({"stormcast", "_grid_outputs"})
+_RESERVED_MODULE_KEYS = frozenset({"stormprob", "stormcast", "_grid_outputs"})
 
 
 def _segments(pointer: Any) -> tuple[str, ...]:

@@ -21,7 +21,7 @@ class KalmanObservation:
     lon: float
     timestamp: Optional[datetime] = None
     
-    # Optional velocity observation (from StormCast or historical motion)
+    # Optional velocity observation (from StormProb or historical motion)
     u: Optional[float] = None
     v: Optional[float] = None
 
@@ -150,14 +150,19 @@ class KalmanFilter:
             u = dx / dt  # m/s
             v = dy / dt  # m/s
         
-        # Try to get velocity from StormCast module
+        # Use the previous-cycle StormProb 15-minute forecast when available.
+        from EdgeWARN.stormprob.deployment import promoted, rollback
         modules = cell.get('modules', {})
-        stormcast = modules.get('StormCast', {})
-        if stormcast.get('status') == 'success':
-            sc_u = stormcast.get('u')
-            sc_v = stormcast.get('v')
-            if sc_u is not None and sc_v is not None:
-                u, v = sc_u, sc_v
+        if rollback():
+            legacy = modules.get('StormCast', {})
+            if legacy.get('status') == 'success' and legacy.get('u') is not None and legacy.get('v') is not None:
+                u, v = float(legacy['u']), float(legacy['v'])
+        stormprob = modules.get('StormProb', {}) if promoted() else {}
+        if stormprob.get('status') == 'success':
+            lead = next((item for item in stormprob.get('leads', [])
+                         if item.get('lead_minutes') == 15), None)
+            if lead and lead.get('east_km') is not None and lead.get('north_km') is not None:
+                u, v = float(lead['east_km']) * 1000 / 900, float(lead['north_km']) * 1000 / 900
         
         self.initialize(lat, lon, u, v, timestamp=timestamp)
     
@@ -171,8 +176,8 @@ class KalmanFilter:
         
         Args:
             dt: Time step in seconds
-            control_u: Optional control input for velocity (from StormCast)
-            control_v: Optional control input for velocity (from StormCast)
+                control_u: Optional control input for velocity (from StormProb)
+                control_v: Optional control input for velocity (from StormProb)
         
         Returns:
             Predicted state vector
@@ -187,7 +192,7 @@ class KalmanFilter:
         x = self.state.to_array()
         P = self.covariance.to_array()
         
-        # Apply control input if provided (StormCast velocity)
+        # Apply control input if provided (StormProb velocity)
         if control_u is not None and control_v is not None:
             # Update velocity in state to match StormCast prediction
             x[2] = control_u

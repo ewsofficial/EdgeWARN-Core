@@ -68,12 +68,12 @@ MAX_REQUEST_BODY_BYTES = 1048576
 STREAM_CHUNK_BYTES = 1048576
 
 # --- Reserved names ---------------------------------------------------------
-# `stormcast` is the built-in adapter's id. An external installation must not be
+# `stormprob` is the built-in adapter's id. An external installation must not be
 # able to shadow it, because a shadowing module would silently replace the
 # forecast producer the alerts stage consumes.
-RESERVED_MODULE_IDS = frozenset({"stormcast"})
+RESERVED_MODULE_IDS = frozenset({"stormprob", "stormcast"})
 
 # Output keys no external module may claim, matched case-insensitively for
-# display names. `StormCast` is the built-in's `modules` key; `_grid_outputs` is
+# display names. `StormProb` is the built-in's `modules` key; `_grid_outputs` is
 # the legacy grid-module container written by the host.
-RESERVED_OUTPUT_KEYS = frozenset({"StormCast", "_grid_outputs"})
+RESERVED_OUTPUT_KEYS = frozenset({"StormProb", "StormCast", "_grid_outputs"})

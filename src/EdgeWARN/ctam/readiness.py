@@ -109,7 +109,7 @@ CYCLE_STATES = (
     CYCLE_STATE_CATALOG_BUILDING,
     CYCLE_STATE_REQUIREMENTS_EVALUATED,
     CYCLE_STATE_NOT_READY,
-    "stormcast_running",
+    "stormprob_running",
     "external_modules_running",
     "committing",
     "completed",

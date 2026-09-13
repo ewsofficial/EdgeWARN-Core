@@ -219,8 +219,9 @@ def _order(candidates: list[DiscoveredModule]) -> list[DiscoveredModule]:
     sort would give an order that depends on the input sequence. The result here
     is a function of the dependency graph and the ids alone.
 
-    ``stormcast`` is a legal dependency and always precedes external modules, but
-    it is the built-in adapter and is never a member of the result.
+    ``stormprob`` is a legal dependency and always precedes external modules; the
+    legacy ``stormcast`` dependency remains legal during the migration window, but
+    both are built-in adapters and are never members of the result.
     """
     by_id = {c.module_id: c for c in candidates}
     runnable = {c.module_id: c for c in candidates if c.state == STATE_DISCOVERED}

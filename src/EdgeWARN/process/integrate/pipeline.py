@@ -472,11 +472,14 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
     """Commit StormProb inputs, then publish derived JSON and indexes."""
     from EdgeWARN.ctam.publication import CTAMPublicationCoordinator
     from EdgeWARN.stormprob.database import StormProbRepository, clean_projection
+    from EdgeWARN.stormprob.deployment import promoted, rollback
     from .history import CellHistoryManager
 
     projected_cells = [clean_projection(copy.deepcopy(cell)) for cell in cells]
     for cell in projected_cells:
         cell.pop("stormprob", None)
+        if not promoted():
+            (cell.get("modules") or {}).pop("StormProb", None)
     snapshot = CellDataSaver(None, None, None, None, None, None).create_json_structure(timestamp, projected_cells)
     histories = CellHistoryManager(io_manager).prepare_cell_history_updates(projected_cells)
     payloads = {json_path: snapshot, **histories}
@@ -490,8 +493,15 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
                        for item in input_manifest.inputs],
         }
     repository = StormProbRepository()
+    forecasts = []
+    if not rollback():
+        for cell in cells:
+            result = (cell.get("modules") or {}).get("StormProb") or {}
+            if result.get("status") in {"success", "error", "skipped"}:
+                forecasts.extend(result.get("leads", []))
     repository.commit_cycle(str(timestamp), timestamp, cells, manifest_record,
-                            projection_cells=projected_cells, projection_path=json_path)
+                            projection_cells=projected_cells, projection_path=json_path,
+                            forecasts=forecasts or None)
     coordinator = CTAMPublicationCoordinator(fs.DATA_DIR / "ctam" / "transactions")
     coordinator.recover()
     coordinator.publish(payloads, publish_indexes=lambda: _update_api_indexes(projected_cells, remove_old_cells, timestamp), transaction_id=str(timestamp).replace(":", "-"),
@@ -560,6 +570,14 @@ def main(
         "Integration - StormProb Inputs",
         lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),
     )
+    # Forecast inference reads only committed database rows. Commit the input
+    # side of this cycle before CTAM; publication below upgrades the pending
+    # four-lead rows and publishes the derived projections afterward.
+    try:
+        from EdgeWARN.stormprob.database import StormProbRepository
+        StormProbRepository().commit_cycle(str(timestamp), timestamp, result_cells)
+    except Exception as exc:
+        io_manager.write_warning(f"StormProb input commit failed before CTAM: {exc}")
     result_cells = _run_ctam_if_enabled(
         result_cells,
         timestamp,

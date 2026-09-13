@@ -715,8 +715,10 @@ class StormCellTracker:
         
         pred_state = self._prediction_states[cell_id]
         
-        # Get StormCast velocity
-        control_u, control_v = self._get_stormcast_velocity(cell)
+        # Get the 15-minute StormProb velocity. This is a forecast from the
+        # previous committed cycle; current-cycle inference cannot be a control
+        # input because that would create a circular dependency.
+        control_u, control_v = self._get_stormprob_velocity(cell)
         
         # Perform Kalman prediction
         predicted_state = kf.predict(dt_seconds, control_u, control_v)
@@ -801,11 +803,22 @@ class StormCellTracker:
         if cell_id in self._prediction_states:
             self._prediction_states[cell_id].reset()
 
-    def _get_stormcast_velocity(self, cell: Dict) -> Tuple[Optional[float], Optional[float]]:
+    def _get_stormprob_velocity(self, cell: Dict) -> Tuple[Optional[float], Optional[float]]:
+        from EdgeWARN.stormprob.deployment import promoted, rollback
+        if rollback():
+            legacy = (cell.get('modules') or {}).get('StormCast') or {}
+            if legacy.get('status') == 'success':
+                return legacy.get('u'), legacy.get('v')
+        if not promoted():
+            return None, None
         modules = cell.get('modules', {})
-        stormcast = modules.get('StormCast', {})
-        if stormcast.get('status') == 'success':
-            return stormcast.get('u'), stormcast.get('v')
+        result = modules.get('StormProb', {})
+        if result.get('status') == 'success':
+            lead = next((item for item in result.get('leads', [])
+                         if item.get('lead_minutes') == 15), None)
+            if lead:
+                return (float(lead['east_km']) * 1000 / 900,
+                        float(lead['north_km']) * 1000 / 900)
         return None, None
 
     def get_lineage_buffer(self) -> Optional[LineageBuffer]:

@@ -27,7 +27,7 @@
         "catalog_building",
         "requirements_evaluated",
         "not_ready",
-        "stormcast_running",
+        "stormprob_running",
         "external_modules_running",
         "committing",
         "completed",
@@ -91,7 +91,7 @@
             "items": { "type": "string", "pattern": "\\S" }
           },
           "reserved": {
-            "description": "True for the built-in StormCast module, whose ID cannot be shadowed by an external installation.",
+            "description": "True for the built-in StormProb module, whose ID cannot be shadowed by an external installation.",
             "type": "boolean"
           },
           "patch_counts": {

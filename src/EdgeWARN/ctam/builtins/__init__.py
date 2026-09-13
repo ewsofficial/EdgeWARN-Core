@@ -1,5 +1,5 @@
 """Built-in CTAM adapters owned by the CTAM host."""
 
-from .stormcast import BuiltinStormCastAdapter, StormCastCycleService
+from .stormprob import BuiltinStormProbAdapter, StormProbCycleService
 
-__all__ = ["BuiltinStormCastAdapter", "StormCastCycleService"]
+__all__ = ["BuiltinStormProbAdapter", "StormProbCycleService"]
