@@ -92,7 +92,7 @@ class CTAMJsonManager:
         Updates the modules dictionary with new data for a specific module and saves.
         
         Args:
-            module_name: The name of the module (e.g., 'StormCast').
+            module_name: The name of the module (e.g., 'StormProb').
             new_data: A dictionary of new key-value pairs to update within the module's entry.
         """
         target = self.properties

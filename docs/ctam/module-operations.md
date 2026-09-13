@@ -8,7 +8,7 @@ python src/run_edgewarn.py --list-ctam-modules
 ```
 
 Use `--ctam-module-dir` or `EDGEWARN_CTAM_MODULE_DIR` for a packaged module
-root. A missing root is valid and leaves StormCast enabled. Install, upgrade, or
+root. A missing root is valid and leaves StormProb enabled. Install, upgrade, or
 remove a module between cycles; discovery is frozen for each active cycle.
 
 Inspect `<base-dir>/data/ctam/cycles/<cycle-id>/status.json` to determine why a
@@ -22,5 +22,5 @@ publications from `<base-dir>/data/ctam/transactions/` before a later cycle
 touches the same files. Irrecoverable journals move to `quarantine/`; do not
 delete journals manually before collecting them for diagnosis.
 
-`--disable-ctam` disables both StormCast and external modules.
+`--disable-ctam` disables both StormProb and external modules.
 `--disable-ctam-modules` disables only external modules for troubleshooting.

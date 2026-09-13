@@ -304,7 +304,7 @@
                     "max_refl": 58.5,
                     "event_type": "continuing",
                     "properties": {"morphology": "cluster", "p100EchoTop30": 11.2},
-                    "modules": {"StormCast": {"status": "success", "u": 9.634322526, "v": 1.01855566}}
+                    "modules": {"StormProb": {"status": "success", "u": 9.634322526, "v": 1.01855566}}
                   }]
                 },
                 "errors": []
@@ -340,7 +340,7 @@
                     "max_refl": 58.5,
                     "event_type": "continuing",
                     "properties": {"morphology": "cluster", "p100EchoTop30": 11.2},
-                    "modules": {"StormCast": {"status": "success", "u": 9.634322526, "v": 1.01855566}}
+                    "modules": {"StormProb": {"status": "success", "u": 9.634322526, "v": 1.01855566}}
                   }
                 },
                 "errors": []
@@ -432,8 +432,8 @@
                   "returned": 2,
                   "truncated": false,
                   "entries": [
-                    {"id": 146904, "timestamp": "2026-08-05T11:55:00+00:00", "centroid": [35.21, 262.70], "modules": {"StormCast": {"status": "success"}}},
-                    {"id": 146904, "timestamp": "2026-08-05T12:00:00+00:00", "centroid": [35.25, 262.75], "modules": {"StormCast": {"status": "success"}}}
+                    {"id": 146904, "timestamp": "2026-08-05T11:55:00+00:00", "centroid": [35.21, 262.70], "modules": {"StormProb": {"status": "success"}}},
+                    {"id": 146904, "timestamp": "2026-08-05T12:00:00+00:00", "centroid": [35.25, 262.75], "modules": {"StormProb": {"status": "success"}}}
                   ]
                 },
                 "errors": []
@@ -748,7 +748,7 @@
               "code": "forbidden_path",
               "message": "operation path names a key the caller does not own",
               "resource": "stormcells.current",
-              "pointer": "/modules/StormCast/u",
+              "pointer": "/modules/StormProb/u",
               "expected_revision": null,
               "observed_revision": null,
               "limit": null,

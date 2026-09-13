@@ -211,10 +211,9 @@ def test_max_module_id_length_matches_the_frozen_pattern_quantifier():
 def test_reserved_module_ids_is_exactly_the_builtin_adapter():
     """Reserving more ids than the plan states would silently forbid legal names.
 
-    ``stormprob`` is the built-in; ``stormcast`` stays reserved during migration
-    so an external module cannot impersonate the retired producer.
+    ``stormprob`` is the sole built-in and cannot be impersonated externally.
     """
-    assert RESERVED_MODULE_IDS == frozenset({"stormprob", "stormcast"})
+    assert RESERVED_MODULE_IDS == frozenset({"stormprob"})
 
 
 def test_every_reserved_module_id_is_a_legal_module_id():

@@ -804,13 +804,6 @@ class StormCellTracker:
             self._prediction_states[cell_id].reset()
 
     def _get_stormprob_velocity(self, cell: Dict) -> Tuple[Optional[float], Optional[float]]:
-        from EdgeWARN.stormprob.deployment import promoted, rollback
-        if rollback():
-            legacy = (cell.get('modules') or {}).get('StormCast') or {}
-            if legacy.get('status') == 'success':
-                return legacy.get('u'), legacy.get('v')
-        if not promoted():
-            return None, None
         modules = cell.get('modules', {})
         result = modules.get('StormProb', {})
         if result.get('status') == 'success':

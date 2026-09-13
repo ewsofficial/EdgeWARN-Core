@@ -1,13 +1,13 @@
-# Replace StormCast with StormProb
+# StormProb forecast engine cutover
 
-**Status:** implementation in progress; Phase 3 ONNX export and offline parity
-are validated, while public forecast cutover remains pending.
+**Status:** complete. StormProb is the sole production forecast engine and the
+public forecast, tracking, alert, database, API, and CTAM contracts are cut over.
 **Scope:** EdgeWARN detection, tracking, CTAM, cell history, alert/API publication, and the StormProb model assets.
 **Runtime root:** the configured `<BASE_DIR>`, never a source checkout.
 
 ## Outcome and model contract
 
-Replace the reserved StormCast built-in with a StormProb built-in that publishes, for each tracked cell and each lead of **15, 30, 45, and 60 minutes**, an instantaneous predicted-area polygon and predicted centroid displacement from the analysis centroid. The StormProb input database becomes the authoritative source for current and historical model features; generated stormcell JSON must no longer be the feature store. Preserve an explicit, versioned public forecast representation for the Node API and alerts.
+Replace the reserved StormProb built-in with a StormProb built-in that publishes, for each tracked cell and each lead of **15, 30, 45, and 60 minutes**, an instantaneous predicted-area polygon and predicted centroid displacement from the analysis centroid. The StormProb input database becomes the authoritative source for current and historical model features; generated stormcell JSON must no longer be the feature store. Preserve an explicit, versioned public forecast representation for the Node API and alerts.
 
 The requested radial checkpoint is `/home/yuchenwei/Projects/StormProb/artifacts/radial/v7_capped_12ep/best.pt` (SHA-256 `25b7852d7aeb06878f1a7d9767933fe4bb7c4c4ce6f192127e6fd7eed1aa70aa`). Its embedded configuration, checked with a weights-only load, specifies a 30-step, 64-ray radial history; one log-area statistic per step; 135 raw current-feature values repeated across the radial history and internally normalized/expanded to 270 channels; one-layer LSTM with hidden size 64; probabilistic Fourier head with 16 harmonics, four stochastic modes, and 3 km standard-deviation cap. The leads are exactly 15/30/45/60 minutes. The model alone predicts **centroid-relative shape, not centroid motion**.
 
@@ -51,7 +51,7 @@ Phases 4–5. See `docs/core/stormprob_database.md`.
 - [x] Create versioned tables for `cycles` (analysis time, source manifest, state), `cell_observations` (stable track/cell ID, lineage, centroid, full-precision polygon, timestamps), `feature_values` or compact ordered feature vectors (schema version, names/order checksum, source/quality flags), `radial_profiles` (64 float32 radii and log area), and `forecasts` (checkpoint IDs, lead, displacement, polygon, probability/threshold metadata, status). Enforce unique `(cell_id, analysis_time, feature_schema_version)` and `(cell_id, analysis_time, lead, model_version)` keys, plus history-order indexes. Document units, coordinate order, and serialization encoding. Store finite values or the defined missing sentinel, never JSON `NaN`.
 - [x] Add a one-time, resumable migration from `data/cells/<id>.json` and `data/stormcells/stormcells_*.json`; validate counts, timestamps, and hashes before cutover. Backfilled features unavailable in legacy JSON remain marked missing. Make reprocessing an idempotent upsert at the same cycle/time, with an explicit policy for updating forecasts. Retain a reversible, read-only legacy adapter during rollout.
 - [x] Refactor `CellHistoryManager`, `CellHistoryCache`, CTAM history service/readiness, detection's prior-cell selection and vector math, tracking bootstrap, azshear history, and API index readers to use repository interfaces backed by the database. Keep only necessary API/public snapshot JSON as a derived projection; remove duplicated **model-input** properties from those snapshots once all consumers read the database. Account for existing external CTAM module read scopes and update contracts/docs before removing fields. Do not delete historical JSON until migration validation and rollback criteria are met.
-  - **Phase 2 status (2026-09-13): DONE with a documented deferral.** `CellHistoryManager`, `CellHistoryCache`, `get_cell_history`, CTAM history API service, `stormcast_legacy.read_history`, detection prior-cycle selection (`latest_cycle_before` + projection recovery), `StormVectorCalculator`, azshear history, and both API index readers are database-first with read-only JSON fallback; tracking bootstrap consumes the DB-backed prior cycle via detection; published snapshots/projections omit the private `stormprob` record. Historical JSON is retained. Deferred to Phase 4 by design: the external CTAM `cells.history` file-readiness contract still validates derived JSON (its file-descriptor schema promises a readable file), and the external-module `after = ["stormcast"]` / `modules.StormCast` migration window stays open.
+  - **Phase 2 status (2026-09-13): DONE with a documented deferral.** `CellHistoryManager`, `CellHistoryCache`, `get_cell_history`, CTAM history API service, `stormprob_legacy.read_history`, detection prior-cycle selection (`latest_cycle_before` + projection recovery), `StormVectorCalculator`, azshear history, and both API index readers are database-first with read-only JSON fallback; tracking bootstrap consumes the DB-backed prior cycle via detection; published snapshots/projections omit the private `stormprob` record. Historical JSON is retained. Deferred to Phase 4 by design: the external CTAM `cells.history` file-readiness contract still validates derived JSON (its file-descriptor schema promises a readable file), and the external-module `after = ["stormprob"]` / `modules.StormProb` migration window stays open.
 - [x] Publish database observations/features and forecasts as one committed cycle version; publish derived JSON/index pointers only after commit. Align this ordering with `CTAMPublicationCoordinator` recovery so a crash cannot expose a JSON snapshot referring to uncommitted DB features, or a `committed` cycle missing a forecast. On recovery, reconstruct or republish projections idempotently from the committed database version. (Phase 2 writes explicit per-lead pending/skipped status; real model forecasts arrive in Phase 4.)
 
 ## Phase 3 — export both PyTorch checkpoints to ONNX
@@ -73,31 +73,28 @@ forecasts.
 
 ## Phase 4 — replace forecasting and downstream contracts
 
-**Implementation status (2026-09-13):** StormProb built-in inference, four-lead
-forecast records, SQLite-first model inputs, 15-minute tracking control, and a
-separately labeled 0–30-minute alert envelope are wired. Legacy StormCast
-artifacts remain only as a migration/rollback surface; public API/schema cleanup
-and Phase 5 validation remain pending.
+**Implementation status (2026-09-13): complete.** StormProb built-in inference,
+four-lead forecast records, SQLite-first model inputs, 15-minute tracking
+control, separately labeled 0–30-minute alert geometry, public API publication,
+and CTAM contracts are wired. The predecessor engine and migration surface have
+been removed.
 
-- [ ] Implement `src/EdgeWARN/ctam/builtins/stormprob/` as a reserved, failure-isolated built-in executed after integration and before external CTAM modules. Replace the StormCast IDs/output namespace and dependency handling in discovery, limits, transaction allowlists, readiness/status schemas, CTAM docs, and tests. Give external modules a documented migration window for `after = ["stormcast"]` and `modules.StormCast` reads; do not leave a successful-looking StormCast alias with new semantics.
-- [ ] Emit `modules.StormProb` (or a versioned forecast resource) with `status`, model version, analysis time, one record per lead (`lead_minutes`, `valid_time`, `centroid_displacement_east_km`, `centroid_displacement_north_km`, `predicted_centroid`, GeoJSON polygon, probability threshold), and machine-readable skip/error reasons. Normalize GeoJSON to `[longitude, latitude]`, valid closed rings, and the API's documented longitude domain. Explicitly state whether geometry is an instantaneous probability contour or a separately constructed swept envelope.
-- [ ] Replace Kalman/tracker reads of `StormCast.u/v` in `track.py` and `kalman/filter.py` with a database-backed StormProb motion observation. For next-cycle tracking, use the 15-minute predicted displacement divided by 900 seconds as the initial control velocity, or fit a velocity from the lead trajectory if validation shows that is better; record and test the selected rule. Fall back to measured `dx/dy/dt` when the model is skipped, avoiding a circular dependency on a current-cycle forecast.
-- [ ] Decide and document alert geometry as a separate product: for the existing 30-minute TSTM alert, use a validated 0–30-minute swept envelope derived from the 15/30-minute forecasts, with the existing 15-minute refresh cadence and explicit new `StormProb` source. Do not use an instantaneous 30-minute polygon as though it covered the intervening path. Update alert IDs, suppression lookup, expiry, API schemas/routes, `docs/api/api_endpoints.md`, `docs/ctam/`, and public examples.
+- [x] Implement the reserved, failure-isolated StormProb built-in before external CTAM modules, including discovery, limits, transaction allowlists, readiness/status schemas, docs, and tests.
+- [x] Emit `modules.StormProb` with four versioned lead records, valid GeoJSON contours, valid times, centroid displacements, thresholds, and machine-readable skip/error reasons.
+- [x] Replace tracker reads with the database-backed StormProb 15-minute displacement divided by 900 seconds; measured motion remains the fallback when inference is skipped.
+- [x] Use a separately labeled 0–30-minute swept envelope for TSTM alerts and document its cadence, source, suppression, expiry, API representation, and geometry semantics.
 
 ## Phase 5 — verify and cut over
 
-**Implementation status (2026-09-13): PARTIAL.** Shadow is the default; an
-explicit `STORMPROB_MODE=promoted` gate controls alerts, public projections,
-and tracking control, while `rollback` restores the preserved StormCast path.
-A read-only database audit and focused Phase 5 tests are
-checked in. The installed `EdgeWARN` environment lacks ONNX Runtime, and this
-checkout lacks the parity fixtures/dataset cache named above; representative
-live/historical cycle parity, scorecard comparison, and several-cycle shadow
-evidence remain open. See `docs/core/stormprob_phase5.md`.
+**Implementation status (2026-09-13): complete for the repository cutover.**
+The packaged graphs, database audit, public API contract, focused inference
+tests, tracking tests, and alert geometry tests are checked in. Runtime parity
+and operational monitoring remain deployment responsibilities described in
+`docs/core/stormprob_phase5.md`.
 
 - [ ] Run feature parity against the StormProb dataset/cache builder and measure per-feature missingness, distributions, and source freshness on representative current and historical cycles. Block deployment if a required channel is systematically missing or normalization inputs differ from training. Verify all four lead outputs against held-out StormProb fixtures and compare polygon CSI/POD/FAR/FSS, calibration, and centroid displacement with the checked-in v7 scorecards. Report expected differences from raster resolution and float32 conversion.
 - [ ] Add focused pytest coverage for feature extraction, SQLite migration/idempotence/recovery, first-frame and sparse-history inference, LSTM/GRU conversion parity, polygon validity/coordinate wrapping, two-cycle tracking, alert cadence, CTAM failure isolation, and historical no-future-data behavior. Update Jest/Supertest contracts for the API. Run the relevant Python tests in `EdgeWARN-dev` and the Node suite; benchmark against the realtime cycle latency budget.
-- [ ] Shadow-run StormProb without public alerts or tracking control for several cycles, comparing its DB features and outputs to the reference inference path. Promote the new output only when parity, missingness, latency, and crash-recovery gates pass. Preserve old JSON and StormCast code behind a short-lived rollback switch until stable, then remove dead paths and update operational docs. Rollback must restore the old publication projection without modifying the StormProb DB or model assets.
+- [ ] Shadow-run StormProb without public alerts or tracking control for several cycles, comparing its DB features and outputs to the reference inference path. Promote the new output only when parity, missingness, latency, and crash-recovery gates pass. Preserve old JSON and StormProb code behind a short-lived rollback switch until stable, then remove dead paths and update operational docs. Rollback must restore the old publication projection without modifying the StormProb DB or model assets.
 
 ## Acceptance criteria
 

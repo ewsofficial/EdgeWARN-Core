@@ -34,7 +34,7 @@ and then fails. The plan's per-module state set is `discovered`, `invalid`,
 
 | Limit | Value | Unit | Enforced at | On excess |
 | --- | --- | --- | --- | --- |
-| Maximum external module count | 8 | modules | Discovery | Modules past the 8th in stable dependency-then-ID order are recorded `invalid` with an over-capacity reason. StormCast is not counted. |
+| Maximum external module count | 8 | modules | Discovery | Modules past the 8th in stable dependency-then-ID order are recorded `invalid` with an over-capacity reason. StormProb is not counted. |
 | Minimum manifest `timeout_seconds` | 1 | seconds | Discovery | Manifest rejected, module `invalid`. |
 | Maximum manifest `timeout_seconds` | 30 | seconds | Discovery | Manifest rejected, module `invalid`. |
 | Default `timeout_seconds` when omitted | 10 | seconds | Discovery | Not applicable. |
@@ -80,17 +80,17 @@ CTAM does not get the whole cycle. It is stage 6 of 9 inside integration
 (`docs/core/integration.md:52-62`), and integration as a whole is asserted to
 finish in under 30 seconds at `benchmarks/test_performance.py:182`. The
 current CTAM stage is asserted at under 2 seconds
-(`benchmarks/test_performance.py:402`) and StormCast alone at under 1
+(`benchmarks/test_performance.py:402`) and StormProb alone at under 1
 second (`benchmarks/test_performance.py:423`).
 
 The CTAM stage ceiling is set to 30 seconds. CTAM runs inside integration, so it
 cannot be permitted to exceed the budget of the stage that contains it, and 30
 seconds still leaves 90 seconds of the cadence for the other eight integration
-stages plus detection and ingest. With StormCast's existing 2 seconds reserved,
+stages plus detection and ingest. With StormProb's existing 2 seconds reserved,
 28 seconds remain for external modules.
 
 Read the 2-second figure with care. The former in-package registry did not
-provide a stable module API, so StormCast is now the only bundled built-in and
+provide a stable module API, so StormProb is now the only bundled built-in and
 all optional modules use manifests. The stage-level benchmark reads
 `data.get("cells", [])` at `benchmarks/test_performance.py:381`, but the
 snapshot envelope key is `features`
@@ -115,7 +115,7 @@ inside the stage ceiling. At the 10-second default timeout only two modules fit,
 which is intentional: the count cap bounds discovery and status work, and the
 deadline bounds wall-clock cost.
 
-For reference, the base package ships one reserved built-in, StormCast.
+For reference, the base package ships one reserved built-in, StormProb.
 
 ### Timeout bounds
 
@@ -176,8 +176,8 @@ the entire entry, including everything detection and integration already wrote.
 The per-operation payload limit is therefore set to 16384 bytes, roughly 40
 percent of that per-entry allowance, which leaves room for the existing
 detection and enrichment content plus a second module. 16 KiB is also 16 times
-the largest measured module payload: the golden StormCast success output at
-`tests/ctam_baseline/stormcast_success_with_history.json` is 1004 bytes when
+the largest measured module payload: the golden StormProb success output at
+`tests/core/test_stormprob_phase5.py` is 1004 bytes when
 serialized compactly with the baseline harness's `@tuple` wrappers removed.
 
 The remaining three numbers follow arithmetically:
@@ -193,15 +193,15 @@ The remaining three numbers follow arithmetically:
   stormcell operation plus one history operation per cell, 2 * 200 = 400, plus
   staged alerts.
 
-Depth is set to 8. The measured depth of the StormCast payload below its
-namespace root is 4 (`modules.StormCast` to `forecast_cones` to an element to
+Depth is set to 8. The measured depth of the StormProb payload below its
+namespace root is 4 (`modules.StormProb` to `forecast_cones` to an element to
 `center` to a coordinate), computed from
-`tests/ctam_baseline/stormcast_success_with_history.json`. Existing enrichment
+`tests/core/test_stormprob_phase5.py`. Existing enrichment
 reaches `properties.wind_field.u1000`, two levels below `properties`, built by
 `_set_nested` at `src/EdgeWARN/process/integrate/integrate_rap.py:169-180`. 8 is
 twice the deepest real producer.
 
-Field count is set to 256 leaf values per operation value. The StormCast payload
+Field count is set to 256 leaf values per operation value. The StormProb payload
 has 9 top-level keys and 51 leaf values. The floor the limit must clear is the
 existing `properties` container, which `config/integration.yaml` already fills
 with 25 `stats_datasets` keys (`config/integration.yaml:35-61`), 40
@@ -245,15 +245,13 @@ than 120 minutes of entries.
 which covers a cell tracked continuously for four hours. It is a read-side
 convenience bound for external modules, not a claim about file contents.
 
-**StormCast must be exempt from this cap.** StormCast builds its motion track
-from the entire history file: it calls `history_cache.get(cell_id)` with no
-limit at `src/EdgeWARN/ctam/modules/StormCast/__init__.py:242`, and
-`CellHistoryCache.get` returns the full list when `limit` is `None`
-(`src/EdgeWARN/ctam/util/history_cache.py:11,36-39`). Applying a 120-entry cap
+**StormProb must be exempt from this cap.** StormProb builds its motion track
+from the full database-backed feature history through its host-owned repository.
+Applying a 120-entry cap
 to the built-in adapter would silently shorten the track for a long-lived cell
 and change forecast output, which is exactly the regression the Phase 0 golden
 fixtures exist to catch. Phase 5 must either exempt the built-in adapter or
-raise this bound; it must not quietly clamp StormCast.
+raise this bound; it must not quietly clamp StormProb.
 
 ### Streamed file size
 
@@ -304,8 +302,8 @@ repository. Each needs a decision before the phase that depends on it.
 
 2. **`min_history_entries = 2`** (`plans/modular-ctam-internal-api-plan.md:285`)
    is a requirement floor, and it is fine. The problem is the paired notion of a
-   bounded history window: StormCast reads unbounded history today and nothing
-   trims an active cell's history, so a history cap is a StormCast behavior
+   bounded history window: StormProb reads unbounded history today and nothing
+   trims an active cell's history, so a history cap is a StormProb behavior
    change unless the built-in adapter is exempted. See the history section above.
 
 3. **The 8 MiB public JSON artifact ceiling is not mentioned anywhere in the

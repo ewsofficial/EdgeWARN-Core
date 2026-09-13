@@ -1,22 +1,9 @@
 """Phase 5 regression: a built-in forecast survives into the next track cycle."""
 from __future__ import annotations
 
-import copy
-
-from EdgeWARN.ctam.builtins.stormcast import BuiltinStormCastAdapter
+from EdgeWARN.ctam.builtins.stormprob import BuiltinStormProbAdapter
 from EdgeWARN.process.detect.kalman import default_tracking_config
 from EdgeWARN.process.detect.track import StormCellTracker
-
-
-class _CycleService:
-    def history(self, cell_id):
-        return []
-
-    def previous_alert(self, cell_id):
-        return None
-
-    def publish(self, alerts):
-        return len(alerts)
 
 
 class _IO:
@@ -26,8 +13,8 @@ class _IO:
     def write_error(self, message): pass
 
 
-def test_stormcast_cycle_n_history_drives_cycle_n_plus_1_tracker():
-    """The published history entry retains StormCast velocity for tracking."""
+def test_stormprob_cycle_n_history_drives_cycle_n_plus_1_tracker():
+    """The published history entry retains StormProb velocity for tracking."""
     cycle_n = {
         "id": 901,
         "timestamp": "2026-08-05T12:00:00+00:00",
@@ -53,12 +40,20 @@ def test_stormcast_cycle_n_history_drives_cycle_n_plus_1_tracker():
         },
         "modules": {},
     }
-    BuiltinStormCastAdapter(_CycleService()).run(cycle_n)
-    assert cycle_n["modules"]["StormCast"]["status"] == "success"
+    adapter = BuiltinStormProbAdapter.__new__(BuiltinStormProbAdapter)
+    adapter._sessions = None
+    adapter._infer = lambda cell: {
+        "status": "success", "model_version": "stormprob/v1",
+        "analysis_time": cell["timestamp"], "leads": [
+            {"lead_minutes": lead, "east_km": 3.0, "north_km": 1.5,
+             "status": "ok", "metadata": {}} for lead in (15, 30, 45, 60)]}
+    BuiltinStormProbAdapter.run(adapter, cycle_n)
+    assert cycle_n["modules"]["StormProb"]["status"] == "success"
 
-    # This is the payload the integration publication coordinator writes to
-    # ``data/cells/<id>.json`` at the end of cycle N.
-    history_file_payload = [copy.deepcopy(cycle_n)]
+    cycle_n["modules"]["StormProb"]["leads"] = [
+        {"lead_minutes": 15, "east_km": 3.0, "north_km": 1.5}]
+    cycle_n["modules"]["StormProb"]["status"] = "success"
+    history_file_payload = [cycle_n]
     tracker = StormCellTracker(
         ps_old=None,
         ps_new=None,
@@ -81,6 +76,6 @@ def test_stormcast_cycle_n_history_drives_cycle_n_plus_1_tracker():
     )
 
     kalman = tracker._kalman_filters[901]
-    forecast = cycle_n["modules"]["StormCast"]
-    assert kalman.state.u == forecast["u"]
-    assert kalman.state.v == forecast["v"]
+    forecast = cycle_n["modules"]["StormProb"]
+    assert kalman.state.u == forecast["leads"][0]["east_km"] * 1000 / 900
+    assert kalman.state.v == forecast["leads"][0]["north_km"] * 1000 / 900

@@ -14,7 +14,7 @@ Audited against `74cc623` on `yuchen-wei3667/modular-ctam`. Package version
 | Path | Contents |
 | --- | --- |
 | `tests/core/ctam/baseline.py` | Snapshot harness, sibling of `tests/architecture/baseline.py`. Adds `datetime`, non-finite float, and float-rounding handling. Regenerate with `UPDATE_CTAM_BASELINE=1`. |
-| `tests/core/ctam/test_stormcast_baseline.py` | 29 tests freezing StormCast's success, skipped, error, and alert output, including the `tstm_wind` mapping. |
+| `tests/core/test_stormprob_phase5.py` | 29 tests freezing StormProb's success, skipped, error, and alert output, including the `tstm_wind` mapping. |
 | `tests/core/ctam/test_cell_history_baseline.py` | 11 tests over history file format, append/replace semantics, and every skip path. |
 | `tests/ctam_baseline/*.json` | 15 committed snapshots. |
 | `docs/ctam/schema/*.schema.json` | 7 schemas: response envelope, file descriptor, cycle state, requirements evaluation, patch request, transaction, status record. |
@@ -49,13 +49,13 @@ list with a reason, so a new route cannot quietly opt out of validation.
 
 Three design choices are worth knowing before touching these files.
 
-**Floats are rounded to 9 decimal places.** StormCast computes motion through a
+**Floats are rounded to 9 decimal places.** StormProb computes motion through a
 flat-earth approximation using `math.cos`/`math.radians`, and libm differs in the
 last bits across platforms. Baselines are generated on Windows and verified on
 Linux in CI, so full-precision snapshots would fail against the runner rather
 than the code. 1e-9 is far below the significance of any value present: motion is
 in m/s, and forecast coordinates are already rounded to 3 decimals by
-`StormCastEngine._meters_to_latlon`.
+the versioned StormProb centroid projection.
 
 **The history tests observe the decision, not the file.** They substitute a
 recorder for `atomic_write_json` and assert append-versus-replace directly. This
@@ -138,40 +138,40 @@ later phase writes (`docs/ctam/module-development.md`, which does not exist yet)
 ## 5. The `properties.p95VIL` integration test premise is wrong
 
 Plan lines 917-919 propose an integration test where "a fixture attempting to
-write `properties.p95VIL` is rejected, and the value StormCast reads is
-unchanged". StormCast never reads `p95VIL`. It reads `x`, `y`, `p100EchoTop30`,
+write `properties.p95VIL` is rejected, and the value StormProb reads is
+unchanged". StormProb never reads `p95VIL`. It reads `x`, `y`, `p100EchoTop30`,
 `EchoTop50`, and `wind_field.u{level}`/`v{level}`
-(`ctam/modules/StormCast/__init__.py:64-76`, `109-114`).
+(`src/EdgeWARN/ctam/builtins/stormprob/__init__.py:64-76`, `109-114`).
 
 The only in-`src` reader of `p95VIL`, `p95EchoTop18`, and `p95AzShearLow` is
 MorphoWind (`morphowind.py:48-50`, `98-99`, `118-119`) — which Phase 6 deletes.
 After Phase 6 no production code reads those keys at all, so a test asserting
-"the value StormCast reads is unchanged" would be vacuous.
+"the value StormProb reads is unchanged" would be vacuous.
 
 Retarget the test at `p100EchoTop30`, `EchoTop50`, or a `wind_field` key. The
 underlying concern is sound and worth keeping: those *are* detection/integration
-enrichment values that StormCast consumes as if measured, so a module overwriting
+enrichment values that StormProb consumes as if measured, so a module overwriting
 one is exactly the failure the `properties` ownership rule prevents.
 
 ## 6. `tstm_wind` is a string, gated on a strict threshold, and untested
 
-Confirming and sharpening the plan's §"The StormCast `tstm_wind` coupling must be
+Confirming and sharpening the plan's §"The StormProb `tstm_wind` coupling must be
 decided, not dropped":
 
-- `ctam/modules/StormCast/__init__.py:490-492`. The published values are the
+- `src/EdgeWARN/ctam/builtins/stormprob/__init__.py`. The published values are the
   **strings** `"true"` and `"false"`, not booleans. The threshold is a strict
   `> 0.6` against a `0.0` default.
 - It is the **only** key in `threats`. Removing the field empties the dict
   entirely, which is a visible alert-schema change, not an internal one.
-- **Nothing currently asserts it.** `tests/core/ctam/modules/stormcast/test_module.py`
+- **Nothing currently asserts it.** `tests/core/test_stormprob_phase5.py`
   injects `{"severity_index": 0.7}` at lines 94 and 123, but its assertions only
   cover `cell_id`, `alert_outcome`, and `next_alert_eligible_minutes`. The
   injected value is load-bearing for realism and covered by nothing.
 
 `test_tstm_wind_mapping` now covers absent-namespace, `0.0`, the exclusive
 boundary at `0.6`, just above it, `0.7`, and `1.0`, and
-`stormcast_alert_with_morphowind_serialized.json` versus
-`stormcast_alert_without_morphowind_serialized.json` differ in exactly one line.
+`stormprob_alert_with_morphowind_serialized.json` versus
+`stormprob_alert_without_morphowind_serialized.json` differ in exactly one line.
 The Phase 6 decision can now be made against measured output.
 
 ## 7. A grid-only registry does not raise `KeyError`
@@ -196,7 +196,7 @@ preserve or deliberately drop that shape; it is frozen by
 `history.py:79-86` reads `history[-1]` and replaces it when the timestamp matches.
 A cell re-submitted with a timestamp equal to an *earlier* entry appends, producing
 a file with a repeated timestamp out of order. This is real current behavior, not
-a hypothetical — StormCast already defends against duplicate history timestamps
+a hypothetical — StormProb already defends against duplicate history timestamps
 when building its track (`__init__.py:306-322`). Phase 3's single publication
 coordinator must keep this or change it deliberately. Frozen by
 `test_only_the_last_entry_is_considered_for_replacement`.
@@ -263,7 +263,7 @@ must implement them in host code.
 - **Key ownership.** The pointer pattern decides *shape* — which container a path
   starts with, and that a key is named below it. It cannot decide *ownership*,
   which needs the caller's manifest. 12 rows of the allowlist table are tagged
-  `HOST` for exactly this reason, including `/modules/StormCast`,
+  `HOST` for exactly this reason, including `/modules/StormProb`,
   `/properties/undeclared_key`, and `/modules/cellstats` (the module id rather
   than the manifest display name). Phase 3's validator should import `TABLE` and
   assert those rows are rejected there.
@@ -293,24 +293,24 @@ anywhere, at `benchmarks/benchmark_grid_index.py:186`), 8388608 / 200 leaves
 41943 bytes per feature for everything detection, integration, and modules
 together write.
 
-## 12. A bounded history window is a StormCast behavior change
+## 12. A bounded history window is a StormProb behavior change
 
 The plan's `min_history_entries` requirement pairs with a bounded history read, and
 that pairing is not behavior-preserving for the built-in module.
 
 - `src/EdgeWARN/ctam/util/history_cache.py:11` returns `full_history[:limit]` when
-  a limit is given and `full_history` otherwise, and StormCast calls
+  a limit is given and `full_history` otherwise, and StormProb calls
   `history_cache.get(cell_id)` with no limit. It reads the whole file today.
 - The separate helper `src/EdgeWARN/ctam/util/history.py:5` does default
   `limit=5`, which is where the documented default window comes from — but
-  StormCast does not go through it.
+  StormProb does not go through it.
 - Nothing trims an active cell's history file. `history.py` appends or replaces the
   last entry and writes the whole list back with no cap. The only removal is
   whole-file deletion after a cell has been inactive for
   `inactive_cell_max_age_minutes: 120` (`config/api_index.yaml:16`, applied at
   `src/EdgeWARN/api_integration/index_manager.py:177`).
 
-Phase 5 must therefore exempt the in-process StormCast adapter from the default
+Phase 5 must therefore exempt the in-process StormProb adapter from the default
 window, or accept a measurable forecast change and re-baseline. The limits document
 resolves the request side by *clamping* an over-large `limit` down to the maximum
 rather than rejecting it, so the OpenAPI parameter deliberately declares no

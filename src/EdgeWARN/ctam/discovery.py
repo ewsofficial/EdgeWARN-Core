@@ -219,9 +219,8 @@ def _order(candidates: list[DiscoveredModule]) -> list[DiscoveredModule]:
     sort would give an order that depends on the input sequence. The result here
     is a function of the dependency graph and the ids alone.
 
-    ``stormprob`` is a legal dependency and always precedes external modules; the
-    legacy ``stormcast`` dependency remains legal during the migration window, but
-    both are built-in adapters and are never members of the result.
+    ``stormprob`` is a legal dependency and always precedes external modules; it
+    is a built-in adapter and is never a member of the result.
     """
     by_id = {c.module_id: c for c in candidates}
     runnable = {c.module_id: c for c in candidates if c.state == STATE_DISCOVERED}
@@ -327,7 +326,7 @@ def _apply_capacity(ordered: list[DiscoveredModule]) -> list[DiscoveredModule]:
     The limits document ties the cap to "stable dependency-then-ID order", so the
     order has to exist before the tail can be identified. Which module is dropped
     is then a property of the installed set, not of directory iteration order.
-    StormCast is not counted: it is the built-in, not an installed module.
+    StormProb is not counted: it is the built-in, not an installed module.
     """
     result: list[DiscoveredModule] = []
     admitted = 0

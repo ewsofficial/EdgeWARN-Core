@@ -78,7 +78,7 @@ required = true
 scope = "cycle"
 entrypoint = ["{python}", "main.py", "--verbose"]
 timeout_seconds = 12
-after = ["stormcast", "other"]
+after = ["stormprob", "other"]
 
 [[requires]]
 selector = "stormcells.current"
@@ -122,7 +122,7 @@ def test_fully_populated_manifest_round_trips(tmp_path):
     assert manifest.scope == "cycle"
     assert manifest.entrypoint == ("{python}", "main.py", "--verbose")
     assert manifest.timeout_seconds == 12
-    assert manifest.after == ("stormcast", "other")
+    assert manifest.after == ("stormprob", "other")
     assert manifest.directory == tmp_path / "cellstats"
     assert manifest.manifest_path == manifest_path
 
@@ -281,9 +281,9 @@ def test_id_not_matching_its_directory_is_rejected(tmp_path):
 
 
 def test_reserved_id_cannot_be_shadowed_by_an_installation(tmp_path):
-    body = replace(MINIMAL, 'id = "cellstats"', 'id = "stormcast"')
+    body = replace(MINIMAL, 'id = "cellstats"', 'id = "stormprob"')
     with pytest.raises(ManifestError) as excinfo:
-        parse_manifest(write_module(tmp_path, "stormcast", body))
+        parse_manifest(write_module(tmp_path, "stormprob", body))
     assert "reserved" in str(excinfo.value)
 
 
@@ -323,7 +323,7 @@ def test_name_with_illegal_characters_is_rejected(tmp_path):
     assert "output key" in str(excinfo.value)
 
 
-@pytest.mark.parametrize("candidate", ["StormCast", "stormcast", "STORMCAST", "_grid_outputs"])
+@pytest.mark.parametrize("candidate", ["StormProb", "stormprob", "STORMPROB", "_grid_outputs"])
 def test_name_colliding_with_a_reserved_output_key_is_rejected(tmp_path, candidate):
     """Case-insensitive, because a case-only difference is not a distinct key.
 
@@ -520,14 +520,14 @@ def test_flag_arguments_are_not_treated_as_paths(tmp_path):
 
 
 def test_after_must_be_an_array(tmp_path):
-    body = 'after = "stormcast"\n' + MINIMAL
+    body = 'after = "stormprob"\n' + MINIMAL
     with pytest.raises(ManifestError) as excinfo:
         parse_manifest(write_module(tmp_path, "cellstats", body))
     assert "after" in str(excinfo.value)
 
 
 def test_after_element_with_an_illegal_id_is_rejected(tmp_path):
-    body = 'after = ["StormCast"]\n' + MINIMAL
+    body = 'after = ["StormProb"]\n' + MINIMAL
     with pytest.raises(ManifestError) as excinfo:
         parse_manifest(write_module(tmp_path, "cellstats", body))
     assert "legal module id" in str(excinfo.value)
@@ -542,9 +542,9 @@ def test_self_reference_in_after_is_rejected(tmp_path):
 
 
 def test_after_is_deduplicated_but_order_is_preserved(tmp_path):
-    body = 'after = ["stormcast", "other", "stormcast"]\n' + MINIMAL
+    body = 'after = ["stormprob", "other", "stormprob"]\n' + MINIMAL
     assert parse_manifest(write_module(tmp_path, "cellstats", body)).after == (
-        "stormcast",
+        "stormprob",
         "other",
     )
 
@@ -864,7 +864,7 @@ REJECTED_POINTERS = (
     ("stormcells.current", "/features/*/modulesX/CellStats", "container name must match exactly"),
     # Another module's key, or a reserved one.
     ("stormcells.current", "/features/*/modules/SomeOtherModule", "another module's namespace"),
-    ("stormcells.current", "/features/*/modules/StormCast", "reserved built-in namespace"),
+    ("stormcells.current", "/features/*/modules/StormProb", "reserved built-in namespace"),
     ("stormcells.current", "/features/*/modules/_grid_outputs", "reserved legacy key"),
     (
         "stormcells.current",
@@ -874,7 +874,7 @@ REJECTED_POINTERS = (
     (
         "stormcells.current",
         "/features/*/properties/p95VIL",
-        "an enrichment value StormCast consumes as if measured",
+        "an enrichment value StormProb consumes as if measured",
     ),
     ("stormcells.current", "/features/*/properties/severity", "missing the module-id prefix"),
     (

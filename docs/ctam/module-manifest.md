@@ -30,8 +30,7 @@ directory, because supervisor children are spawned with no argv and no
 predictable CWD; a bare `ctam_modules` must name one fixed tree or the parent
 and its children would scan different ones. A root that is a regular file is a
 misconfiguration and raises; a missing root is an empty external module set,
-which is a supported StormProb-only installation. The legacy `stormcast`
-dependency remains accepted during the migration window.
+which is a supported StormProb-only installation.
 
 ## Discovery model
 
@@ -47,8 +46,7 @@ stable dependency-then-ID order:
 | `skipped_disabled` | Manifest is valid but sets `enabled = false`. |
 
 `stormprob` is the active reserved built-in id; an external manifest may depend
-on it but cannot claim it. Legacy `stormcast` dependencies remain legal during
-the migration window but do not select the forecast implementation. Two module
+on it but cannot claim it. Two module
 ids differing only by case invalidate **both** — the
 old registry silently picked a winner, which is precisely the failure this model
 exists to remove.
@@ -59,7 +57,7 @@ exists to remove.
 | --- | --- | --- | --- |
 | `schema_version` | int | — required | Must be `1` (`src/EdgeWARN/ctam/limits.py:33`). |
 | `id` | string | — required | Lowercase letter/digit start; `[a-z0-9_-]` thereafter, 1–128 chars (`manifest.py:41`). Must equal the containing directory name. Reserved ids rejected. |
-| `name` | string | — required | Display name, becomes `modules.<name>`. Letter/digit start; `[A-Za-z0-9_-]`, 1–64 chars. Case-insensitively reserved names (`StormProb`, `StormCast`, `_grid_outputs`) rejected (`limits.py:74`). |
+| `name` | string | — required | Display name, becomes `modules.<name>`. Letter/digit start; `[A-Za-z0-9_-]`, 1–64 chars. Case-insensitively reserved names (`StormProb`, `_grid_outputs`) rejected (`limits.py:74`). |
 | `version` | string | — required | Three-part `X.Y.Z` (`manifest.py:43`). |
 | `api_version` | string | — required | Digits only; must be `"1"` (`manifest.py:45`). |
 | `enabled` | bool | `true` | `false` means `skipped_disabled` at discovery. |
@@ -67,7 +65,7 @@ exists to remove.
 | `scope` | string | `"stormcells"` | `stormcells` or `cycle`. |
 | `entrypoint` | string array | — required | Argument vector, never a shell string. Only `{python}` is expanded. Absolute paths, shell metacharacters, and paths escaping the module directory are rejected at discovery (`manifest.py:494`). |
 | `timeout_seconds` | int | `10` | Bounded 1–30 seconds (`limits.py:46`). |
-| `after` | string array | `[]` | Module ids that must run first; `stormprob` is always legal and precedes external modules. Legacy `stormcast` is accepted during migration. Self-dependency rejected here; cycles are detected by discovery. |
+| `after` | string array | `[]` | Module ids that must run first; `stormprob` is always legal and precedes external modules. Self-dependency rejected here; cycles are detected by discovery. |
 | `[[requires]]` | table list | `[]` | Declared inputs; see below. |
 | `[[writes]]` | table list | — one or more required | Declared output locations; see below. |
 
@@ -134,7 +132,7 @@ required = false
 scope = "stormcells"
 entrypoint = ["{python}", "main.py"]
 timeout_seconds = 10
-after = ["stormcast"]
+after = ["stormprob"]
 
 [[requires]]
 selector = "stormcells.current"

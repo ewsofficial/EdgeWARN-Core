@@ -63,7 +63,7 @@ def make_cell(timestamp=TS_B, cell_id=CELL_ID, **overrides):
         "centroid": [35.25, 262.75],
         "max_refl": 58.5,
         "properties": {"p100EchoTop30": 11.5},
-        "modules": {"StormCast": {"status": "success"}},
+        "modules": {"StormProb": {"status": "success"}},
     }
     if timestamp is None:
         del cell["timestamp"]
@@ -100,7 +100,7 @@ def test_history_entry_is_the_whole_cell_including_modules(history_env):
     manager.update_cell_histories([make_cell()])
 
     entry = writes[0][1][0]
-    assert entry["modules"] == {"StormCast": {"status": "success"}}
+    assert entry["modules"] == {"StormProb": {"status": "success"}}
     assert entry["timestamp"] == TS_B
 
 
@@ -140,7 +140,7 @@ def test_only_the_last_entry_is_considered_for_replacement(history_env):
 
     ``history.py`` compares only ``history[-1]``. This is a real edge in the
     current behavior, and the plan's single publication coordinator must either
-    keep it or change it deliberately -- StormCast already has to defend against
+    keep it or change it deliberately -- StormProb already has to defend against
     duplicate history timestamps when it builds its track.
     """
     manager, cell_dir, writes = history_env

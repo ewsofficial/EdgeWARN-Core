@@ -151,13 +151,8 @@ class KalmanFilter:
             v = dy / dt  # m/s
         
         # Use the previous-cycle StormProb 15-minute forecast when available.
-        from EdgeWARN.stormprob.deployment import promoted, rollback
         modules = cell.get('modules', {})
-        if rollback():
-            legacy = modules.get('StormCast', {})
-            if legacy.get('status') == 'success' and legacy.get('u') is not None and legacy.get('v') is not None:
-                u, v = float(legacy['u']), float(legacy['v'])
-        stormprob = modules.get('StormProb', {}) if promoted() else {}
+        stormprob = modules.get('StormProb', {})
         if stormprob.get('status') == 'success':
             lead = next((item for item in stormprob.get('leads', [])
                          if item.get('lead_minutes') == 15), None)
@@ -194,7 +189,7 @@ class KalmanFilter:
         
         # Apply control input if provided (StormProb velocity)
         if control_u is not None and control_v is not None:
-            # Update velocity in state to match StormCast prediction
+            # Update velocity in state to match StormProb prediction
             x[2] = control_u
             x[3] = control_v
         

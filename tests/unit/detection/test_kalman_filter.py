@@ -186,11 +186,11 @@ class TestKalmanFilter:
         assert abs(kf.state.lon - pred_lon) < 0.001
     
     def test_control_input(self):
-        """Test prediction with StormCast control input."""
+        """Test prediction with StormProb control input."""
         kf = KalmanFilter()
         kf.initialize(lat=35.0, lon=-97.0, u=0.0, v=0.0)
         
-        # Predict with control input (StormCast velocity)
+        # Predict with control input (StormProb velocity)
         predicted = kf.predict(dt=120.0, control_u=15.0, control_v=10.0)
         
         # Velocity should be updated to control input
@@ -358,7 +358,6 @@ class TestKalmanFilterWithCell:
             }
         }
         
-        monkeypatch.setenv('STORMPROB_MODE', 'promoted')
         kf = KalmanFilter()
         kf.initialize_from_cell(cell)
         
@@ -366,17 +365,6 @@ class TestKalmanFilterWithCell:
         assert kf.state.u == 15.0
         assert kf.state.v == 10.0
 
-        monkeypatch.setenv('STORMPROB_MODE', 'shadow')
-        shadow = KalmanFilter()
-        shadow.initialize_from_cell(cell)
-        assert shadow.state.u == 12.5
-        assert shadow.state.v == pytest.approx(800 / 120)
-
-        monkeypatch.setenv('STORMPROB_MODE', 'rollback')
-        cell['modules']['StormCast'] = {'status': 'success', 'u': 8.0, 'v': -4.0}
-        legacy = KalmanFilter()
-        legacy.initialize_from_cell(cell)
-        assert (legacy.state.u, legacy.state.v) == (8.0, -4.0)
 
 
 if __name__ == '__main__':

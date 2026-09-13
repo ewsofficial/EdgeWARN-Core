@@ -1,7 +1,7 @@
 """Snapshot harness for Phase 0 of the modular CTAM internal API plan.
 
 These snapshots freeze the *observable output* of today's CTAM framework --
-StormCast's per-cell payload, its alert payload, the stormcell snapshot shape,
+StormProb's per-cell payload, its alert payload, the stormcell snapshot shape,
 and cell-history semantics -- so that later phases can prove the move to an
 out-of-process internal API is behavior-preserving. Regenerate with::
 
@@ -16,13 +16,13 @@ payloads require: ``datetime`` values (alert effective/expiry times), non-finite
 floats (``max_refl`` and ``centroid`` are ``NaN`` for a degenerate cell), and
 float rounding.
 
-Floats are rounded to ``_FLOAT_PLACES``. StormCast's motion is computed through
+Floats are rounded to ``_FLOAT_PLACES``. StormProb's motion is computed through
 ``math.cos``/``math.radians`` in a flat-earth approximation, and libm differs in
 the last bits between platforms. Baselines are generated on Windows and verified
 on Linux in CI, so full-precision floats would produce failures that track the
 runner rather than the code. 1e-9 is far below the significance of any value
 here: motion is m/s, and forecast lat/lon are already rounded to 3 decimals by
-``StormCastEngine._meters_to_latlon``.
+the versioned StormProb centroid projection.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ _FLOAT_PLACES = 9
 def requires(*modules: str) -> None:
     """Skip when a scientific dependency is absent.
 
-    ``EdgeWARN/__init__.py`` pulls in xarray, and StormCast's forecast path
+    ``EdgeWARN/__init__.py`` pulls in xarray, and StormProb's forecast path
     imports shapely, so these tests need the full ``EdgeWARN-dev`` environment.
     """
     for module in modules:
@@ -91,7 +91,7 @@ def normalize(value):
 
     if isinstance(value, datetime):
         # Normalize to UTC so a snapshot does not encode the runner's offset,
-        # but keep naive values distinguishable -- StormCast falls back to
+        # but keep naive values distinguishable -- StormProb falls back to
         # ``datetime.now()`` (naive) when a timestamp is unparseable, and that
         # distinction is exactly what a Phase 5 regression would blur.
         if value.tzinfo is None:

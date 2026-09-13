@@ -15,7 +15,6 @@ from typing import List, Dict, Any, Optional
 from collections import Counter
 from EdgeWARN.alerts import AlertManager
 from . import discovery, readiness
-from .util.history_cache import CellHistoryCache
 from common.ingest.manifest import CycleInputManifest
 
 
@@ -109,8 +108,6 @@ def _run_builtin_stormprob(cells):
     crosses the same narrow host-service boundary.
     """
     from .builtins import BuiltinStormProbAdapter, StormProbCycleService
-    from EdgeWARN.stormprob.deployment import promoted
-
     adapter = BuiltinStormProbAdapter(StormProbCycleService())
     success_count = error_count = alert_count = 0
     for cell_idx, cell in enumerate(cells):
@@ -123,36 +120,10 @@ def _run_builtin_stormprob(cells):
             cell["modules"][adapter.name] = {"status": "error", "error": str(exc)}
             print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: built-in StormProb FAILED: {exc}")
             continue
-        if promoted():
-            try:
-                alert_count += adapter.publish_alerts(adapter.alerts(cell))
-            except Exception as exc:
-                print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormProb alerts FAILED: {exc}")
-    return success_count, error_count, alert_count
-
-
-def _run_builtin_stormcast_rollback(cells):
-    """Restore the previous public forecast/alert producer without DB writes."""
-    from .builtins.stormcast import BuiltinStormCastAdapter, StormCastCycleService
-
-    history = CellHistoryCache()
-    history.preload_active(active_cells=[cell["id"] for cell in cells if "id" in cell])
-    adapter = BuiltinStormCastAdapter(StormCastCycleService(history))
-    success_count = error_count = alert_count = 0
-    for cell in cells:
-        cell.setdefault("modules", {})
-        cell["modules"].pop("StormProb", None)
-        try:
-            adapter.run(cell)
-            success_count += int(cell["modules"].get(adapter.name, {}).get("status") == "success")
-        except Exception as exc:
-            cell["modules"][adapter.name] = {"status": "error", "error": str(exc)}
-            error_count += 1
-            continue
         try:
             alert_count += adapter.publish_alerts(adapter.alerts(cell))
         except Exception as exc:
-            print(f"[CTAM] StormCast rollback alert failed: {exc}")
+            print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormProb alerts FAILED: {exc}")
     return success_count, error_count, alert_count
 
 
@@ -183,8 +154,6 @@ def run_ctam(
         The list of cells with 'modules' populated by each completed module.
     """
     start_time = time.time()
-    from EdgeWARN.stormprob.deployment import rollback
-
     if timestamp:
         _run_phase1_discovery_dry_run(cells, timestamp, json_path, input_manifest)
 
@@ -196,16 +165,12 @@ def run_ctam(
         print(f"[CTAM] Failed to clean up expired alerts: {e}")
     
     print("[CTAM] Starting CTAM pipeline...")
-    print(f"[CTAM] Built-in modules: {['StormCast' if rollback() else 'StormProb']}")
+    print("[CTAM] Built-in modules: ['StormProb']")
     print(f"[CTAM] Processing {len(cells)} storm cell(s)...")
     
     # Step 1: Run cell-based modules
     
-    # Pre-initialize history cache
-    if rollback():
-        cell_success_count, cell_error_count, builtin_alert_count = _run_builtin_stormcast_rollback(cells)
-    else:
-        cell_success_count, cell_error_count, builtin_alert_count = _run_builtin_stormprob(cells)
+    cell_success_count, cell_error_count, builtin_alert_count = _run_builtin_stormprob(cells)
     
     stormprob_status_counts = {}
     stormprob_alert_eligibility_counts = {

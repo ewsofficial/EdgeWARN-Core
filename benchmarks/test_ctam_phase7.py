@@ -24,14 +24,14 @@ def _cell():
     }
 
 
-def test_stormcast_only_cycle_stays_within_phase7_latency_budget():
+def test_stormprob_only_cycle_stays_within_phase7_latency_budget():
     from EdgeWARN.ctam.run import run_ctam
 
     started = time.monotonic()
     result = run_ctam([_cell()])
     elapsed = time.monotonic() - started
 
-    assert result[0]["modules"]["StormCast"]["status"] in {"success", "skipped"}
+    assert result[0]["modules"]["StormProb"]["status"] in {"success", "skipped"}
     assert elapsed < 1.0
 
 

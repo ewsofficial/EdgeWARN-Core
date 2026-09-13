@@ -22,7 +22,7 @@
 - External CTAM module support with manifest discovery, declared-input
   readiness checks, a loopback internal API and SDK, cycle-scoped transactions,
   ordered alert publication, persistent journals, and per-module outcome
-  reporting. StormCast now runs as a built-in module through the same host
+  reporting. StormProb now runs as a built-in module through the same host
   boundary.
 - Coherent cycle input manifests and transactional runtime-artifact publication
   to preserve consistent detection, integration, and rendering outputs.
@@ -44,7 +44,7 @@
   optional cross-process primary-activity lease (default off).
 
 ### Changed
-- StormCast emits `tstm_wind: "false"` when no wind assessment is available.
+- StormProb emits `tstm_wind: "false"` when no wind assessment is available.
 - The primary cycle now performs primary-only work and publishes durable
   records as the sole cross-service handoff; the GOES render loop is a
   poll-based EWMRS-owned cycle, RAP is an EWMRS-owned artifact, and NEXRAD GUI

@@ -35,7 +35,7 @@ class TestAlertPayload:
         expiry = effective + timedelta(minutes=30)
         payload = AlertPayload(
             alert_type="severe_weather",
-            source="StormCast",
+            source="StormProb",
             cell_id="cell_42",
             geometry=[(35.0, -97.0), (35.1, -97.0), (35.1, -97.1)],
             effective_time=effective,
@@ -46,8 +46,8 @@ class TestAlertPayload:
         d = payload.to_dict()
 
         assert d["alert_type"] == "severe_weather"
-        assert d["source"] == "StormCast"
-        assert d["id"] == "id:severe_weather:StormCast:cell_42:2026.03.04.12.00.00"
+        assert d["source"] == "StormProb"
+        assert d["id"] == "id:severe_weather:StormProb:cell_42:2026.03.04.12.00.00"
         assert d["cell_id"] == "cell_42"
         assert d["severity"] == "warning"
         assert d["threats"] == {"hail": True}
@@ -65,7 +65,7 @@ class TestAlertManager:
         effective = datetime(2026, 3, 4, 12, 0, 0)
         alert = AlertPayload(
             alert_type="severe_weather",
-            source="StormCast",
+            source="StormProb",
             cell_id="cell_99",
             geometry=[(35.0, -97.0), (35.1, -97.0)],
             effective_time=effective,
@@ -75,14 +75,14 @@ class TestAlertManager:
         result = AlertManager.publish(alert)
 
         assert result is True
-        alert_file = override_alerts_dir / "id_severe_weather_StormCast_cell_99_2026.03.04.12.00.00.json"
+        alert_file = override_alerts_dir / "id_severe_weather_StormProb_cell_99_2026.03.04.12.00.00.json"
         assert alert_file.exists()
 
         with open(alert_file) as f:
             data = json.load(f)
 
-        assert data["source"] == "StormCast"
-        assert data["id"] == "id:severe_weather:StormCast:cell_99:2026.03.04.12.00.00"
+        assert data["source"] == "StormProb"
+        assert data["id"] == "id:severe_weather:StormProb:cell_99:2026.03.04.12.00.00"
         assert data["cell_id"] == "cell_99"
         assert data["alert_type"] == "severe_weather"
         assert data["geometry"] == [[35.0, -97.0], [35.1, -97.0]]
@@ -117,7 +117,7 @@ class TestAlertManager:
     def test_publish_many(self, override_alerts_dir):
         now = datetime.now()
         alerts = [
-            AlertPayload("severe_weather", "StormCast", f"cell_{i}",
+            AlertPayload("severe_weather", "StormProb", f"cell_{i}",
                          [(35.0, -97.0)], now, now + timedelta(minutes=30))
             for i in range(3)
         ]
@@ -128,7 +128,7 @@ class TestAlertManager:
     def test_no_collision_across_sources(self, override_alerts_dir):
         """Two modules alerting on the same cell_id must produce separate files."""
         now = datetime.now()
-        a1 = AlertPayload("severe_weather", "StormCast", "cell_x",
+        a1 = AlertPayload("severe_weather", "StormProb", "cell_x",
                           [(35.0, -97.0)], now, now + timedelta(minutes=30))
         a2 = AlertPayload("flash_flood", "FloodModule", "cell_x",
                           [(36.0, -98.0)], now, now + timedelta(minutes=60))
@@ -142,8 +142,8 @@ class TestAlertManager:
 
         # Contents are distinct
         formatted_time = now.strftime("%Y.%m.%d.%H.%M.%S")
-        with open(override_alerts_dir / f"id_severe_weather_StormCast_cell_x_{formatted_time}.json") as f:
-            assert json.load(f)["source"] == "StormCast"
+        with open(override_alerts_dir / f"id_severe_weather_StormProb_cell_x_{formatted_time}.json") as f:
+            assert json.load(f)["source"] == "StormProb"
         with open(override_alerts_dir / f"id_flash_flood_FloodModule_cell_x_{formatted_time}.json") as f:
             assert json.load(f)["source"] == "FloodModule"
 
@@ -155,7 +155,7 @@ class TestAlertManager:
         """load() should reconstruct an AlertPayload from disk."""
         effective = datetime(2026, 3, 4, 12, 0, 0)
         original = AlertPayload(
-            "severe_weather", "StormCast", "cell_50",
+            "severe_weather", "StormProb", "cell_50",
             [(35.0, -97.0)], effective, effective + timedelta(minutes=30),
             threats={"hail": True},
         )
@@ -165,7 +165,7 @@ class TestAlertManager:
         loaded = AlertManager.load_by_id(original.id)
         assert loaded is not None
         assert loaded.cell_id == "cell_50"
-        assert loaded.source == "StormCast"
+        assert loaded.source == "StormProb"
         assert loaded.threats == {"hail": True}
 
     def test_load_nonexistent_returns_none(self, override_alerts_dir):
@@ -174,7 +174,7 @@ class TestAlertManager:
     def test_load_all_returns_all_sources(self, override_alerts_dir):
         now = datetime.now()
         AlertManager.publish(AlertPayload(
-            "severe_weather", "StormCast", "cell_y",
+            "severe_weather", "StormProb", "cell_y",
             [(35.0, -97.0)], now, now + timedelta(minutes=30)))
         AlertManager.publish(AlertPayload(
             "flash_flood", "FloodModule", "cell_y",
@@ -183,7 +183,7 @@ class TestAlertManager:
         all_alerts = AlertManager.load_all("cell_y")
         assert len(all_alerts) == 2
         sources = {a.source for a in all_alerts}
-        assert sources == {"StormCast", "FloodModule"}
+        assert sources == {"StormProb", "FloodModule"}
 
     def test_load_all_empty_dir(self, override_alerts_dir):
         assert AlertManager.load_all("nonexistent") == []
@@ -192,7 +192,7 @@ class TestAlertManager:
         """Demonstrates the load → modify → republish workflow."""
         now = datetime(2026, 3, 4, 14, 0, 0)
         original = AlertPayload(
-            "severe_weather", "StormCast", "cell_77",
+            "severe_weather", "StormProb", "cell_77",
             [(35.0, -97.0)], now, now + timedelta(minutes=30),
             threats={"hail": True},
         )
@@ -215,7 +215,7 @@ class TestAlertManager:
         active_eff = now - timedelta(minutes=10)
         active_exp = now + timedelta(minutes=20)
         a_active = AlertPayload(
-            "severe_weather", "StormCast", "cell_active",
+            "severe_weather", "StormProb", "cell_active",
             [(35.0, -97.0)], active_eff, active_exp
         )
         
@@ -223,7 +223,7 @@ class TestAlertManager:
         exp_eff = now - timedelta(minutes=40)
         exp_exp = now - timedelta(minutes=10)
         a_expired = AlertPayload(
-            "severe_weather", "StormCast", "cell_expired",
+            "severe_weather", "StormProb", "cell_expired",
             [(35.0, -97.0)], exp_eff, exp_exp
         )
         
@@ -249,7 +249,7 @@ class TestAlertManager:
         future_expiry = now + timedelta(hours=4)
 
         alert = AlertPayload(
-            "severe_weather", "StormCast", "cell_long_lived",
+            "severe_weather", "StormProb", "cell_long_lived",
             [(35.0, -97.0)], effective, future_expiry
         )
         AlertManager.publish(alert)
@@ -267,15 +267,15 @@ class TestAlertManager:
     def test_cleanup_expired_deletes_old_file_without_expiry(self, override_alerts_dir):
         """Fallback mtime policy should delete stale files with missing expires."""
         data = {
-            "id": "id:severe_weather:StormCast:cell_no_expiry:2026.03.04.12.00.00",
+            "id": "id:severe_weather:StormProb:cell_no_expiry:2026.03.04.12.00.00",
             "alert_type": "severe_weather",
-            "source": "StormCast",
+            "source": "StormProb",
             "cell_id": "cell_no_expiry",
             "effective": datetime.now(timezone.utc).isoformat(),
             "geometry": [[35.0, -97.0]],
             "threats": {},
         }
-        alert_file = override_alerts_dir / "id_severe_weather_StormCast_cell_no_expiry_2026.03.04.12.00.00.json"
+        alert_file = override_alerts_dir / "id_severe_weather_StormProb_cell_no_expiry_2026.03.04.12.00.00.json"
         with open(alert_file, "w") as f:
             json.dump(data, f)
 

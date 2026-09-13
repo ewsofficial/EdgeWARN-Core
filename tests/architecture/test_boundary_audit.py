@@ -25,6 +25,8 @@ CATALOG_REGISTRIES = {
 # These are library-call defaults rather than deployable policy. Keep them
 # enumerated so a new operational default cannot quietly join this boundary.
 OPERATIONAL_LITERAL_EXCEPTIONS = {
+    ("EdgeWARN/stormprob/audit.py", "audit", "cycle_limit"): "bounded audit sample size",
+    ("EdgeWARN/stormprob/audit.py", "audit", "maximum_source_age_hours"): "source freshness audit threshold",
     ("EWMRS/pipeline.py", "<module>", "_LAST_GOES_GUI_CLEANUP_S"): "cleanup timestamp state, not a cleanup policy",
     ("EdgeWARN/alerts/manager.py", "AlertManager.cleanup_expired", "max_age_minutes"): "CTAM alert cleanup is deferred",
     ("EdgeWARN/process/detect/track.py", "<module>", "_KALMAN_INITIALIZED_IDS_SAMPLE_LIMIT"): "bounded diagnostic output",
