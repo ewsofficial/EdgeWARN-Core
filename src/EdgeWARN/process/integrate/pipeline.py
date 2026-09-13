@@ -376,6 +376,62 @@ def _run_parallel_enrichment(
     return _run_step("Integration - Merge", _merge_all)
 
 
+def _resolve_stormprob_source_times(input_manifest):
+    """Map source families to analysis times for the StormProb audit.
+
+    Returns ``{}`` when no manifest is available (audit skipped; readiness is
+    purely value-based). With a manifest, unresolvable families map to None
+    so records flag ``absent-source:<family>`` explicitly.
+    """
+    if input_manifest is None:
+        return {}
+
+    def _latest_time(predicate):
+        candidates = [record for record in input_manifest.current_inputs()
+                      if predicate(record)]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda record: record.analysis_time).analysis_time
+
+    return {
+        "rap": _latest_time(lambda record: record.family == "rap"),
+        "mrms": _latest_time(lambda record: record.family == "mrms"),
+        "probsevere": _latest_time(
+            lambda record: "probsevere" in record.product.lower()),
+    }
+
+
+def _attach_stormprob_inputs(cells, timestamp, input_manifest=None):
+    """Phase 1 StormProb input collection (post-enrichment, pre-inference).
+
+    Runs after MRMS/RAP/ProbSevere enrichment and before CTAM/inference.
+    Additive only (``cell["stormprob"]["observation"]``); failure-isolated so
+    enrichment output always survives.
+    """
+    try:
+        from EdgeWARN.stormprob.records import build_observation_record
+
+        source_times = _resolve_stormprob_source_times(input_manifest)
+        for cell in cells:
+            try:
+                record = build_observation_record(
+                    cell,
+                    analysis_time=cell.get("timestamp") or timestamp,
+                    source_times=source_times,
+                    cycle_manifest=input_manifest,
+                )
+                stormprob = cell.setdefault("stormprob", {})
+                stormprob["observation"] = record
+                stormprob["feature_schema"] = record["schema_version"]
+            except Exception as exc:
+                io_manager.write_warning(
+                    f"StormProb observation skipped for cell {cell.get('id')}: {exc}"
+                )
+    except Exception as exc:
+        io_manager.write_warning(f"StormProb input collection skipped: {exc}")
+    return cells
+
+
 def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_manifest=None, disable_ctam_modules=False):
     if disable_ctam:
         io_manager.write_info("CTAM module execution disabled via command-line flag")
@@ -475,6 +531,10 @@ def main(
         include_glm=not mrms_core_only,
         include_rap=not mrms_core_only,
         input_manifest=input_manifest,
+    )
+    result_cells = _run_step(
+        "Integration - StormProb Inputs",
+        lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),
     )
     result_cells = _run_ctam_if_enabled(
         result_cells,

@@ -241,6 +241,10 @@ class CellDataSaver:
         valid_refl_mask = ~np.isnan(refl_vals)
         refl_vals = refl_vals[valid_refl_mask]
 
+        # Full-precision analysis centroid retained before JSON rounding for
+        # StormProb radial inputs (Phase 1). The rounded ``centroid`` below
+        # stays the serialized contract; ``centroid_full`` is additive.
+        centroid_full = None
         if refl_vals.size > 0:
             global_rows = rows[valid_refl_mask] + grid_slice[0].start
             global_cols = cols[valid_refl_mask] + grid_slice[1].start
@@ -256,11 +260,12 @@ class CellDataSaver:
             sum_weights = np.sum(weights)
 
             if sum_weights > 0:
-                lat_centroid = float(np.sum(lat_vals * weights) / sum_weights)
-                lon_centroid = float(np.sum(lon_vals * weights) / sum_weights) % 360
+                lat_centroid_full = float(np.sum(lat_vals * weights) / sum_weights)
+                lon_centroid_full = float(np.sum(lon_vals * weights) / sum_weights) % 360
+                centroid_full = (lat_centroid_full, lon_centroid_full)
                 centroid = (
-                    round(lat_centroid, _centroid_decimals),
-                    round(lon_centroid, _centroid_decimals),
+                    round(lat_centroid_full, _centroid_decimals),
+                    round(lon_centroid_full, _centroid_decimals),
                 )
             else:
                 centroid = (np.nan, np.nan)
@@ -276,7 +281,7 @@ class CellDataSaver:
         else:
             hail_core = self.__create_hailcore_polygon(poly_id, grid_slice)
 
-        return {
+        entry = {
             "id": int(poly_id),
             "num_gates": int(count),
             "centroid": centroid,
@@ -290,6 +295,20 @@ class CellDataSaver:
                 "morphology": morph_stats
             }
         }
+
+        # Phase 1 StormProb geometry: full-precision centroid + pre-rounding
+        # detection polygon, 64-ray east-CCW profile, exact log-area.
+        # ``bbox`` arrives at gatemapper 3-decimal precision on the watershed
+        # path (full float precision on the ProbSevere-geometry path); the
+        # radial math is identical either way. Failure-isolated: detection
+        # output must survive a geometry failure.
+        try:
+            from EdgeWARN.stormprob.geometry import attach_stormprob_geometry
+            attach_stormprob_geometry(entry, centroid_full, bbox)
+        except Exception:
+            pass
+
+        return entry
 
     def __create_entries_from_probsevere_geometry(self, morphology_engine):
         results = []
