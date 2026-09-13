@@ -1,6 +1,6 @@
 {
-  "manifest_version": "0.1.0",
-  "phase": "phase-0-contract-freeze",
+  "manifest_version": "0.2.0",
+  "phase": "phase-3-onnx-export",
   "stormprob_commit": "e428f53ec33adac9197a3cda865f599e5f9c5aff",
   "stormprob_log": "e428f53 Workspace save\n8b09a76 Move cell I/O from residual package to stormprob.data.cells\n6f4ba05 Modularize residual package and slim training scripts",
   "stormprob_dirty": "M scripts/radial_morphology/train.py\n M stormprob/model/radial_morphology/__init__.py\n M stormprob/model/radial_morphology/model.py",
@@ -17,16 +17,48 @@
     }
   },
   "provenance_license": {
-    "status": "BLOCKED",
-    "detail": "No LICENSE/provenance file found in the StormProb checkout; weights and calibrator are NOT copied into this repo. Manifest references canonical source paths plus SHA-256. Confirm license/provenance before packaging deployable assets (Phase 3)."
+    "status": "user-directed-repository-copy",
+    "detail": "The StormProb checkout has dataset provenance but no separate model-weight license file. The user explicitly directed that the derived ONNX graphs and calibrator be copied into EdgeWARN-Core. This records the instruction, not a licensing determination."
   },
   "deployment_assets": {
-    "status": "not-packaged",
+    "status": "repository-packaged",
+    "repository_path": "models/stormprob",
     "required": [
-      "stormprob_radial_v7.onnx",
-      "stormprob_motion_best.onnx",
+      "stormprob_radial.onnx",
+      "stormprob_motion.onnx",
       "isotonic_calibrator.json"
     ]
+  },
+  "onnx_export": {
+    "status": "exported-and-validated-offline",
+    "deployment_status": "packaged",
+    "reason": "The user directed that the validated ONNX graphs and calibrator be included in EdgeWARN-Core.",
+    "opset": 18,
+    "exporter": "torch.onnx.export(dynamo=True)",
+    "torch_version": "2.14.0+cu130",
+    "onnx_version": "1.22.0",
+    "onnxscript_version": "0.7.2",
+    "onnxruntime_version": "1.30.0",
+    "execution_provider": "CPUExecutionProvider",
+    "batch_size": 1,
+    "history_steps": 30,
+    "external_data": false,
+    "models": {
+      "radial": {
+        "file": "stormprob_radial.onnx",
+        "sha256": "aaa98821b783da347373957d2e34e7e477b64fefb0442ef17969e26d7171c2cd",
+        "bytes": 859982,
+        "inputs": ["radial_history", "statistics_history", "current_features", "history_mask"],
+        "outputs": ["coefficient_mean", "coefficient_log_std"]
+      },
+      "motion": {
+        "file": "stormprob_motion.onnx",
+        "sha256": "268ea32e8ee0110299f7a5759b227a3cd0153f94fe88d332e7873d8cb0030332",
+        "bytes": 2466720,
+        "inputs": ["current_features", "history_sequence", "history_mask", "trajectory_sequence", "trajectory_mask"],
+        "outputs": ["residual_motion_mps"]
+      }
+    }
   },
   "lead_order_minutes": [
     15.0,

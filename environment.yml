@@ -40,3 +40,4 @@ dependencies:
     - requests
     - beautifulsoup4
     - opencv-python-headless
+    - onnxruntime==1.30.0

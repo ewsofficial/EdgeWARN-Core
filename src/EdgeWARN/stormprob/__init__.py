@@ -1,8 +1,7 @@
-"""StormProb input collection (Phase 1).
+"""StormProb input records, database, and paired ONNX inference helpers.
 
-Versioned, failure-isolated helpers that collect exact model inputs at the
-right pipeline stages. The input database (Phase 2) and ONNX inference
-(Phase 3) consume these records; no inference runs here.
+The ONNX loader and postprocessor are available for the Phase 4 pipeline
+integration; importing this package does not start inference.
 """
 
 from . import features, geometry, records, tracks
