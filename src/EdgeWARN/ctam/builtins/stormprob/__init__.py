@@ -66,7 +66,7 @@ class BuiltinStormProbAdapter:
         self._service = service or StormProbCycleService()
         self._sessions = None
 
-    def _infer(self, cell: dict[str, Any]) -> dict[str, Any]:
+    def _prepare(self, cell: dict[str, Any]) -> tuple[dict, dict]:
         timestamp = cell.get("timestamp")
         if not timestamp:
             raise ValueError("missing-analysis-time")
@@ -76,19 +76,19 @@ class BuiltinStormProbAdapter:
         if (observation["analysis_time"] != _utc(timestamp).isoformat(timespec="microseconds")
                 or not observation["inference_ready"]):
             raise InputNotReady("committed-observation-not-ready")
+        return inputs, observation
+
+    def _load_models(self):
         if self._sessions is None:
             model_dir = assets.asset_dir()
             self._sessions = onnx_runtime.load_sessions(
                 model_dir, assets.manifest_path())
         calibrator = onnx_runtime.load_calibrator(assets.asset_dir(), assets.manifest_path())
-        outputs = onnx_runtime.infer_pair(*self._sessions,
-            radial_history=np.asarray(inputs["radial_history"])[None],
-            statistics_history=np.asarray(inputs["radial_statistics_history"])[None],
-            current_features=np.asarray(inputs["current"])[None],
-            history_mask=np.asarray(inputs["radial_history_mask"])[None],
-            history_sequence=np.asarray(inputs["history_sequence"])[None],
-            trajectory_sequence=np.asarray(inputs["trajectory_sequence"])[None],
-            trajectory_mask=np.asarray(inputs["trajectory_mask"])[None])
+        return calibrator
+
+    def _finish(self, cell: dict[str, Any], inputs: dict, observation: dict,
+                outputs: dict, calibrator: dict) -> dict[str, Any]:
+        timestamp = cell["timestamp"]
         initial = predict_initial_wind({"wind_field": {
             key.rsplit(".", 1)[1]: value
             for key, value in observation["raw_values"].items()
@@ -113,6 +113,7 @@ class BuiltinStormProbAdapter:
             forecasts.append({
                 "cell_id": str(cell["id"]), "analysis_time": timestamp,
                 "lead_minutes": lead, "model_version": MODEL_VERSION,
+                "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
                 "radial_checkpoint_id": "radial-v7", "motion_checkpoint_id": "motion-best",
                 "status": status, "reason": None if status == "ok" else contour["status"],
                 "east_km": east, "north_km": north,
@@ -127,27 +128,77 @@ class BuiltinStormProbAdapter:
                 "initial_wind_mps": [initial["u"], initial["v"]]}
 
     def run(self, cell: dict[str, Any]) -> None:
+        self.run_batch([cell])
+
+    @staticmethod
+    def _record_failure(cell: dict[str, Any], exc: Exception, started: float) -> None:
         cell.setdefault("modules", {})
-        started = time.perf_counter()
-        try:
-            result = self._infer(cell)
-        except Exception as exc:
-            status = "skipped" if isinstance(exc, InputNotReady) else "error"
-            cell["modules"][self.name] = {
-                "status": status, "reason": str(exc) if status == "skipped" else "inference-failed",
-                "error": str(exc), "inference_duration_ms": (time.perf_counter() - started) * 1000,
-                "analysis_time": cell.get("timestamp"), "model_version": MODEL_VERSION,
-                "leads": [{"cell_id": str(cell.get("id")),
-                           "analysis_time": cell.get("timestamp"),
-                           "lead_minutes": lead, "model_version": MODEL_VERSION,
-                           "status": status, "reason": str(exc),
-                           "metadata": {"geometry_kind": "instantaneous-probability-contour"}}
-                          for lead in LEADS]}
+        status = "skipped" if isinstance(exc, InputNotReady) else "error"
+        cell["modules"]["StormProb"] = {
+            "status": status, "reason": str(exc) if status == "skipped" else "inference-failed",
+            "error": str(exc), "inference_duration_ms": (time.perf_counter() - started) * 1000,
+            "analysis_time": cell.get("timestamp"), "model_version": MODEL_VERSION,
+            "leads": [{"cell_id": str(cell.get("id")),
+                       "analysis_time": cell.get("timestamp"),
+                       "valid_time": ((
+                           _utc(cell["timestamp"]) + timedelta(minutes=lead)
+                       ).isoformat() if cell.get("timestamp") else None),
+                       "lead_minutes": lead, "model_version": MODEL_VERSION,
+                       "status": status, "reason": str(exc),
+                       "metadata": {"geometry_kind": "instantaneous-probability-contour"}}
+                      for lead in LEADS]}
+
+    def run_batch(self, cells: list[dict[str, Any]]) -> None:
+        """Infer up to 128 ready cells together, preserving per-cell outcomes."""
+        if len(cells) > onnx_runtime.BATCH_SIZE:
+            raise ValueError("StormProb batch exceeds graph capacity")
+        fields = {
+            "radial_history": ("radial_history", (30, 64), np.float32),
+            "statistics_history": ("radial_statistics_history", (30, 1), np.float32),
+            "current_features": ("current", (135,), np.float32),
+            "history_mask": ("radial_history_mask", (30,), np.bool_),
+            "history_sequence": ("history_sequence", (30, 135), np.float32),
+            "trajectory_sequence": ("trajectory_sequence", (30, 16), np.float32),
+            "trajectory_mask": ("trajectory_mask", (30,), np.bool_),
+        }
+        prepared = []
+        for cell in cells:
+            cell.setdefault("modules", {})
+            started = time.perf_counter()
+            try:
+                inputs, observation = self._prepare(cell)
+                for name, (source, shape, dtype) in fields.items():
+                    actual = np.asarray(inputs[source], dtype=dtype).shape
+                    if actual != shape:
+                        raise ValueError(f"{name} shape {actual}; expected {shape}")
+                prepared.append((cell, inputs, observation, started))
+            except Exception as exc:
+                self._record_failure(cell, exc, started)
+        if not prepared:
             return
-        result["inference_duration_ms"] = (time.perf_counter() - started) * 1000
-        for lead in result["leads"]:
-            lead["metadata"]["inference_duration_ms"] = result["inference_duration_ms"]
-        cell["modules"][self.name] = result
+        try:
+            calibrator = self._load_models()
+            tensors = {}
+            for name, (source, shape, dtype) in fields.items():
+                batch = np.zeros((onnx_runtime.BATCH_SIZE, *shape), dtype=dtype)
+                for index, (_, inputs, _, _) in enumerate(prepared):
+                    batch[index] = np.asarray(inputs[source], dtype=dtype)
+                tensors[name] = batch
+            outputs = onnx_runtime.infer_pair(*self._sessions, **tensors)
+        except Exception as exc:
+            for cell, _, _, started in prepared:
+                self._record_failure(cell, exc, started)
+            return
+        for index, (cell, inputs, observation, started) in enumerate(prepared):
+            try:
+                one = {name: value[index:index + 1] for name, value in outputs.items()}
+                result = self._finish(cell, inputs, observation, one, calibrator)
+                result["inference_duration_ms"] = (time.perf_counter() - started) * 1000
+                for lead in result["leads"]:
+                    lead["metadata"]["inference_duration_ms"] = result["inference_duration_ms"]
+                cell["modules"][self.name] = result
+            except Exception as exc:
+                self._record_failure(cell, exc, started)
 
     def alerts(self, cell: dict[str, Any]) -> list[AlertPayload]:
         result = cell.get("modules", {}).get(self.name, {})

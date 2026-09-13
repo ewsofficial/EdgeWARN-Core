@@ -15,6 +15,46 @@ Use `/home/yuchenwei/Projects/StormProb/artifacts/residual/best_model/best.pt` a
 
 For each lead, compute motion in local east/north kilometers as `(initial_wind_mps + residual_motion_mps) * lead_seconds / 1000`; report both displacement components and the resulting centroid coordinates. Sample the radial Fourier distribution, add the bounded residual to the current 64-ray profile, translate each sampled shape by that lead's predicted centroid, form an occupancy probability raster, apply the supplied lead-specific isotonic calibrator, and polygonize the 0.25 probability contour. The 0.25 threshold and 20-member, 1 km, ±100 km instantaneous grid match the stored v7 scorecard; make these versioned deployment parameters. The primary output is **four separate valid-time polygons**, not a single swept 0–60-minute path. If an alert needs a swept polygon, derive and label it separately using the evaluation script's interpolation/union algorithm; do not call it an instantaneous footprint. Record no-polygon status where a contour is empty instead of fabricating geometry.
 
+### Operational public output contract
+
+The public `cell.modules.StormProb` payload should contain only information needed
+by operators and downstream operational consumers. The proposed reduced shape is:
+
+```json
+{
+  "status": "success",
+  "analysis_time": "2024-05-01T12:00:00Z",
+  "leads": [
+    {
+      "lead_minutes": 15,
+      "valid_time": "2024-05-01T12:15:00Z",
+      "status": "ok",
+      "east_km": 4.5,
+      "north_km": 1.8,
+      "predicted_centroid": [35.016, 265.047],
+      "polygon": {"type": "Polygon", "coordinates": []}
+    }
+  ]
+}
+```
+
+The result always contains the four leads `15`, `30`, `45`, and `60` minutes.
+`valid_time` is a direct lead field. Lead status is one of `ok`, `no-polygon`,
+`skipped`, or `error`; non-`ok` leads include a concise machine-readable
+`reason` and omit unavailable motion, centroid, and polygon values. Empty
+contours remain explicit `no-polygon` results, never fabricated geometry.
+
+Remove `inference_duration_ms`, the public `metadata` object, and the
+intermediate `initial_wind_mps` field. Keep `model_version`, checkpoint IDs,
+probability threshold, postprocessing version, and detailed timing only in the
+SQLite forecast record or operational audit logs. The public payload does not
+need to expose those implementation/provenance fields unless a downstream
+operator requirement is identified.
+
+The alert contract remains separate: the TSTM alert continues to use the
+operationally labeled `swept-envelope-0-30min` geometry derived from the current
+detection and the 15/30-minute instantaneous forecasts.
+
 ## Phase 0 — freeze the contract and map the gaps
 
 - [ ] Add a reproducible model manifest under `models/stormprob/` with checkpoint hashes, StormProb commit, feature names/order/units, normalization and missing-value policy, model tensor shapes, lead order, ensemble seed/count, calibrator hash, threshold, and polygonization/projection rules. Copy or package **both** model weights and calibrator into deployable assets; production must not depend on `~/Projects/StormProb`. Confirm the local license/provenance before copying.
@@ -81,6 +121,7 @@ been removed.
 
 - [x] Implement the reserved, failure-isolated StormProb built-in before external CTAM modules, including discovery, limits, transaction allowlists, readiness/status schemas, docs, and tests.
 - [x] Emit `modules.StormProb` with four versioned lead records, valid GeoJSON contours, valid times, centroid displacements, thresholds, and machine-readable skip/error reasons.
+- [x] Strip the public `modules.StormProb` payload down to the operational contract above: direct `valid_time`, status/reason, displacement, predicted centroid, and polygon only. Remove inference duration and implementation metadata from the public projection while retaining required provenance and timing in SQLite/audit records.
 - [x] Replace tracker reads with the database-backed StormProb 15-minute displacement divided by 900 seconds; measured motion remains the fallback when inference is skipped.
 - [x] Use a separately labeled 0–30-minute swept envelope for TSTM alerts and document its cadence, source, suppression, expiry, API representation, and geometry semantics.
 

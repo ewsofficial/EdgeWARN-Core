@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+BATCH_SIZE = 128
+
 
 class ModelUnavailable(RuntimeError):
     """A graph, operator, hash, or execution provider is unavailable."""
@@ -36,6 +38,8 @@ def load_sessions(model_dir: str | Path, manifest_path: str | Path,
     if provider not in ort.get_available_providers():
         raise ModelUnavailable(f"ONNX Runtime provider unavailable: {provider}")
     manifest = json.loads(Path(manifest_path).read_text())
+    if manifest["onnx_export"]["batch_size"] != BATCH_SIZE:
+        raise ModelUnavailable("StormProb ONNX manifest batch size mismatch")
     assets = manifest["onnx_export"]["models"]
     if manifest["onnx_export"]["deployment_status"] not in {"packaged", "external"}:
         raise ModelUnavailable("StormProb ONNX assets are not ready for deployment")
@@ -55,6 +59,8 @@ def load_sessions(model_dir: str | Path, manifest_path: str | Path,
             raise ModelUnavailable(f"StormProb {key} provider mismatch: {session.get_providers()}")
         if [item.name for item in session.get_inputs()] != info["inputs"]:
             raise ModelUnavailable(f"StormProb {key} graph input contract mismatch")
+        if any(item.shape[0] != BATCH_SIZE for item in session.get_inputs()):
+            raise ModelUnavailable(f"StormProb {key} graph batch size mismatch")
         if [item.name for item in session.get_outputs()] != info["outputs"]:
             raise ModelUnavailable(f"StormProb {key} graph output contract mismatch")
         sessions.append(session)
@@ -78,7 +84,7 @@ def load_calibrator(model_dir: str | Path, manifest_path: str | Path) -> dict:
 def infer_pair(radial_session, motion_session, *, radial_history, statistics_history,
                current_features, history_mask, history_sequence, trajectory_sequence,
                trajectory_mask):
-    """Execute both fixed batch-1 graphs and return named float32 outputs."""
+    """Execute both fixed batch-128 graphs and return named float32 outputs."""
     tensors = {
         "radial_history": np.asarray(radial_history, dtype=np.float32),
         "statistics_history": np.asarray(statistics_history, dtype=np.float32),
@@ -88,10 +94,10 @@ def infer_pair(radial_session, motion_session, *, radial_history, statistics_his
         "trajectory_sequence": np.asarray(trajectory_sequence, dtype=np.float32),
         "trajectory_mask": np.asarray(trajectory_mask, dtype=np.bool_),
     }
-    required = {"radial_history": (1, 30, 64), "statistics_history": (1, 30, 1),
-                "current_features": (1, 135), "history_mask": (1, 30),
-                "history_sequence": (1, 30, 135), "trajectory_sequence": (1, 30, 16),
-                "trajectory_mask": (1, 30)}
+    required = {"radial_history": (BATCH_SIZE, 30, 64), "statistics_history": (BATCH_SIZE, 30, 1),
+                "current_features": (BATCH_SIZE, 135), "history_mask": (BATCH_SIZE, 30),
+                "history_sequence": (BATCH_SIZE, 30, 135), "trajectory_sequence": (BATCH_SIZE, 30, 16),
+                "trajectory_mask": (BATCH_SIZE, 30)}
     for key, shape in required.items():
         if tensors[key].shape != shape:
             raise ValueError(f"{key} shape {tensors[key].shape}; expected {shape}")
@@ -108,6 +114,6 @@ def infer_pair(radial_session, motion_session, *, radial_history, statistics_his
     for name, value in outputs.items():
         if value.dtype != np.float32 or not np.isfinite(value).all():
             raise ModelUnavailable(f"StormProb {name} is non-finite or not float32")
-    if mean.shape != (1, 4, 33) or log_std.shape != (1, 4, 33) or residual.shape != (1, 4, 2):
+    if mean.shape != (BATCH_SIZE, 4, 33) or log_std.shape != (BATCH_SIZE, 4, 33) or residual.shape != (BATCH_SIZE, 4, 2):
         raise ModelUnavailable("StormProb ONNX output shape mismatch")
     return outputs

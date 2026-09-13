@@ -38,6 +38,15 @@ forecast is silently reused after input revision. Model tensors are rebuilt by
 `radial_profiles`, and observation centroids; the 30-row window is chronological
 and left-padded.
 
+The packaged StormProb ONNX graphs use a fixed batch size of 128. During each
+CTAM cycle, ready cells are processed in chunks of up to 128, with zero padding
+for the last chunk. Skipped or invalid cells do not occupy a model slot; each
+successful output is mapped back to its original cell before contour
+postprocessing and alert handling. `inference_duration_ms` records a cell's
+elapsed time through input preparation, shared batch execution, and its own
+postprocessing, so it is not the isolated ONNX kernel time. Re-exporting the
+graphs requires the pinned checkpoints and `scripts/export_stormprob_batch128.py`.
+
 Before cutover, inspect legacy files and then import them:
 
 ```bash

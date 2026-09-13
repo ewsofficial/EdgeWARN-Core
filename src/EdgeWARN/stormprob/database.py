@@ -49,6 +49,37 @@ def clean_projection(value: Any) -> Any:
     return value
 
 
+def clean_public_projection(value: Any) -> Any:
+    """Apply the operational public contract to derived cell projections."""
+    value = clean_projection(value)
+    if not isinstance(value, dict):
+        return value
+    modules = value.get("modules")
+    stormprob = modules.get("StormProb") if isinstance(modules, dict) else None
+    if isinstance(stormprob, dict):
+        public = {
+            "status": stormprob.get("status"),
+            "analysis_time": stormprob.get("analysis_time"),
+            "leads": [],
+        }
+        for lead in stormprob.get("leads", []):
+            if not isinstance(lead, dict):
+                continue
+            item = {
+                "lead_minutes": lead.get("lead_minutes"),
+                "valid_time": lead.get("valid_time"),
+                "status": lead.get("status"),
+            }
+            if lead.get("status") == "ok":
+                for key in ("east_km", "north_km", "predicted_centroid", "polygon"):
+                    item[key] = lead.get(key)
+            else:
+                item["reason"] = lead.get("reason")
+            public["leads"].append(item)
+        modules["StormProb"] = public
+    return value
+
+
 def _time(value: Any) -> str:
     if isinstance(value, datetime):
         moment = value
@@ -617,4 +648,4 @@ class StormProbRepository:
 
 
 __all__ = ["StormProbRepository", "database_path", "LEADS", "PENDING_MODEL_VERSION",
-           "clean_projection"]
+           "clean_projection", "clean_public_projection"]

@@ -108,22 +108,24 @@ def _run_builtin_stormprob(cells):
     crosses the same narrow host-service boundary.
     """
     from .builtins import BuiltinStormProbAdapter, StormProbCycleService
+    from EdgeWARN.stormprob.onnx_runtime import BATCH_SIZE
     adapter = BuiltinStormProbAdapter(StormProbCycleService())
     success_count = error_count = alert_count = 0
-    for cell_idx, cell in enumerate(cells):
-        cell.setdefault("modules", {})
+    for batch_start in range(0, len(cells), BATCH_SIZE):
+        batch = cells[batch_start:batch_start + BATCH_SIZE]
         try:
-            adapter.run(cell)
+            adapter.run_batch(batch)
+        except Exception as exc:
+            for cell in batch:
+                cell.setdefault("modules", {})[adapter.name] = {
+                    "status": "error", "error": str(exc)}
+        for cell_idx, cell in enumerate(batch, batch_start):
             success_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success")
             error_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") != "success")
-        except Exception as exc:
-            cell["modules"][adapter.name] = {"status": "error", "error": str(exc)}
-            print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: built-in StormProb FAILED: {exc}")
-            continue
-        try:
-            alert_count += adapter.publish_alerts(adapter.alerts(cell))
-        except Exception as exc:
-            print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormProb alerts FAILED: {exc}")
+            try:
+                alert_count += adapter.publish_alerts(adapter.alerts(cell))
+            except Exception as exc:
+                print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormProb alerts FAILED: {exc}")
     return success_count, error_count, alert_count
 
 

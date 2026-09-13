@@ -42,11 +42,13 @@ def test_stormprob_cycle_n_history_drives_cycle_n_plus_1_tracker():
     }
     adapter = BuiltinStormProbAdapter.__new__(BuiltinStormProbAdapter)
     adapter._sessions = None
-    adapter._infer = lambda cell: {
+    def forecast(cell):
+        return {
         "status": "success", "model_version": "stormprob/v1",
         "analysis_time": cell["timestamp"], "leads": [
             {"lead_minutes": lead, "east_km": 3.0, "north_km": 1.5,
              "status": "ok", "metadata": {}} for lead in (15, 30, 45, 60)]}
+    adapter.run_batch = lambda cells: [cell["modules"].update(StormProb=forecast(cell)) for cell in cells]
     BuiltinStormProbAdapter.run(adapter, cycle_n)
     assert cycle_n["modules"]["StormProb"]["status"] == "success"
 

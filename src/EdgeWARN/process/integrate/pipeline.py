@@ -471,10 +471,10 @@ def _save_cells(handler, timestamp, cells, json_path):
 def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None):
     """Commit StormProb inputs, then publish derived JSON and indexes."""
     from EdgeWARN.ctam.publication import CTAMPublicationCoordinator
-    from EdgeWARN.stormprob.database import StormProbRepository, clean_projection
+    from EdgeWARN.stormprob.database import StormProbRepository, clean_public_projection
     from .history import CellHistoryManager
 
-    projected_cells = [clean_projection(copy.deepcopy(cell)) for cell in cells]
+    projected_cells = [clean_public_projection(copy.deepcopy(cell)) for cell in cells]
     for cell in projected_cells:
         cell.pop("stormprob", None)
     snapshot = CellDataSaver(None, None, None, None, None, None).create_json_structure(timestamp, projected_cells)
