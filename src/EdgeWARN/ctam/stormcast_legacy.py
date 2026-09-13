@@ -14,6 +14,13 @@ from EdgeWARN.alerts import AlertManager
 
 
 def read_history(cell_id: Any) -> list[dict[str, Any]]:
+    try:
+        from EdgeWARN.stormprob.database import StormProbRepository
+        history = StormProbRepository().legacy_history(cell_id)
+        if history:
+            return history
+    except FileNotFoundError:
+        pass
     path = fs.CELL_DIR / f"{cell_id}.json"
     if not path.exists():
         return []

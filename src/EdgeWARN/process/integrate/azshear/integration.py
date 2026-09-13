@@ -62,6 +62,15 @@ def _read_recent_history(cell_id, history_cache):
     if cell_id in history_cache:
         return history_cache[cell_id]
 
+    try:
+        from EdgeWARN.stormprob.database import StormProbRepository
+        history = StormProbRepository().legacy_history(cell_id, limit=azshear_history_window())
+        if history:
+            history_cache[cell_id] = history
+            return history
+    except FileNotFoundError:
+        pass
+
     history_file = fs.CELL_DIR / f"{cell_id}.json"
     if not history_file.exists():
         history_cache[cell_id] = []

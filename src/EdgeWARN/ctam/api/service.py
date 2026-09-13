@@ -179,8 +179,18 @@ class CTAMReadService:
             raise APIError("file_unavailable", "cell history is not readable for this cycle", 409, "cells.history")
         if file_id not in self._history_cache:
             try:
-                with entry.path.open("r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
+                from EdgeWARN.stormprob.database import StormProbRepository
+                payload = StormProbRepository().legacy_history(
+                    cell_id, through=self.catalog.analysis_time)
+                if not payload:
+                    with entry.path.open("r", encoding="utf-8") as handle:
+                        payload = json.load(handle)
+            except FileNotFoundError:
+                try:
+                    with entry.path.open("r", encoding="utf-8") as handle:
+                        payload = json.load(handle)
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise APIError("file_unavailable", "cell history is no longer readable", 409, "cells.history") from exc
             except (OSError, json.JSONDecodeError) as exc:
                 raise APIError("file_unavailable", "cell history is no longer readable", 409, "cells.history") from exc
             if not isinstance(payload, list):

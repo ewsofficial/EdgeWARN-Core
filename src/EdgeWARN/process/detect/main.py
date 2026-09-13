@@ -163,9 +163,29 @@ def main(
     # === Load or create previous entries ===
     data_old = None
     try:
+        from EdgeWARN.stormprob.database import StormProbRepository
+        repository = StormProbRepository()
+        pending = repository.pending_projection_cycles()
+        restored = repository.recover_projections()
+        if pending or restored:
+            from EdgeWARN.api_integration.index_manager import APIIndexManager
+            APIIndexManager(io_manager).initialize_indexes()
+            for cycle_id in pending:
+                repository.mark_projection_published(cycle_id)
+        previous = repository.latest_cycle_before(json_ts)
+        if previous:
+            data_old = {"features": previous,
+                        "latest_timestamp": previous[0].get("timestamp")}
+            io_manager.write_debug("Loaded previous cells from committed StormProb database")
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        io_manager.write_error(f"Error loading previous database cycle: {exc}")
+
+    try:
         # Find the most recent stormcells_*.json file in the stormcell directory
         stormcell_dir = fs.STORMCELL_DIR
-        if stormcell_dir.exists():
+        if data_old is None and stormcell_dir.exists():
             latest_json = None
             for candidate in stormcell_dir.glob("stormcells_*.json"):
                 if candidate.stem < f"stormcells_{final_ts}":
@@ -265,13 +285,8 @@ def main(
         
         io_manager.write_info(f"Saved single-frame results to {output_file}")
 
-        try:
-            from EdgeWARN.api_integration.index_manager import APIIndexManager
-            APIIndexManager(io_manager).update_stormcell_index(final_ts)
-        except Exception as e:
-            # The artifact is deliberately left unadvertised if index commit
-            # fails; the next index resync can safely discover it.
-            io_manager.write_error(f"Failed to update API index: {e}")
+        # This is an integration input, not a public committed cycle. The
+        # integration publisher updates the index after its SQLite commit.
         return output_file, None
 
     # === Dual-frame mode ===
@@ -405,13 +420,7 @@ def main(
         
     io_manager.write_info(f"Saved detection results to {output_file}")
     
-    # Update API stormcell index
-    try:
-        from EdgeWARN.api_integration.index_manager import APIIndexManager
-        api_index = APIIndexManager(io_manager)
-        api_index.update_stormcell_index(final_ts)
-    except Exception as e:
-        io_manager.write_error(f"Failed to update API index: {e}")
+    # Publication/index update happens after integration commits SQLite.
     
     # Return output file AND the new dataset objects for next iteration
     return output_file, (radar_new_obj, ps_new_obj, pt_new_obj)

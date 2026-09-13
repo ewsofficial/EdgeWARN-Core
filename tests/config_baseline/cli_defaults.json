@@ -1,4 +1,14 @@
 {
+  "EdgeWARN/stormprob/migrate.py": {
+    "--base-dir": {
+      "default": null,
+      "action": null
+    },
+    "--dry-run": {
+      "default": false,
+      "action": "store_true"
+    }
+  },
   "edgewarn_cli/main.py": {
     "--version": {
       "default": null,

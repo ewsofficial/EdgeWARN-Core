@@ -1,0 +1,7 @@
+{
+  "shadows_yaml": [],
+  "can_be_unset": [
+    "--base-dir",
+    "--dry-run"
+  ]
+}

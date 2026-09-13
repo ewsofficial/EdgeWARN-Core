@@ -93,7 +93,7 @@ def test_cycle_outcome_contract_covers_failure_and_retry_states(
     assert outcome.completed is (status is CycleStatus.COMPLETED and exit_status == 0)
 
 
-def test_single_frame_detects_current_radar_and_updates_index(monkeypatch, tmp_path):
+def test_single_frame_detects_current_radar_without_publishing_index(monkeypatch, tmp_path):
     """A previous snapshot is context, never a substitute for current detection."""
     import util.file as fs
     from EdgeWARN.process.detect import main as detect_main
@@ -143,8 +143,9 @@ def test_single_frame_detects_current_radar_and_updates_index(monkeypatch, tmp_p
         detector.assert_called_once()
         output = json.loads(output_path.read_text(encoding="utf-8"))
         assert [feature["id"] for feature in output["features"]] == [10]
-        index = json.loads((fs.STORMCELL_DIR / "stormcell_index.json").read_text(encoding="utf-8"))
-        assert "20260726-180000" in index["timestamps"]
+        # Detection output is an intermediate integration input. The public
+        # index is written only after integration commits StormProb inputs.
+        assert not (fs.STORMCELL_DIR / "stormcell_index.json").exists()
     finally:
         fs._define_paths(original_base)
 

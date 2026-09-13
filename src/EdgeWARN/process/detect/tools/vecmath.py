@@ -31,7 +31,8 @@ class StormVectorCalculator:
 
             prev_entry = previous_by_id.get(int(cell_id))
             if prev_entry is None:
-                prev_entry = StormVectorCalculator._load_previous_entry_from_history(cell_id)
+                prev_entry = StormVectorCalculator._load_previous_entry_from_history(
+                    cell_id, before=cell.get("timestamp"))
 
             if prev_entry is None:
                 continue
@@ -100,7 +101,14 @@ class StormVectorCalculator:
         return previous_by_id
 
     @staticmethod
-    def _load_previous_entry_from_history(cell_id):
+    def _load_previous_entry_from_history(cell_id, before=None):
+        try:
+            from EdgeWARN.stormprob.database import StormProbRepository
+            history = StormProbRepository().legacy_history(cell_id, limit=1, before=before)
+            if history:
+                return history[-1]
+        except FileNotFoundError:
+            pass
         history_path = fs.CELL_DIR / f"{cell_id}.json"
         if not history_path.exists():
             return None

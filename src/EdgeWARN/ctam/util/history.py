@@ -14,6 +14,14 @@ def get_cell_history(cell_id, limit=5):
         list: List of dictionaries representing past states, sorted by time descending.
               Returns [] if no history found.
     """
+    try:
+        from EdgeWARN.stormprob.database import StormProbRepository
+        history = StormProbRepository().legacy_history(cell_id, limit=limit)
+        if history:
+            return list(reversed(history))
+    except FileNotFoundError:
+        pass
+
     history_file = fs.CELL_DIR / f"{cell_id}.json"
     
     if not history_file.exists():

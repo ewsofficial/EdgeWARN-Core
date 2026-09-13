@@ -16,8 +16,13 @@ class CellHistoryCache:
         if cell_id not in self._cache:
             history_file = fs.CELL_DIR / f"{cell_id}.json"
             history = []
+            try:
+                from EdgeWARN.stormprob.database import StormProbRepository
+                history = list(reversed(StormProbRepository().legacy_history(cell_id)))
+            except FileNotFoundError:
+                pass
             
-            if history_file.exists():
+            if not history and history_file.exists():
                 try:
                     with open(history_file, 'r') as f:
                         history = json.load(f)

@@ -468,17 +468,39 @@ def _save_cells(handler, timestamp, cells, json_path):
     handler.write_json(data, json_path)
 
 
-def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells):
-    """Publish snapshot and active histories first, then make indexes visible."""
+def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None):
+    """Commit StormProb inputs, then publish derived JSON and indexes."""
     from EdgeWARN.ctam.publication import CTAMPublicationCoordinator
+    from EdgeWARN.stormprob.database import StormProbRepository, clean_projection
     from .history import CellHistoryManager
 
-    snapshot = CellDataSaver(None, None, None, None, None, None).create_json_structure(timestamp, cells)
-    histories = CellHistoryManager(io_manager).prepare_cell_history_updates(cells)
+    projected_cells = [clean_projection(copy.deepcopy(cell)) for cell in cells]
+    for cell in projected_cells:
+        cell.pop("stormprob", None)
+    snapshot = CellDataSaver(None, None, None, None, None, None).create_json_structure(timestamp, projected_cells)
+    histories = CellHistoryManager(io_manager).prepare_cell_history_updates(projected_cells)
     payloads = {json_path: snapshot, **histories}
+    manifest_record = None
+    if input_manifest is not None:
+        manifest_record = {
+            "cycle_time": input_manifest.cycle_time,
+            "inputs": [{"family": item.family, "product": item.product,
+                        "analysis_time": item.analysis_time,
+                        "local_path": str(item.local_path), "validated": item.validated}
+                       for item in input_manifest.inputs],
+        }
+    repository = StormProbRepository()
+    repository.commit_cycle(str(timestamp), timestamp, cells, manifest_record,
+                            projection_cells=projected_cells, projection_path=json_path)
     coordinator = CTAMPublicationCoordinator(fs.DATA_DIR / "ctam" / "transactions")
     coordinator.recover()
-    coordinator.publish(payloads, publish_indexes=lambda: _update_api_indexes(cells, remove_old_cells), transaction_id=str(timestamp).replace(":", "-"))
+    coordinator.publish(payloads, publish_indexes=lambda: _update_api_indexes(projected_cells, remove_old_cells, timestamp), transaction_id=str(timestamp).replace(":", "-"),
+                        db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
+    repository.mark_projection_published(str(timestamp))
+    try:
+        repository.backup_if_due()
+    except Exception as exc:
+        io_manager.write_warning(f"StormProb daily backup failed: {exc}")
 
 
 def _update_history(cells, timestamp):
@@ -491,7 +513,7 @@ def _update_history(cells, timestamp):
         io_manager.write_error(f"Failed to update cell history: {e}")
 
 
-def _update_api_indexes(cells, remove_old_cells):
+def _update_api_indexes(cells, remove_old_cells, timestamp):
     try:
         from EdgeWARN.api_integration.index_manager import APIIndexManager
 
@@ -500,12 +522,14 @@ def _update_api_indexes(cells, remove_old_cells):
         active_cell_ids = [cell["id"] for cell in cells if "timestamp" in cell]
 
         def _update():
+            api_index.update_stormcell_index(datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).strftime("%Y%m%d-%H%M%S"))
             api_index.update_cell_index(active_cell_ids)
             api_index.cleanup_inactive_cells()
 
         _run_step("Integration - API Index", _update)
     except Exception as e:
         io_manager.write_error(f"Failed to update API indexes: {e}")
+        raise
 
 
 def main(
@@ -546,7 +570,7 @@ def main(
     )
 
     try:
-        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells))
+        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells, input_manifest))
     except Exception as exc:
         io_manager.write_error(f"Failed to save integrated stormcells to {json_path}: {exc}")
         raise
