@@ -42,9 +42,10 @@ Errors use `application/problem+json`.
 - Styles: `/api/v3/styles/colormaps`
 - Infrastructure: `/health/live`, `/health/ready`
 
-Canonical render IDs use lower-kebab-case, such as `comp-ref-qc`, `qpe-01h`,
-and `goes-abi-c13`. The product catalog preserves the mapping to runtime
-folders and legacy file prefixes.
+Canonical render IDs equal the render layer name / file prefix, such as `MRMS_MergedReflectivityQC`, `MRMS_QPE`,
+and `GOES_ABI_C13_BrightnessTemp`. The product catalog preserves the mapping to runtime
+folders and legacy aliases. The id charset (`[A-Za-z0-9_.-]+`) is frozen so 3.1.0
+dynamic ingest/render products only add catalog entries.
 
 ## EWMRS binary chunks
 

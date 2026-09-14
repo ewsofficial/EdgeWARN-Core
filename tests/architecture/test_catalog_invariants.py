@@ -600,7 +600,9 @@ def test_the_colormap_accessor_hands_back_a_mutable_copy(render):
 
 # --- API product catalog --------------------------------------------------
 
-PRODUCT_SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+# v3 render id == render layer name == legacyFilePrefix. Charset frozen for 3.1.0
+# dynamic ingest/render products (same as RAP layerId charset).
+PRODUCT_SLUG = r"[A-Za-z0-9_.-]+"
 
 
 def _node_product_catalog():

@@ -64,7 +64,7 @@
     "parameters": {
       "cellId": {"name": "cellId", "in": "path", "required": true, "schema": {"type": "string"}},
       "alertId": {"name": "alertId", "in": "path", "required": true, "schema": {"type": "string"}},
-      "productId": {"name": "productId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"}},
+      "productId": {"name": "productId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"}},
       "siteId": {"name": "siteId", "in": "path", "required": true, "schema": {"type": "string"}},
       "layerId": {"name": "layerId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"}},
       "elevation": {"name": "elevation", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^\\d{1,3}(?:\\.\\d{1,2})?$"}},

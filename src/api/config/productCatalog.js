@@ -1,13 +1,16 @@
 import catalog from './product-catalog.json' with { type: 'json' };
 
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// v3 render id == render layer name == legacyFilePrefix (e.g. MRMS_MergedReflectivityQC).
+// Charset is frozen for 3.1.0 dynamic ingest/render products: 3.1.0 adds catalog
+// entries only, no route or validation change. Matches the layerId charset.
+const PRODUCT_ID = /^[A-Za-z0-9_.-]+$/;
 
 function assertCatalog(entries) {
   const ids = new Set();
   const legacyIds = new Set();
   const directories = new Set();
   for (const entry of entries) {
-    if (!entry || !SLUG.test(entry.id) || !entry.legacyId || !entry.storageDirectory || !entry.legacyFilePrefix) {
+    if (!entry || !PRODUCT_ID.test(entry.id) || !entry.legacyId || !entry.storageDirectory || !entry.legacyFilePrefix) {
       throw new Error('Invalid render product catalog entry');
     }
     for (const [set, value, field] of [[ids, entry.id, 'id'], [legacyIds, entry.legacyId, 'legacyId'], [directories, entry.storageDirectory, 'storageDirectory']]) {

@@ -50,8 +50,8 @@ describe('unified API services', () => {
     await fs.writeFile(path.join(product, 'index.json'), '{"timestamps":["20260317-200000"]}');
     await fs.writeFile(path.join(product, 'MRMS_MergedReflectivityQC_20260317-200000.png'), 'png');
     const service = createRenderService(new ArtifactRepository({ gui: path.join(root, 'gui') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT), RENDER_DEFAULTS, 1024);
-    await expect(service.listSnapshots('comp-ref-qc')).resolves.toEqual(['20260317-200000']);
-    const opened = await service.image('comp-ref-qc', '20260317-200000');
+    await expect(service.listSnapshots('MRMS_MergedReflectivityQC')).resolves.toEqual(['20260317-200000']);
+    const opened = await service.image('MRMS_MergedReflectivityQC', '20260317-200000');
     await expect(opened.handle.readFile()).resolves.toEqual(Buffer.from('png'));
     await opened.handle.close();
   });
@@ -63,7 +63,7 @@ describe('unified API services', () => {
     await fs.writeFile(path.join(product, 'index.json'), '{"tile_grid":{"rows":2,"cols":3,"tile_size":256}}');
     await fs.writeFile(path.join(product, '20260317-200000', 'index.json'), '{"tiles":[[2,1]]}');
     const service = createRenderService(new ArtifactRepository({ gui: path.join(root, 'gui') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT), RENDER_DEFAULTS, 1024);
-    await expect(service.tiles('comp-ref-qc', '20260317-200000')).resolves.toEqual({ grid: { rows: 2, cols: 3, tileSize: 256 }, tiles: [[2, 1]] });
+    await expect(service.tiles('MRMS_MergedReflectivityQC', '20260317-200000')).resolves.toEqual({ grid: { rows: 2, cols: 3, tileSize: 256 }, tiles: [[2, 1]] });
   });
 
   it('opens only indexed RGBA chunks with their exact expected length', async () => {
@@ -75,10 +75,10 @@ describe('unified API services', () => {
     await fs.writeFile(path.join(product, timestamp, 'index.json'), JSON.stringify({ schema_version: 2, timestamp, representation: 'binary_chunks', chunk_format: format, tile_grid: { rows: 1, cols: 1, tile_size: 2 }, chunks: [[0, 0]] }));
     await fs.writeFile(path.join(product, timestamp, 'chunks', 'chunk_0_0.f16.gz'), Buffer.from('H4sIAAAAAAAC/2NggAAAad8iZQgAAAA=', 'base64'));
     const service = createRenderService(new ArtifactRepository({ gui: path.join(root, 'gui') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT), RENDER_DEFAULTS, 1024);
-    await expect(service.chunks('comp-ref-qc', timestamp)).resolves.toMatchObject({ chunks: [[0, 0]], grid: { tileSize: 2 } });
-    const opened = await service.chunk('comp-ref-qc', timestamp, 0, 0);
+    await expect(service.chunks('MRMS_MergedReflectivityQC', timestamp)).resolves.toMatchObject({ chunks: [[0, 0]], grid: { tileSize: 2 } });
+    const opened = await service.chunk('MRMS_MergedReflectivityQC', timestamp, 0, 0);
     expect(opened.size).toBe(23); await opened.handle.close();
-    await expect(service.chunk('comp-ref-qc', timestamp, 1, 0)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(service.chunk('MRMS_MergedReflectivityQC', timestamp, 1, 0)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('closes a RAP data handle when its metadata is malformed', async () => {

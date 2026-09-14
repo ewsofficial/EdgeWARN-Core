@@ -120,7 +120,7 @@ describe('binary producer/consumer contracts through the real API', () => {
   it('serves the float16 chunk gzip payload with float16/no-data headers', async () => {
     const reference = await fixtureBytes('render/CompRefQC/20260317-200000/chunks/chunk_0_0.f16.gz');
     const response = await request(app)
-      .get(`/api/v3/render-products/comp-ref-qc/snapshots/${TIMESTAMP}/chunks/0/0`)
+      .get(`/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/${TIMESTAMP}/chunks/0/0`)
       .expect(200)
       .expect('Content-Type', /application\/octet-stream/);
     expect(response.headers['x-data-type']).toBe('float16');
