@@ -97,21 +97,21 @@ class BuiltinStormProbAdapter:
         radii = postprocess.sample_radii(outputs["coefficient_mean"],
             outputs["coefficient_log_std"],
             np.asarray(inputs["radial_history"])[-1:])
-        original_polygon = cell.get("bbox")
-        if original_polygon is None:
-            geometry = cell.get("stormprob", {}).get("geometry", {})
-            original_polygon = geometry.get("polygon_full")
-        if original_polygon is None:
-            raise ValueError("missing-original-polygon")
+        # These are the same committed PS polygon and PS-only centroid used
+        # to construct the radial history supplied to the model.
+        original_polygon = observation["polygon"]
+        original_centroid = observation["centroid"]
+        if original_polygon is None or original_centroid is None:
+            raise ValueError("missing-original-ps-geometry")
         analysis = _utc(timestamp)
         forecasts = []
         for index, lead in enumerate(LEADS):
             east, north = map(float, displacement[0, index])
-            lat, lon = map(float, cell["centroid"])
+            lat, lon = map(float, original_centroid)
             lon += east / (111.0 * math.cos(math.radians(lat)))
             lat += north / 111.0
             polygon = postprocess.operational_envelope(
-                original_polygon, cell["centroid"], displacement[0, index],
+                original_polygon, original_centroid, displacement[0, index],
                 radii[0, :, index], calibrator, index)
             forecasts.append({
                 "cell_id": str(cell["id"]), "analysis_time": timestamp,

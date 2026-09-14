@@ -392,3 +392,30 @@ def test_probsevere_geometry_rasterizes_local_window(monkeypatch):
     assert out_shapes
     assert out_shapes[0][0] < len(lats)
     assert out_shapes[0][1] < len(lons)
+
+
+def test_stormprob_uses_original_ps_polygon_and_its_own_centroid():
+    lats = 35.0 + np.arange(5) * 0.01
+    lons = 265.0 + np.arange(5) * 0.01
+    refl = np.ones((5, 5), dtype=float)
+    expanded = np.full((5, 5), 7, dtype=np.int32)
+    radar = xr.Dataset({'unknown': (('latitude', 'longitude'), refl)},
+                       coords={'latitude': lats, 'longitude': lons})
+    expanded_ds = xr.Dataset({'PolygonID': (('latitude', 'longitude'), expanded)},
+                             coords={'latitude': lats, 'longitude': lons})
+    ps_ring = [[265.0, 35.0], [265.02, 35.0], [265.02, 35.02],
+               [265.0, 35.02], [265.0, 35.0]]
+    ps = {'features': [{'properties': {'ID': 7},
+                       'geometry': {'type': 'Polygon', 'coordinates': [ps_ring]}}]}
+    expanded_ring = [[35.0, 265.0], [35.0, 265.04],
+                     [35.04, 265.04], [35.04, 265.0]]
+    entry = CellDataSaver({7: expanded_ring}, radar, None, expanded_ds,
+                          ps, None).create_entry()[0]
+    stored = entry['stormprob']['geometry']
+
+    assert entry['bbox'] == expanded_ring
+    assert entry['centroid'] == (35.02, 265.02)
+    assert stored['polygon_full'] == [[lat, lon] for lon, lat in ps_ring]
+    assert stored['centroid_full'][0] < entry['centroid'][0]
+    assert stored['centroid_full'][1] < entry['centroid'][1]
+    assert stored['radial']['status'] == 'ok'

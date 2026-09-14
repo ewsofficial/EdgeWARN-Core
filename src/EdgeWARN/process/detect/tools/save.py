@@ -223,55 +223,44 @@ class CellDataSaver:
             cmin + col_offset,
         )
 
-    def __create_entry_from_mask(self, poly_id, bbox, mask, grid_slice, morphology_engine):
+    def __weighted_centroid(self, mask, grid_slice):
+        """Reflectivity-weighted centroid of gates selected by one polygon."""
+        rows, cols = np.nonzero(mask)
+        refl_vals = self.radar_ds['unknown'].values[grid_slice][mask]
+        valid = ~np.isnan(refl_vals)
+        refl_vals = refl_vals[valid]
+        if not refl_vals.size:
+            return None, float('nan')
+        rows = rows[valid] + grid_slice[0].start
+        cols = cols[valid] + grid_slice[1].start
+        lats = self.radar_ds['latitude'].values
+        lons = self.radar_ds['longitude'].values
+        if lats.ndim == 1:
+            lat_vals, lon_vals = lats[rows], lons[cols]
+        else:
+            lat_vals, lon_vals = lats[rows, cols], lons[rows, cols]
+        maximum = float(np.nanmax(refl_vals))
+        weights = np.exp(refl_vals - maximum)
+        total = np.sum(weights)
+        if total <= 0:
+            return None, maximum
+        return (float(np.sum(lat_vals * weights) / total),
+                float(np.sum(lon_vals * weights) / total) % 360), maximum
+
+    def __create_entry_from_mask(self, poly_id, bbox, mask, grid_slice, morphology_engine,
+                                 stormprob_polygon=None, stormprob_mask_slice=None):
         count = np.count_nonzero(mask)
         if count == 0:
             return None
 
         _centroid_decimals = section("save")["centroid_decimals"]
-        refl_grid = self.radar_ds['unknown'].values
-        lats = self.radar_ds['latitude'].values
-        lons = self.radar_ds['longitude'].values
-
-        rows, cols = np.nonzero(mask)
-        refl_slice = refl_grid[grid_slice]
+        refl_slice = self.radar_ds['unknown'].values[grid_slice]
         morph_stats = morphology_engine.process_cell(mask, refl_slice)
 
-        refl_vals = refl_slice[mask]
-        valid_refl_mask = ~np.isnan(refl_vals)
-        refl_vals = refl_vals[valid_refl_mask]
-
-        # Full-precision analysis centroid retained before JSON rounding for
-        # StormProb radial inputs (Phase 1). The rounded ``centroid`` below
-        # stays the serialized contract; ``centroid_full`` is additive.
-        centroid_full = None
-        if refl_vals.size > 0:
-            global_rows = rows[valid_refl_mask] + grid_slice[0].start
-            global_cols = cols[valid_refl_mask] + grid_slice[1].start
-            if lats.ndim == 1:
-                lat_vals = lats[global_rows]
-                lon_vals = lons[global_cols]
-            else:
-                lat_vals = lats[global_rows, global_cols]
-                lon_vals = lons[global_rows, global_cols]
-
-            max_refl_val = float(np.nanmax(refl_vals))
-            weights = np.exp(refl_vals - max_refl_val)
-            sum_weights = np.sum(weights)
-
-            if sum_weights > 0:
-                lat_centroid_full = float(np.sum(lat_vals * weights) / sum_weights)
-                lon_centroid_full = float(np.sum(lon_vals * weights) / sum_weights) % 360
-                centroid_full = (lat_centroid_full, lon_centroid_full)
-                centroid = (
-                    round(lat_centroid_full, _centroid_decimals),
-                    round(lon_centroid_full, _centroid_decimals),
-                )
-            else:
-                centroid = (np.nan, np.nan)
-        else:
-            max_refl_val = float('nan')
-            centroid = (np.nan, np.nan)
+        # Keep the public detection centroid tied to its detection mask.
+        centroid_full, max_refl_val = self.__weighted_centroid(mask, grid_slice)
+        centroid = (tuple(round(value, _centroid_decimals) for value in centroid_full)
+                    if centroid_full is not None else (np.nan, np.nan))
 
         if self.use_probsevere_geometry:
             hail_core = self.__create_direct_hailcore_polygon(
@@ -296,15 +285,15 @@ class CellDataSaver:
             }
         }
 
-        # Phase 1 StormProb geometry: full-precision centroid + pre-rounding
-        # detection polygon, 64-ray east-CCW profile, exact log-area.
-        # ``bbox`` arrives at gatemapper 3-decimal precision on the watershed
-        # path (full float precision on the ProbSevere-geometry path); the
-        # radial math is identical either way. Failure-isolated: detection
-        # output must survive a geometry failure.
+        # StormProb was trained on the original ProbSevere polygon. Its radial
+        # profile and centroid must both come from that polygon, even when the
+        # public detection footprint has been expanded by the watershed path.
         try:
             from EdgeWARN.stormprob.geometry import attach_stormprob_geometry
-            attach_stormprob_geometry(entry, centroid_full, bbox)
+            ps_centroid = None
+            if stormprob_mask_slice is not None:
+                ps_centroid, _ = self.__weighted_centroid(*stormprob_mask_slice)
+            attach_stormprob_geometry(entry, ps_centroid, stormprob_polygon)
         except Exception:
             pass
 
@@ -335,6 +324,8 @@ class CellDataSaver:
                 mask,
                 mask_slice,
                 morphology_engine,
+                stormprob_polygon=bbox,
+                stormprob_mask_slice=(mask, mask_slice),
             )
             if entry is not None:
                 results.append(entry)
@@ -371,6 +362,14 @@ class CellDataSaver:
             return []
             
         slices = scipy.ndimage.find_objects(polygon_grid, max_label=max_id)
+        ps_geometries = {}
+        for feature in (self.ps_ds or {}).get('features', []):
+            try:
+                ps_id = int((feature.get('properties') or {}).get('ID', 0) or 0)
+                if ps_id > 0 and feature.get('geometry'):
+                    ps_geometries[ps_id] = self.__normalize_geometry(feature['geometry'])
+            except (TypeError, ValueError):
+                continue
 
         for poly_id, bbox in self.bboxes.items():
             if poly_id == 0:
@@ -386,6 +385,13 @@ class CellDataSaver:
 
             # Extract sub-grids
             mask_slice = polygon_grid[sl] == poly_id
+            ps_geometry = ps_geometries.get(poly_id)
+            ps_polygon = (self.__geometry_to_bbox_points(ps_geometry)
+                          if ps_geometry is not None else None)
+            ps_mask_slice = (self.__geometry_to_mask_and_slice(ps_geometry)
+                             if ps_geometry is not None else (None, None))
+            if ps_mask_slice[0] is None:
+                ps_mask_slice = None
             
             # Pre-filter: if mask is empty (shouldn't happen if slice is valid)
             entry = self.__create_entry_from_mask(
@@ -394,6 +400,8 @@ class CellDataSaver:
                 mask_slice,
                 sl,
                 MorphologyEngine,
+                stormprob_polygon=ps_polygon,
+                stormprob_mask_slice=ps_mask_slice,
             )
             if entry is not None:
                 results.append(entry)
