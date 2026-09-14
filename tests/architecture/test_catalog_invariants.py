@@ -170,7 +170,7 @@ def test_goes_abi_channels_are_unique(mrms_goes):
 
 def test_mrms_render_layers_are_unique(render):
     layers = render["mrms_layers"]
-    assert len(layers) == 15
+    assert len(layers) == 16
     assert duplicates([layer["name"] for layer in layers]) == {}
     assert duplicates([layer["filepath"] for layer in layers]) == {}
     assert duplicates([layer["outdir"] for layer in layers]) == {}

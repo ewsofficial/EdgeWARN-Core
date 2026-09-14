@@ -18,7 +18,7 @@ src/api/
 ├── config/
 │   ├── index.js                # catalog load + CLI/env overlay resolution
 │   ├── productCatalog.js       # catalog invariants and lookup maps
-│   └── product-catalog.json    # 31 render products
+│   └── product-catalog.json    # 32 render products
 ├── openapi/v3.yaml             # JSON despite the extension; served verbatim at /api/v3/openapi.json
 ├── middleware/
 │   ├── requestId.js

@@ -239,9 +239,9 @@ def test_ewmrs_goes_render_layers_baseline():
 def test_ewmrs_render_layer_lengths():
     from EWMRS.render.config import get_file_list, get_goes_file_list, get_mrms_file_list
 
-    assert len(get_mrms_file_list()) == 15
+    assert len(get_mrms_file_list()) == 16
     assert len(get_goes_file_list()) == 16
-    assert len(get_file_list()) == 31
+    assert len(get_file_list()) == 32
 
 
 def test_ewmrs_render_layer_names_are_unique():

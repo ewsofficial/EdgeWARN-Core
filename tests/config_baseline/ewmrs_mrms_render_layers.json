@@ -103,5 +103,12 @@
     "filepath": "fs:MRMS_MESH_DIR",
     "outdir": "fs:GUI_MESH_DIR",
     "required": true
+  },
+  {
+    "name": "MRMS_NLDN",
+    "colormap_key": "VILDensity",
+    "filepath": "fs:MRMS_NLDN_DIR",
+    "outdir": "fs:GUI_NLDN_DIR",
+    "required": true
   }
 ]

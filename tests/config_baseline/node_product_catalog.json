@@ -66,6 +66,12 @@
     "representation": "png-tiles"
   },
   {
+    "id": "MRMS_NLDN",
+    "storageDirectory": "NLDN",
+    "legacyFilePrefix": "MRMS_NLDN",
+    "representation": "png-tiles"
+  },
+  {
     "id": "MRMS_QPE",
     "storageDirectory": "QPE_01H",
     "legacyFilePrefix": "MRMS_QPE",

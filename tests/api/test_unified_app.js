@@ -47,7 +47,7 @@ describe('unified API app', () => {
       source: { schemaVersion: 1 },
       overrides: ['EDGEWARN_BASE_DIR', 'RATE_LIMIT_MAX_SEC', 'RATE_LIMIT_MAX_MIN'],
       restartRequired: true,
-      effective: { baseDir, renderProductCount: 31, radarProductCount: 7 },
+      effective: { baseDir, renderProductCount: 32, radarProductCount: 7 },
     });
     const ready = await request(app).get('/health/ready').expect(200);
     expect(ready.body.config).toEqual(live.body.config);

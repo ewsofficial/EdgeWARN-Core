@@ -32,7 +32,7 @@ describe('unified API contract specification', () => {
   });
 
   it('has a collision-free canonical product catalog with legacy parity', () => {
-    expect(productCatalog).toHaveLength(31);
+    expect(productCatalog).toHaveLength(32);
     expect(productById.size).toBe(productCatalog.length);
     expect(productByLegacyId.size).toBe(productCatalog.length);
     expect(productById.get('MRMS_MergedReflectivityQC').storageDirectory).toBe('CompRefQC');

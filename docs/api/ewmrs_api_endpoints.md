@@ -63,7 +63,7 @@ Response:
 Currently mapped products include MRMS layers and GOES products.
 
 - `CompRefQC`, `EchoTop18`, `EchoTop30`, `RALA`, `Ref0C`, `RefM5C`, `RefM15C`
-- `PrecipRate`, `QPE_01H`, `VIL`, `VILDensity`, `VII`, `MESH`
+- `PrecipRate`, `QPE_01H`, `VIL`, `VILDensity`, `VII`, `MESH`, `NLDN`
 - `AzShearLow`, `AzShearMid`
 - `GOES_ABI_C01`, `GOES_ABI_C02`, `GOES_ABI_C03`, `GOES_ABI_C04`, `GOES_ABI_C05`, `GOES_ABI_C06`
 - `GOES_ABI_C07`, `GOES_ABI_C08`, `GOES_ABI_C09`, `GOES_ABI_C10`, `GOES_ABI_C11`, `GOES_ABI_C12`

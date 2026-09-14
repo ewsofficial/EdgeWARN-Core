@@ -75,4 +75,4 @@ validation:
   radar_products: [DBZH, VRADH, WRADH, PHIDP, CCORH, RHOHV, ZDR]
 
 product_catalog:
-  entries: 31
+  entries: 32
