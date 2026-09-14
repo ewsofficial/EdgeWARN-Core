@@ -1,7 +1,6 @@
 [
   {
     "id": "MRMS_MergedReflectivityQC",
-    "legacyId": "CompRefQC",
     "storageDirectory": "CompRefQC",
     "legacyFilePrefix": "MRMS_MergedReflectivityQC",
     "representation": "png-tiles",
@@ -9,7 +8,6 @@
   },
   {
     "id": "MRMS_EchoTop18",
-    "legacyId": "EchoTop18",
     "storageDirectory": "EchoTop18",
     "legacyFilePrefix": "MRMS_EchoTop18",
     "representation": "png-tiles",
@@ -17,7 +15,6 @@
   },
   {
     "id": "MRMS_EchoTop30",
-    "legacyId": "EchoTop30",
     "storageDirectory": "EchoTop30",
     "legacyFilePrefix": "MRMS_EchoTop30",
     "representation": "png-tiles",
@@ -25,7 +22,6 @@
   },
   {
     "id": "MRMS_ReflectivityAtLowestAltitude",
-    "legacyId": "RALA",
     "storageDirectory": "RALA",
     "legacyFilePrefix": "MRMS_ReflectivityAtLowestAltitude",
     "representation": "png-tiles",
@@ -33,28 +29,24 @@
   },
   {
     "id": "MRMS_ReflectivityAt0C",
-    "legacyId": "Ref0C",
     "storageDirectory": "Ref0C",
     "legacyFilePrefix": "MRMS_ReflectivityAt0C",
     "representation": "png-tiles"
   },
   {
     "id": "MRMS_ReflectivityAtM5C",
-    "legacyId": "RefM5C",
     "storageDirectory": "RefM5C",
     "legacyFilePrefix": "MRMS_ReflectivityAtM5C",
     "representation": "png-tiles"
   },
   {
     "id": "MRMS_ReflectivityAtM15C",
-    "legacyId": "RefM15C",
     "storageDirectory": "RefM15C",
     "legacyFilePrefix": "MRMS_ReflectivityAtM15C",
     "representation": "png-tiles"
   },
   {
     "id": "MRMS_PrecipRate",
-    "legacyId": "PrecipRate",
     "storageDirectory": "PrecipRate",
     "legacyFilePrefix": "MRMS_PrecipRate",
     "representation": "png-tiles",
@@ -62,7 +54,6 @@
   },
   {
     "id": "MRMS_VIL",
-    "legacyId": "VIL",
     "storageDirectory": "VIL",
     "legacyFilePrefix": "MRMS_VIL",
     "representation": "png-tiles",
@@ -70,7 +61,6 @@
   },
   {
     "id": "MRMS_VILDensity",
-    "legacyId": "VILDensity",
     "storageDirectory": "VILDensity",
     "legacyFilePrefix": "MRMS_VILDensity",
     "representation": "png-tiles",
@@ -78,7 +68,6 @@
   },
   {
     "id": "MRMS_MESH",
-    "legacyId": "MESH",
     "storageDirectory": "MESH",
     "legacyFilePrefix": "MRMS_MESH",
     "representation": "png-tiles",
@@ -86,7 +75,6 @@
   },
   {
     "id": "MRMS_QPE",
-    "legacyId": "QPE_01H",
     "storageDirectory": "QPE_01H",
     "legacyFilePrefix": "MRMS_QPE",
     "representation": "png-tiles",
@@ -94,7 +82,6 @@
   },
   {
     "id": "MRMS_VII",
-    "legacyId": "VII",
     "storageDirectory": "VII",
     "legacyFilePrefix": "MRMS_VII",
     "representation": "png-tiles",
@@ -102,7 +89,6 @@
   },
   {
     "id": "MRMS_MergedAzShear_0-2kmAGL",
-    "legacyId": "AzShearLow",
     "storageDirectory": "AzShearLow",
     "legacyFilePrefix": "MRMS_MergedAzShear_0-2kmAGL",
     "representation": "png-tiles",
@@ -110,7 +96,6 @@
   },
   {
     "id": "MRMS_MergedAzShear_3-6kmAGL",
-    "legacyId": "AzShearMid",
     "storageDirectory": "AzShearMid",
     "legacyFilePrefix": "MRMS_MergedAzShear_3-6kmAGL",
     "representation": "png-tiles",
@@ -118,7 +103,6 @@
   },
   {
     "id": "GOES_ABI_C01_Reflectance",
-    "legacyId": "GOES_ABI_C01",
     "storageDirectory": "GOES_ABI_C01",
     "legacyFilePrefix": "GOES_ABI_C01_Reflectance",
     "representation": "png-tiles",
@@ -126,7 +110,6 @@
   },
   {
     "id": "GOES_ABI_C02_Reflectance",
-    "legacyId": "GOES_ABI_C02",
     "storageDirectory": "GOES_ABI_C02",
     "legacyFilePrefix": "GOES_ABI_C02_Reflectance",
     "representation": "png-tiles",
@@ -134,7 +117,6 @@
   },
   {
     "id": "GOES_ABI_C03_Reflectance",
-    "legacyId": "GOES_ABI_C03",
     "storageDirectory": "GOES_ABI_C03",
     "legacyFilePrefix": "GOES_ABI_C03_Reflectance",
     "representation": "png-tiles",
@@ -142,7 +124,6 @@
   },
   {
     "id": "GOES_ABI_C04_Reflectance",
-    "legacyId": "GOES_ABI_C04",
     "storageDirectory": "GOES_ABI_C04",
     "legacyFilePrefix": "GOES_ABI_C04_Reflectance",
     "representation": "png-tiles",
@@ -150,7 +131,6 @@
   },
   {
     "id": "GOES_ABI_C05_Reflectance",
-    "legacyId": "GOES_ABI_C05",
     "storageDirectory": "GOES_ABI_C05",
     "legacyFilePrefix": "GOES_ABI_C05_Reflectance",
     "representation": "png-tiles",
@@ -158,7 +138,6 @@
   },
   {
     "id": "GOES_ABI_C06_Reflectance",
-    "legacyId": "GOES_ABI_C06",
     "storageDirectory": "GOES_ABI_C06",
     "legacyFilePrefix": "GOES_ABI_C06_Reflectance",
     "representation": "png-tiles",
@@ -166,49 +145,42 @@
   },
   {
     "id": "GOES_ABI_C07_BrightnessTemp",
-    "legacyId": "GOES_ABI_C07",
     "storageDirectory": "GOES_ABI_C07",
     "legacyFilePrefix": "GOES_ABI_C07_BrightnessTemp",
     "representation": "png-tiles"
   },
   {
     "id": "GOES_ABI_C08_BrightnessTemp",
-    "legacyId": "GOES_ABI_C08",
     "storageDirectory": "GOES_ABI_C08",
     "legacyFilePrefix": "GOES_ABI_C08_BrightnessTemp",
     "representation": "png-tiles"
   },
   {
     "id": "GOES_ABI_C09_BrightnessTemp",
-    "legacyId": "GOES_ABI_C09",
     "storageDirectory": "GOES_ABI_C09",
     "legacyFilePrefix": "GOES_ABI_C09_BrightnessTemp",
     "representation": "png-tiles"
   },
   {
     "id": "GOES_ABI_C10_BrightnessTemp",
-    "legacyId": "GOES_ABI_C10",
     "storageDirectory": "GOES_ABI_C10",
     "legacyFilePrefix": "GOES_ABI_C10_BrightnessTemp",
     "representation": "png-tiles"
   },
   {
     "id": "GOES_ABI_C11_BrightnessTemp",
-    "legacyId": "GOES_ABI_C11",
     "storageDirectory": "GOES_ABI_C11",
     "legacyFilePrefix": "GOES_ABI_C11_BrightnessTemp",
     "representation": "png-tiles"
   },
   {
     "id": "GOES_ABI_C12_BrightnessTemp",
-    "legacyId": "GOES_ABI_C12",
     "storageDirectory": "GOES_ABI_C12",
     "legacyFilePrefix": "GOES_ABI_C12_BrightnessTemp",
     "representation": "png-tiles"
   },
   {
     "id": "GOES_ABI_C13_BrightnessTemp",
-    "legacyId": "GOES_ABI_C13",
     "storageDirectory": "GOES_ABI_C13",
     "legacyFilePrefix": "GOES_ABI_C13_BrightnessTemp",
     "representation": "png-tiles",
@@ -216,7 +188,6 @@
   },
   {
     "id": "GOES_ABI_C14_BrightnessTemp",
-    "legacyId": "GOES_ABI_C14",
     "storageDirectory": "GOES_ABI_C14",
     "legacyFilePrefix": "GOES_ABI_C14_BrightnessTemp",
     "representation": "png-tiles",
@@ -224,7 +195,6 @@
   },
   {
     "id": "GOES_ABI_C15_BrightnessTemp",
-    "legacyId": "GOES_ABI_C15",
     "storageDirectory": "GOES_ABI_C15",
     "legacyFilePrefix": "GOES_ABI_C15_BrightnessTemp",
     "representation": "png-tiles",
@@ -232,7 +202,6 @@
   },
   {
     "id": "GOES_ABI_C16_BrightnessTemp",
-    "legacyId": "GOES_ABI_C16",
     "storageDirectory": "GOES_ABI_C16",
     "legacyFilePrefix": "GOES_ABI_C16_BrightnessTemp",
     "representation": "png-tiles"

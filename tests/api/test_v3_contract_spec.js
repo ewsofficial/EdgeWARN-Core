@@ -35,7 +35,7 @@ describe('unified API contract specification', () => {
     expect(productCatalog).toHaveLength(31);
     expect(productById.size).toBe(productCatalog.length);
     expect(productByLegacyId.size).toBe(productCatalog.length);
-    expect(productById.get('MRMS_MergedReflectivityQC').legacyId).toBe('CompRefQC');
+    expect(productById.get('MRMS_MergedReflectivityQC').storageDirectory).toBe('CompRefQC');
     expect(productById.get('GOES_ABI_C13_BrightnessTemp').legacyFilePrefix).toBe('GOES_ABI_C13_BrightnessTemp');
     expect(productByLegacyId.get('QPE_01H').id).toBe('MRMS_QPE');
     expect(productById.get('goes-rgb-true-color')).toBeUndefined();

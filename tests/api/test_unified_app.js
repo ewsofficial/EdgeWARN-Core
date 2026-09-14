@@ -138,6 +138,10 @@ describe('unified API app', () => {
       '/api/v3/analyses/wpc/surface/20260317-200000', '/api/v3/styles/colormaps'
     ];
     for (const endpoint of paths) await request(app).get(endpoint).expect(200);
+    const renderProducts = await request(app).get('/api/v3/render-products').expect(200);
+    expect(renderProducts.body.data[0]).not.toHaveProperty('legacyId');
+    const renderProduct = await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC').expect(200);
+    expect(renderProduct.body.data).not.toHaveProperty('legacyId');
     const chunk = await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/chunks/0/0').expect(200).expect('Content-Type', /application\/octet-stream/);
     expect(chunk.headers['cache-control']).toContain('immutable');
     expect(chunk.headers['x-data-type']).toBe('float16');

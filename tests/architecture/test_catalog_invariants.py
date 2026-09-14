@@ -614,7 +614,7 @@ def _node_product_catalog():
 
 
 def test_api_product_catalog_route_keys_are_unique(api):
-    """`id` and `legacyId` are both used to address a product over HTTP.
+    """Canonical ids and storage directories are both unique route keys.
 
     The length is compared against `product_catalog.entries` rather than a literal.
     api.yaml records the count and the JSON holds the entries; nothing derives one
@@ -626,7 +626,6 @@ def test_api_product_catalog_route_keys_are_unique(api):
     assert len(entries) == api["product_catalog"]["entries"]
 
     assert duplicates([entry["id"] for entry in entries]) == {}
-    assert duplicates([entry["legacyId"] for entry in entries]) == {}
     assert duplicates([entry["storageDirectory"] for entry in entries]) == {}
     assert duplicates([entry["legacyFilePrefix"] for entry in entries]) == {}
 
@@ -646,7 +645,7 @@ def test_api_product_catalog_entries_carry_every_field_the_loader_dereferences()
     snapshot is which fields the code dereferences, so that is what this covers.
     """
     entries = _node_product_catalog()
-    required = {"id", "legacyId", "storageDirectory", "legacyFilePrefix", "representation"}
+    required = {"id", "storageDirectory", "legacyFilePrefix", "representation"}
 
     for entry in entries:
         label = entry.get("id")
