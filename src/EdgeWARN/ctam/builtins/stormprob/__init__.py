@@ -83,8 +83,7 @@ class BuiltinStormProbAdapter:
             model_dir = assets.asset_dir()
             self._sessions = onnx_runtime.load_sessions(
                 model_dir, assets.manifest_path())
-        calibrator = onnx_runtime.load_calibrator(assets.asset_dir(), assets.manifest_path())
-        return calibrator
+        return onnx_runtime.load_calibrator(assets.asset_dir(), assets.manifest_path())
 
     def _finish(self, cell: dict[str, Any], inputs: dict, observation: dict,
                 outputs: dict, calibrator: dict) -> dict[str, Any]:
@@ -98,9 +97,12 @@ class BuiltinStormProbAdapter:
         radii = postprocess.sample_radii(outputs["coefficient_mean"],
             outputs["coefficient_log_std"],
             np.asarray(inputs["radial_history"])[-1:])
-        masks = postprocess.calibrated_masks(
-            postprocess.occupancy_probability(radii, displacement), calibrator)
-        contours = postprocess.polygons_from_masks(masks, cell["centroid"])
+        original_polygon = cell.get("bbox")
+        if original_polygon is None:
+            geometry = cell.get("stormprob", {}).get("geometry", {})
+            original_polygon = geometry.get("polygon_full")
+        if original_polygon is None:
+            raise ValueError("missing-original-polygon")
         analysis = _utc(timestamp)
         forecasts = []
         for index, lead in enumerate(LEADS):
@@ -108,18 +110,21 @@ class BuiltinStormProbAdapter:
             lat, lon = map(float, cell["centroid"])
             lon += east / (111.0 * math.cos(math.radians(lat)))
             lat += north / 111.0
-            contour = contours[index]
-            status = "ok" if contour["geometry"] is not None else "no-polygon"
+            polygon = postprocess.operational_envelope(
+                original_polygon, cell["centroid"], displacement[0, index],
+                radii[0, :, index], calibrator, index)
             forecasts.append({
                 "cell_id": str(cell["id"]), "analysis_time": timestamp,
                 "lead_minutes": lead, "model_version": MODEL_VERSION,
                 "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
                 "radial_checkpoint_id": "radial-v7", "motion_checkpoint_id": "motion-best",
-                "status": status, "reason": None if status == "ok" else contour["status"],
+                "status": "ok", "reason": None,
                 "east_km": east, "north_km": north,
-                "predicted_centroid": [lat, lon], "polygon": contour["geometry"],
+                "predicted_centroid": [lat, lon], "polygon": polygon,
                 "probability_threshold": postprocess.THRESHOLD,
-                "metadata": {"geometry_kind": "instantaneous-probability-contour",
+                "metadata": {"geometry_kind": postprocess.OPERATIONAL_GEOMETRY_VERSION,
+                              "buffer_km": postprocess.OPERATIONAL_BUFFER_KM,
+                              "point_count": len(polygon["coordinates"][0]) - 1,
                               "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
                               "postprocess_version": postprocess.VERSION},
             })
