@@ -22,8 +22,9 @@ predictions. A later real-model row can be inserted in the same cycle
 transaction via `commit_cycle(..., forecasts=...)`.
 
 Centroids and detection polygons are `[latitude, longitude]` in the source
-domain. The forecast polygon contract will use GeoJSON `[longitude, latitude]`
-in Phase 4. Numeric vectors are little-endian IEEE 754 float32 blobs of exactly
+domain. Operational forecast polygons use GeoJSON `[longitude, latitude]` and
+are adaptive 4–12 point envelopes spanning the source and predicted polygons,
+with a 1 km metric buffer. Numeric vectors are little-endian IEEE 754 float32 blobs of exactly
 135 or 64 elements. SQL numeric fields must be finite; missing model channels
 use the pinned `-999` sentinel. JSON serialization rejects `NaN` and infinity;
 non-finite legacy projection numbers become `null`.
@@ -41,8 +42,8 @@ and left-padded.
 The packaged StormProb ONNX graphs use a fixed batch size of 128. During each
 CTAM cycle, ready cells are processed in chunks of up to 128, with zero padding
 for the last chunk. Skipped or invalid cells do not occupy a model slot; each
-successful output is mapped back to its original cell before contour
-postprocessing and alert handling. `inference_duration_ms` records a cell's
+successful output is mapped back to its original cell before operational
+geometry postprocessing and alert handling. `inference_duration_ms` records a cell's
 elapsed time through input preparation, shared batch execution, and its own
 postprocessing, so it is not the isolated ONNX kernel time. Re-exporting the
 graphs requires the pinned checkpoints and `scripts/export_stormprob_batch128.py`.

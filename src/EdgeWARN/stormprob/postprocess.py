@@ -13,11 +13,16 @@ import numpy as np
 
 
 VERSION = "stormprob-postprocess/v1"
+OPERATIONAL_GEOMETRY_VERSION = "stormprob-operational-envelope/v1"
 LEADS_MINUTES = (15, 30, 45, 60)
 ENSEMBLE_SIZE = 20
 GRID_HALF_WIDTH_KM = 100
 GRID_RESOLUTION_KM = 1
 THRESHOLD = 0.25
+OPERATIONAL_BUFFER_KM = 1.0
+OPERATIONAL_MIN_POINTS = 4
+OPERATIONAL_MAX_POINTS = 12
+OPERATIONAL_MAX_AREA_INFLATION = 1.25
 
 
 def sample_radii(mean, log_std, current_radii, *, noise=None):
@@ -94,6 +99,168 @@ def displacement(initial_wind_mps, residual_motion_mps):
         raise ValueError("Invalid StormProb wind or residual shape")
     seconds = np.asarray(LEADS_MINUTES, dtype=np.float32) * np.float32(60)
     return ((initial[None] + residual[0]) * seconds[:, None] / np.float32(1000))[None]
+
+
+def _vertex_count(polygon) -> int:
+    return max(0, len(polygon.exterior.coords) - 1)
+
+
+def _add_vertex_if_needed(polygon):
+    """Turn a triangular polygon into a four-vertex polygon."""
+    if _vertex_count(polygon) >= OPERATIONAL_MIN_POINTS:
+        return polygon
+    coords = list(polygon.exterior.coords)[:-1]
+    longest = max(range(len(coords)), key=lambda i: (
+        (coords[(i + 1) % len(coords)][0] - coords[i][0]) ** 2
+        + (coords[(i + 1) % len(coords)][1] - coords[i][1]) ** 2))
+    a = coords[longest]
+    b = coords[(longest + 1) % len(coords)]
+    midpoint = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+    coords.insert(longest + 1, midpoint)
+    from shapely.geometry import Polygon
+    return Polygon(coords)
+
+
+def _circumscribed_polygon(points, vertex_limit):
+    """Build an outer polygon with evenly distributed support-line normals."""
+    from shapely.geometry import Polygon
+
+    points = np.asarray(points, dtype=np.float64)
+    center = points.mean(axis=0)
+    centered = points - center
+    covariance = centered.T @ centered
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    axis = eigenvectors[:, int(np.argmax(eigenvalues))]
+    rotation = math.atan2(float(axis[1]), float(axis[0]))
+    angles = rotation + np.arange(vertex_limit, dtype=np.float64) * (
+        2.0 * math.pi / vertex_limit)
+    normals = np.column_stack((np.cos(angles), np.sin(angles)))
+    offsets = np.max(centered @ normals.T, axis=0)
+    extent = max(float(np.max(np.abs(centered))) * 4.0, 100.0)
+    polygon = [np.array([-extent, -extent]), np.array([extent, -extent]),
+               np.array([extent, extent]), np.array([-extent, extent])]
+    for normal, offset in zip(normals, offsets):
+        clipped = []
+        for start, end in zip(polygon, polygon[1:] + polygon[:1]):
+            start_inside = float(start @ normal) <= offset + 1e-9
+            end_inside = float(end @ normal) <= offset + 1e-9
+            if start_inside:
+                clipped.append(start)
+            if start_inside != end_inside:
+                fraction = (offset - float(start @ normal)) / float((end - start) @ normal)
+                clipped.append(start + fraction * (end - start))
+        polygon = clipped
+        if len(polygon) < 3:
+            raise ValueError("support-line envelope is degenerate")
+    result = Polygon(np.asarray(polygon) + center)
+    if not result.is_valid:
+        result = result.buffer(0)
+    return result
+
+
+def _operational_envelope_local(original, predicted, *, buffer_km=OPERATIONAL_BUFFER_KM):
+    """Build a compact buffered envelope in local east/north kilometres."""
+    from shapely.geometry import MultiPoint, Polygon
+
+    original = np.asarray(original, dtype=np.float64)
+    predicted = np.asarray(predicted, dtype=np.float64)
+    points = np.vstack((original, predicted))
+    envelope = MultiPoint([tuple(point) for point in points]).convex_hull
+    if envelope.geom_type != "Polygon":
+        raise ValueError("forecast envelope is not a polygon")
+    envelope = envelope.buffer(0).convex_hull
+
+    reference = envelope.buffer(float(buffer_km), join_style=2)
+    for vertex_limit in range(OPERATIONAL_MIN_POINTS, OPERATIONAL_MAX_POINTS + 1):
+        # Preserve a naturally compact hull. Otherwise use an outer
+        # support-line approximation and add vertices until its fit is good.
+        candidate = (envelope if _vertex_count(envelope) <= vertex_limit
+                     else _circumscribed_polygon(points, vertex_limit))
+        candidate = _add_vertex_if_needed(candidate)
+        buffered = candidate.buffer(float(buffer_km), join_style=2)
+        if buffered.geom_type != "Polygon" or not (
+                OPERATIONAL_MIN_POINTS <= _vertex_count(buffered) <= OPERATIONAL_MAX_POINTS):
+            continue
+        if not buffered.covers(envelope):
+            continue
+        inflation = buffered.area / max(reference.area, 1e-9)
+        if inflation <= OPERATIONAL_MAX_AREA_INFLATION:
+            return buffered
+    raise ValueError("cannot fit forecast envelope within operational point and area limits")
+
+
+def calibrated_radial_boundary(radii_km, calibrator, lead_index, *,
+                               threshold=THRESHOLD):
+    """Convert calibrated occupancy probability into a radial boundary.
+
+    Along a ray, occupancy at a radius is the number of ensemble members whose
+    radial extent reaches that radius. The first calibrated member count at or
+    above the threshold therefore selects the corresponding order statistic.
+    """
+    radii = np.asarray(radii_km, dtype=np.float64)
+    if radii.shape != (ENSEMBLE_SIZE, 64):
+        raise ValueError("invalid ensemble radial shape")
+    levels = np.asarray(calibrator["parameters"][lead_index][
+        "calibrated_probabilities"], dtype=np.float64)
+    if levels.shape != (ENSEMBLE_SIZE + 1,) or not np.all(np.isfinite(levels)):
+        raise ValueError("invalid calibrated probability levels")
+    qualifying = np.flatnonzero(levels >= float(threshold))
+    if qualifying.size == 0:
+        raise ValueError("calibrator has no qualifying probability level")
+    member_count = int(qualifying[0])
+    # Count zero means the outermost ensemble boundary is the conservative
+    # finite representation of an everywhere-qualified contour.
+    if member_count == 0:
+        return np.max(radii, axis=0).astype(np.float32)
+    return np.sort(radii, axis=0)[::-1][member_count - 1].astype(np.float32)
+
+
+def operational_envelope(original_polygon_latlon, centroid_latlon, displacement_km,
+                         radii_km, calibrator, lead_index, *,
+                         buffer_km=OPERATIONAL_BUFFER_KM):
+    """Return an adaptive 4-12 point, 1 km buffered forecast envelope.
+
+    The envelope spans the original detection polygon and the calibrated
+    predicted radial shape for one lead. Four points are used when the shape
+    fits; additional support points are added up to twelve when needed to keep
+    buffered area inflation within the operational tolerance. All geometry
+    operations are performed in local east/north kilometres; the result is
+    GeoJSON in [longitude, latitude].
+    """
+    original_local, _ = _to_local(original_polygon_latlon, centroid_latlon)
+    centroid = np.asarray(centroid_latlon, dtype=np.float64)
+    displacement = np.asarray(displacement_km, dtype=np.float64)
+    radii = calibrated_radial_boundary(radii_km, calibrator, lead_index)
+    if radii.shape != (64,) or displacement.shape != (2,):
+        raise ValueError("invalid operational forecast shape")
+    angle = np.arange(64, dtype=np.float64) * (2.0 * math.pi / 64.0)
+    predicted_local = np.column_stack((
+        displacement[0] + radii * np.cos(angle),
+        displacement[1] + radii * np.sin(angle)))
+    buffered = _operational_envelope_local(original_local, predicted_local,
+                                            buffer_km=buffer_km)
+    lat, lon = map(float, centroid)
+    scale = 111.0 * math.cos(math.radians(lat))
+    coords = [[float(lon + east / scale) % 360.0,
+               float(lat + north / 111.0)]
+              for east, north in list(buffered.exterior.coords)]
+    return {"type": "Polygon", "coordinates": [coords]}
+
+
+def _to_local(polygon_latlon, centroid_latlon):
+    """Local conversion kept private to avoid coupling to detection geometry."""
+    points = np.asarray(polygon_latlon, dtype=np.float64)
+    centroid = np.asarray(centroid_latlon, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 2 or points.shape[0] < 3:
+        raise ValueError("invalid original polygon")
+    if centroid.shape != (2,) or not np.all(np.isfinite(points)):
+        raise ValueError("invalid operational geometry coordinates")
+    scale = 111.0 * math.cos(math.radians(float(centroid[0])))
+    if not math.isfinite(scale) or abs(scale) < 1e-6:
+        raise ValueError("invalid longitude scale")
+    east = ((points[:, 1] - centroid[1] + 180.0) % 360.0 - 180.0) * scale
+    north = (points[:, 0] - centroid[0]) * 111.0
+    return np.column_stack((east, north)), False
 
 
 def polygons_from_masks(masks, centroid_latlon):

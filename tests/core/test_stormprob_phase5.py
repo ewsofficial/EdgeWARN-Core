@@ -105,6 +105,21 @@ def test_polygon_wrap_preserves_closed_public_rings():
             assert all(0 <= lon <= 360 and -90 <= lat <= 90 for lon, lat in ring)
 
 
+def test_operational_envelope_is_compact_and_buffered():
+    calibrator = {"parameters": [{
+        "calibrated_probabilities": [0.0] * 5 + [0.3] * 16
+    } for _ in range(4)]}
+    polygon = postprocess.operational_envelope(
+        [[35.0, 265.0], [35.0, 265.02], [35.02, 265.02], [35.02, 265.0]],
+        [35.01, 265.01], [12.0, 4.0],
+        np.full((20, 64), 8.0, dtype=np.float32), calibrator, 0)
+    ring = polygon["coordinates"][0]
+    assert polygon["type"] == "Polygon"
+    assert 4 <= len(ring) - 1 <= 12
+    assert ring[0] == ring[-1]
+    assert all(0 <= point[0] <= 360 and -90 <= point[1] <= 90 for point in ring)
+
+
 def test_public_projection_uses_operational_stormprob_contract():
     cell = {"id": 101, "modules": {"StormProb": {
         "status": "success", "model_version": "stormprob/v1",
