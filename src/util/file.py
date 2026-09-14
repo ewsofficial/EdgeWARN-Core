@@ -6,7 +6,7 @@ import asyncio
 import os
 import sys
 
-from util.file_config import cleanup_max_age_minutes, cleanup_max_files, colormap_search_path
+from util.file_config import cleanup_max_age_minutes, cleanup_max_files
 from util.io import IOManager
 
 io_manager = IOManager("[Util]")
@@ -69,7 +69,7 @@ def _define_paths(base_path, config_dir=None):
     global GUI_GOES_C06_DIR, GUI_GOES_C07_DIR, GUI_GOES_C08_DIR, GUI_GOES_C09_DIR, GUI_GOES_C10_DIR
     global GUI_GOES_C11_DIR, GUI_GOES_C12_DIR, GUI_GOES_C13_DIR, GUI_GOES_C14_DIR, GUI_GOES_C15_DIR
     global GUI_GOES_C16_DIR
-    global GUI_RAP_DIR, GUI_MAP_DIR, GUI_MANIFEST_JSON, GUI_COLORMAP_JSON
+    global GUI_RAP_DIR, GUI_MAP_DIR, GUI_MANIFEST_JSON
     global WPC_DIR, WPC_SFC_DIR, STORMCELL_JSON
     global NEXRAD_LEVEL2_DIR, NEXRAD_LEVEL2_LOW_DIR, NEXRAD_LEVEL2_HIGH_DIR, NEXRAD_LEVEL2_MANIFEST_DIR
 
@@ -193,14 +193,6 @@ def _define_paths(base_path, config_dir=None):
     NEXRAD_LEVEL2_LOW_DIR = NEXRAD_LEVEL2_DIR / "Low"
     NEXRAD_LEVEL2_HIGH_DIR = NEXRAD_LEVEL2_DIR / "High"
     NEXRAD_LEVEL2_MANIFEST_DIR = NEXRAD_LEVEL2_DIR / "manifests"
-    GUI_COLORMAP_JSON = _find_existing_path(
-        colormap_search_path(
-            src_dir=Path(__file__).resolve().parents[1],
-            gui_dir=gui_dir,
-            config_dir=config_dir,
-        ),
-        missing_message="colormaps.json not found in any configured location; using the first candidate",
-    )
 
 
 def initialize_filesystem(base_dir=None):

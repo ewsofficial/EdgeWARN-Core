@@ -78,10 +78,8 @@ export function createV3Router({ analysis, renders, ancillary, openApi, apiConfi
   router.get('/models/rap/layers/:layerId/snapshots', requireService('ewmrs'), async (req, res, next) => { try { collection(req, res, await ancillary.rapSnapshots(req.params.layerId)); } catch (error) { next(error); } });
   router.get('/models/rap/layers/:layerId/snapshots/:timestamp/metadata', requireService('ewmrs'), async (req, res, next) => { try { resource(req, res, await ancillary.rapMetadata(req.params.layerId, req.params.timestamp)); } catch (error) { next(error); } });
   router.get('/models/rap/layers/:layerId/snapshots/:timestamp/data', requireService('ewmrs'), async (req, res, next) => { try { await send(req, res, await ancillary.rapData(req.params.layerId, req.params.timestamp), 'application/octet-stream'); } catch (error) { next(error); } });
-  router.get('/models/rap/layer-mappings', requireService('ewmrs'), async (req, res, next) => { try { resource(req, res, await ancillary.rapMappings()); } catch (error) { next(error); } });
   router.get('/analyses/wpc/surface', requireService('ewmrs'), async (req, res, next) => { try { collection(req, res, await ancillary.listWpcSurface()); } catch (error) { next(error); } });
   router.get('/analyses/wpc/surface/:timestamp', requireService('ewmrs'), async (req, res, next) => { try { geojson(req, res, await ancillary.wpcSurface(req.params.timestamp)); } catch (error) { next(error); } });
-  router.get('/styles/colormaps', requireService('ewmrs'), async (req, res, next) => { try { resource(req, res, await ancillary.colormaps()); } catch (error) { next(error); } });
   router.use(methodNotAllowed(openApi));
   return router;
 }

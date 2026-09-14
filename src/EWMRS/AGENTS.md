@@ -4,7 +4,7 @@
 EWMRS rendering service package.
 
 ## Major areas
-- `api/`: Express routes for renders, tiles, WPC, and colormaps.
+- `api/`: Express routes for renders, tiles, and WPC.
 - `render/`: raster rendering, reprojection, tiling, and tools.
 - `pipeline.py` / `scheduler.py`: orchestration helpers.
 

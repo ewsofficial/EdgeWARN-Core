@@ -258,7 +258,6 @@ and return missing-artifact responses when no compatibility PNG exists.
 The EWMRS service also exposes RAP Uint16 array outputs from `<BASE_DIR>/gui/RAP` through:
 
 - `GET /rap/layers`
-- `GET /rap/mappings`
 - `GET /rap/fetch?layer={layer}`
 - `GET /rap/metadata?layer={layer}&timestamp={YYYYMMDD-HHMM00}`
 - `GET /rap/data?layer={layer}&timestamp={YYYYMMDD-HHMM00}`
@@ -320,7 +319,7 @@ Route families declare exactly one required service. Enforced families:
 | Required service | Route families |
 | --- | --- |
 | `edgewarn` | `/api/v3/cells*`, `/api/v3/storm-snapshots*`, `/api/v3/alert-snapshots*`, `/api/v3/alerts*`, and legacy `/api/v2/features/*` adapters |
-| `ewmrs` | `/api/v3/render-products*`, `/api/v3/models/rap/*`, `/api/v3/analyses/wpc/*`, `/api/v3/styles/colormaps`, and the legacy `/renders/*`, `/rap/*`, `/wpc/*`, `/colormaps` adapters |
+| `ewmrs` | `/api/v3/render-products*`, `/api/v3/models/rap/*`, `/api/v3/analyses/wpc/*`, and the legacy `/renders/*`, `/rap/*`, `/wpc/*` adapters |
 | `nexrad` | `/api/v3/radar-sites*` and the legacy `/nexrad/*` adapters |
 
 When the required service is not active, requests receive

@@ -11,9 +11,3 @@ base_dir:
 cleanup_defaults:
   max_age_minutes: 60
   max_files: 10
-
-
-# Search order: bundled defaults first, then runtime override.
-colormap_search_path:
-  - <src_dir>/EWMRS/colormaps.json
-  - <gui_dir>/colormaps.json

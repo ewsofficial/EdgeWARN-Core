@@ -39,7 +39,6 @@ render_threads:
 caches:
   # Cache sizes apply at process start; restart after changing them.
   tile_index_entries: 512
-  colormap_entries: 128
 
 # RAP product catalog. Names, scale ranges, and output directories are renderer contracts.
 rap_uint16:

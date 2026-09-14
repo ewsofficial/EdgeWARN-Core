@@ -134,8 +134,8 @@ describe('unified API app', () => {
       '/api/v3/radar-sites', '/api/v3/radar-sites/KTLH/availability',
       '/api/v3/models/rap/layers', '/api/v3/models/rap/layers/CAPE/snapshots',
       '/api/v3/models/rap/layers/CAPE/snapshots/20260317-200000/metadata',
-      '/api/v3/models/rap/layer-mappings', '/api/v3/analyses/wpc/surface',
-      '/api/v3/analyses/wpc/surface/20260317-200000', '/api/v3/styles/colormaps'
+      '/api/v3/analyses/wpc/surface',
+      '/api/v3/analyses/wpc/surface/20260317-200000'
     ];
     for (const endpoint of paths) await request(app).get(endpoint).expect(200);
     const renderProducts = await request(app).get('/api/v3/render-products').expect(200);

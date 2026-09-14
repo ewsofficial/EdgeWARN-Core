@@ -3,7 +3,7 @@
   "title": "filesystem.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "base_dir", "cleanup_defaults", "colormap_search_path"],
+  "required": ["schema_version", "base_dir", "cleanup_defaults"],
   "properties": {
     "schema_version": { "const": 1 },
     "base_dir": {
@@ -22,15 +22,6 @@
       "properties": {
         "max_age_minutes": { "type": "integer", "minimum": 0 },
         "max_files": { "type": ["integer", "null"], "minimum": 0 }
-      }
-    },
-    "colormap_search_path": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "pattern": "^<(base_dir|gui_dir|src_dir)>/[^/]"
       }
     }
   }

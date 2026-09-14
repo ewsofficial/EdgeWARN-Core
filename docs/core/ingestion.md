@@ -143,7 +143,7 @@ the matched GRIB keys needed to reconstruct and render values from a browser
 `Uint16Array`. `colormap_key` and `description` are written only when the layer
 declares them, so consumers must treat both as optional.
 
-RAP `colormap_key` values are stable and discoverable through `GET /colormaps`.
+RAP `colormap_key` values are internal renderer metadata and are not exposed by the API.
 They are *not* layer names: several layers share one key, so `RAP_Temperature_2m`
 resolves to `RAP_Temperature_LL` and both 10 m wind components resolve to
 `RAP_Wind_LL`. Colormap definitions follow NOAA/SPC/GEMPAK lineage where

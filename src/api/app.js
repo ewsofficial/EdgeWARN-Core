@@ -24,7 +24,7 @@ export async function createApp(options = {}) {
   const openApi = await fs.readFile(config.openApiPath, 'utf8');
   const routeTemplates = Object.keys(JSON.parse(openApi).paths);
   const repository = new ArtifactRepository(
-    { data: config.dataDir, gui: config.guiDir, wpc: config.wpcDir, static: config.staticDir },
+    { data: config.dataDir, gui: config.guiDir, wpc: config.wpcDir },
     config.api.artifacts.size_limits_bytes,
     config.api.artifacts.json_cache,
     config.api.artifacts.list_limit,

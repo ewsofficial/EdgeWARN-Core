@@ -1481,33 +1481,6 @@ def test_nexrad_cli_declares_no_volume_count_it_cannot_use():
         ) == 1
 
 
-# --- RAP colormap authority drift ----------------------------------------
-
-def test_mappings_json_carries_one_layer_with_no_python_producer():
-    """DECISION OWED: delete the orphan, or add a producer.
-
-    `mappings.json` is otherwise exactly `_with_colormap_key` applied to the
-    43-layer RAP catalog, so the drift is a single stale entry.
-    """
-    from EWMRS.rap.config import get_rap_uint16_layers
-
-    mappings = json.loads((REPO_ROOT / "src/EWMRS/mappings.json").read_text(encoding="utf-8"))
-    produced = {layer["name"] for layer in get_rap_uint16_layers()}
-
-    assert sorted(set(mappings) - produced) == ["RAP_BestLiftedIndex_180_0mbAGL"]
-    assert produced - set(mappings) == set()
-    assert len(mappings) == 44
-
-
-def test_mappings_json_agrees_with_the_python_colormap_matcher():
-    """Everything except the orphan is derivable, so it is a duplicate authority."""
-    from EWMRS.rap.config import get_rap_uint16_layers
-
-    mappings = json.loads((REPO_ROOT / "src/EWMRS/mappings.json").read_text(encoding="utf-8"))
-    for layer in get_rap_uint16_layers():
-        assert mappings[layer["name"]] == layer.get("colormap_key")
-
-
 def test_every_configured_colormap_key_exists_in_colormaps_json():
     from EWMRS.rap.config import get_rap_uint16_layers
     from EWMRS.render.config import get_file_list

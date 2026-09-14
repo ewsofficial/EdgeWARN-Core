@@ -1,8 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from pathlib import Path
 from typing import Tuple, List
-import json
 import os
 import time
 import re
@@ -11,11 +9,7 @@ import numpy as np
 from .tools import TransformUtils
 from .tiler import save_float16_chunk
 from common.config.overlay import resolve
-from EWMRS.pipeline_config import (
-    TILE_THREADS_ENV,
-    colormap_cache_entries,
-    max_tile_threads,
-)
+from EWMRS.pipeline_config import TILE_THREADS_ENV, max_tile_threads
 import util.file as fs
 from util.atomic import atomic_write_json
 from xarray import Dataset
@@ -24,48 +18,6 @@ from datetime import datetime
 
 io_manager = IOManager("[Transform]")
 _CHUNK_FILENAME_RE = re.compile(r"^chunk_(\d+)_(\d+)\.f16\.gz$")
-
-
-@lru_cache(maxsize=colormap_cache_entries())
-def _get_cached_cmap(colormap_key: str):
-    """Cache parsed colormap arrays. lru_cache provides thread-safe
-    insertion via the GIL and replaces the previous double-checked-lock
-    dict. Cache key is just the colormap name, matching the original
-    semantics."""
-    with open(fs.GUI_COLORMAP_JSON, 'r') as f:
-        cmaps_json = json.load(f)
-
-    for source in cmaps_json:
-        for cmap in source.get("colormaps", []):
-            if cmap.get("name") == colormap_key:
-                thresholds = np.array([t["value"] for t in cmap["thresholds"]], dtype=np.float32)
-                # Use "rgba" for RAP colormaps, "rgb" for others
-                color_key = "rgba" if colormap_key.startswith("RAP_") else "rgb"
-                raw_colors = []
-                for threshold in cmap["thresholds"]:
-                    color = list(threshold[color_key])
-                    if len(color) == 3:
-                        color.append(255)
-                    raw_colors.append(color)
-                colors = np.array(raw_colors, dtype=np.float32)
-                colors_uint8 = colors.astype(np.uint8)
-                interpolate = cmap.get("interpolate", True)
-                return (thresholds, colors, colors_uint8, interpolate)
-
-    raise ValueError(f"Colormap '{colormap_key}' not found in {fs.GUI_COLORMAP_JSON}")
-
-
-class _ColormapCacheView:
-    """Tests call ``_COLORMAP_CACHE.clear()`` to force a re-read between
-    cases. Expose that surface against the lru_cache without resurrecting
-    the dict."""
-
-    @staticmethod
-    def clear():
-        _get_cached_cmap.cache_clear()
-
-
-_COLORMAP_CACHE = _ColormapCacheView()
 
 
 def _scalar_data_to_rgba(
@@ -365,7 +317,7 @@ class GUILayerRenderer:
         Args:
             filepath (xr.Dataset): Dataset being converted to GUI png
             outdir (Path): Output directory of the converted png file
-            colormap_key (str): Key of the color map as stored under colormaps.json
+            colormap_key (str): Retained for renderer-call compatibility; values are stored raw
             file_name (str): Key of .png file name
             timestamp (str): ISO formatted timestamp string or string to parse
         """
@@ -374,17 +326,6 @@ class GUILayerRenderer:
         self.colormap_key = colormap_key
         self.file_name = file_name
         self.timestamp = timestamp
-
-    def _get_cmap(self):
-        """
-        Returns cached colormap data to avoid re-reading JSON file.
-        
-        Returns:
-            thresholds (np.ndarray): array of dBZ or value thresholds
-            colors (np.ndarray): array of RGB colors corresponding to thresholds
-            interpolate (bool): whether to interpolate between colors
-        """
-        return _get_cached_cmap(self.colormap_key)
 
     def _update_index(self, new_timestamp, tile_grid=None):
         writer = GUIValueWriter(self.outdir, self.file_name, self.timestamp)
@@ -404,9 +345,6 @@ class GUILayerRenderer:
         # Step 1: No Reprojection needed for 1km/pixel raw render
         # We will resize the output image based on physical domain size later
         data = self.ds['unknown'].values
-
-        # Step 2: Get colormap
-        thresholds, colors, colors_uint8, interpolate = self._get_cmap()
 
         render_start_s = time.perf_counter()
         values = np.asarray(data, dtype=np.float32)

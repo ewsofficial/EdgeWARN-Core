@@ -39,7 +39,6 @@ Errors use `application/problem+json`.
 - Radar: `/api/v3/radar-sites`
 - RAP: `/api/v3/models/rap/layers`
 - WPC: `/api/v3/analyses/wpc/surface`
-- Styles: `/api/v3/styles/colormaps`
 - Infrastructure: `/health/live`, `/health/ready`
 
 Canonical render IDs equal the render layer name / file prefix, such as `MRMS_MergedReflectivityQC`, `MRMS_QPE`,
@@ -84,7 +83,7 @@ These float16 value chunks are distinct from RAP `data.u16` scalar arrays and NE
 
 ## Migration
 
-The prior `/api/v2`, `/renders`, `/nexrad`, `/rap`, `/wpc`, `/colormaps`,
+The prior `/api/v2`, `/renders`, `/nexrad`, `/rap`, and `/wpc`,
 `/health`, and `/healthz` paths are compatibility adapters on the same
 process. They retain legacy bodies/representations and include `Deprecation:
 true` plus a link to this API contract. New clients should use v3; no data

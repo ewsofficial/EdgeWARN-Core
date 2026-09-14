@@ -9,14 +9,13 @@
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["host", "port", "debug_port", "request_timeout_ms", "service_stale_after_seconds", "static_root", "openapi_spec", "production_version_label", "v3_api_version"],
+      "required": ["host", "port", "debug_port", "request_timeout_ms", "service_stale_after_seconds", "openapi_spec", "production_version_label", "v3_api_version"],
       "properties": {
         "host": { "type": "string" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "debug_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "request_timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
         "service_stale_after_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "static_root": { "type": "string", "pattern": "^<(base_dir|gui_dir|src_dir)>/[^/]" },
         "openapi_spec": { "type": "string", "pattern": "^<(base_dir|gui_dir|src_dir)>/[^/]" },
         "production_version_label": { "type": "string" },
         "v3_api_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }

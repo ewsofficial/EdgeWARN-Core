@@ -653,5 +653,4 @@ def test_api_product_catalog_entries_carry_every_field_the_loader_dereferences()
         assert re.fullmatch(PRODUCT_SLUG, entry["id"]), label
         for field in required - {"id"}:
             assert isinstance(entry[field], str) and entry[field], (label, field)
-        if "colormapId" in entry:
-            assert isinstance(entry["colormapId"], str) and entry["colormapId"], label
+        assert "colormapId" not in entry, label

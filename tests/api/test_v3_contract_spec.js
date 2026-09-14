@@ -19,7 +19,7 @@ describe('unified API contract specification', () => {
       '/api/v3/render-products/{productId}/snapshots/{timestamp}/tiles/{x}/{y}',
       '/api/v3/radar-sites/{siteId}/scans/{timestamp}/elevations/{elevation}/products/{productId}',
       '/api/v3/models/rap/layers/{layerId}/snapshots/{timestamp}/data',
-      '/api/v3/analyses/wpc/surface/{timestamp}', '/api/v3/styles/colormaps'
+      '/api/v3/analyses/wpc/surface/{timestamp}'
     ]));
     for (const [route, item] of Object.entries(openApi.paths)) {
       for (const operation of Object.values(item)) {

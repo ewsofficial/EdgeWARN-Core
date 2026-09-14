@@ -82,12 +82,10 @@ export function createAncillaryServices(repository, config) {
       }).filter(([, header]) => header !== null));
       return opened;
     },
-    async rapMappings() { return repository.readJson('static', ['mappings.json']); },
     async listWpcSurface() {
       const entries = await noRoot(() => repository.list('wpc', ['surface_analysis']));
       return entries.map((entry) => entry.name.match(wpcSurfaceName)?.[1]).filter((value) => value && timestamp(value)).sort().reverse();
     },
     async wpcSurface(value) { if (!timestamp(value)) throw new ArtifactError('INVALID_PATH', 'Invalid timestamp'); return repository.readJson('wpc', ['surface_analysis', wpcSurfaceFile(value)]); },
-    async colormaps() { return repository.readJson('static', ['colormaps.json']); }
   };
 }

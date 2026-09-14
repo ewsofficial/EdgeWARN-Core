@@ -43,11 +43,9 @@ ROUTE_SERVICE_REQUIREMENTS: dict[str, str] = {
     "/api/v3/render-products": "ewmrs",
     "/api/v3/models/rap": "ewmrs",
     "/api/v3/analyses/wpc": "ewmrs",
-    "/api/v3/styles/colormaps": "ewmrs",
     "/api/v3/radar-sites": "nexrad",
     "/renders": "ewmrs",
     "/wpc": "ewmrs",
-    "/colormaps": "ewmrs",
     "/rap": "ewmrs",
     "/nexrad": "nexrad",
 }

@@ -41,8 +41,7 @@ src/
     ├── pipeline_config.py           # Accessors for config/ewmrs_pipeline.yaml
     ├── render/                      # Layer rendering and tile generation
     ├── rap/                         # RAP Uint16 conversion pipeline + catalog accessors
-    ├── colormaps.json               # Colormap source blocks served by /colormaps
-    └── mappings.json                # RAP layer/colormap mapping served by /rap/mappings
+    └── colormaps.json               # Internal renderer colormap definitions
 ```
 
 ## High-Level Flow

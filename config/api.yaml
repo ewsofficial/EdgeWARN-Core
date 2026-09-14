@@ -9,8 +9,6 @@ server:
   debug_port: 3001
   request_timeout_ms: 30000
   service_stale_after_seconds: 30
-  # Internal source path; do not change unless the packaged layout changes.
-  static_root: <src_dir>/EWMRS
   openapi_spec: <src_dir>/api/openapi/v3.yaml
   production_version_label: '2.x'
 

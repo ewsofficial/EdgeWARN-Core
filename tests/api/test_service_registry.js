@@ -103,7 +103,6 @@ describe('service registry scanner', () => {
     expect(requiredServiceForRoute('/api/v3/render-products')).toBe('ewmrs');
     expect(requiredServiceForRoute('/api/v3/models/rap/layers')).toBe('ewmrs');
     expect(requiredServiceForRoute('/api/v3/analyses/wpc/surface')).toBe('ewmrs');
-    expect(requiredServiceForRoute('/api/v3/styles/colormaps')).toBe('ewmrs');
     expect(requiredServiceForRoute('/renders/get-items')).toBe('ewmrs');
     expect(requiredServiceForRoute('/health/ready')).toBeNull();
   });
@@ -154,7 +153,6 @@ describe('SERVICE_NOT_ENABLED gating for the ewmrs route family', () => {
     const app = await createAppWithBaseDir();
     await writeHeartbeat(baseDir, 'ewmrs', freshHeartbeat({ service: 'ewmrs' }));
     await request(app).get('/api/v3/render-products').expect(200);
-    await request(app).get('/colormaps').expect(200);
   });
 });
 

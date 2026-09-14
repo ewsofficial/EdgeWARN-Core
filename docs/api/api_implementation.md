@@ -2,7 +2,7 @@
 
 The live Express implementation is `src/api/`, started with `npm run api` (or
 `npm run debug:api`). It serves `/api/v3` as its primary contract and retains
-the `/api/v2`, `/renders`, `/nexrad`, `/rap`, `/wpc`, `/colormaps`, `/health`,
+the `/api/v2`, `/renders`, `/nexrad`, `/rap`, `/wpc`, `/health`,
 and `/healthz` paths as compatibility adapters in the same process.
 
 There is no `src/EdgeWARN/api` or `src/EWMRS/api` tree; both were removed in
@@ -32,7 +32,7 @@ src/api/
 ├── services/
 │   ├── analysis.js             # cells, storm snapshots, alerts, METAR
 │   ├── renders.js              # products, snapshots, PNG tiles, float16 chunks
-│   ├── ancillary.js            # NEXRAD, RAP, WPC, colormaps
+│   ├── ancillary.js            # NEXRAD, RAP, and WPC
 │   └── validation.js           # identifier validators and pagination
 └── routes/
     ├── v3/index.js
@@ -113,7 +113,6 @@ A leading `~` is expanded, and the result is resolved to an absolute path.
 Supplying the same flag twice with different values throws rather than silently
 picking one. Derived roots are `<BASE_DIR>/data`, `<BASE_DIR>/gui`, and
 `<BASE_DIR>/wpc`; the `static` root is `src/EWMRS`, which is where
-`mappings.json` and `colormaps.json` are served from.
 
 Integer environment overrides are validated, not coerced: `PORT`,
 `REQUEST_TIMEOUT_MS`, `RATE_LIMIT_MAX_SEC`, and `RATE_LIMIT_MAX_MIN` must be

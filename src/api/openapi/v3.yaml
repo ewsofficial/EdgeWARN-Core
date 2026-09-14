@@ -31,10 +31,8 @@
     "/api/v3/models/rap/layers/{layerId}/snapshots": {"get": {"operationId": "listRapSnapshots", "parameters": [{"$ref":"#/components/parameters/layerId"}], "responses": {"200": {"description": "RAP snapshot collection"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
     "/api/v3/models/rap/layers/{layerId}/snapshots/{timestamp}/metadata": {"get": {"operationId": "getRapMetadata", "parameters": [{"$ref":"#/components/parameters/layerId"}, {"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "RAP metadata"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
     "/api/v3/models/rap/layers/{layerId}/snapshots/{timestamp}/data": {"get": {"operationId": "getRapData", "parameters": [{"$ref":"#/components/parameters/layerId"}, {"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "Uint16 data", "content": {"application/octet-stream": {}}}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
-    "/api/v3/models/rap/layer-mappings": {"get": {"operationId": "getRapLayerMappings", "responses": {"200": {"description": "RAP mappings"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
     "/api/v3/analyses/wpc/surface": {"get": {"operationId": "listWpcSurfaceAnalyses", "responses": {"200": {"description": "WPC surface analysis collection"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
-    "/api/v3/analyses/wpc/surface/{timestamp}": {"get": {"operationId": "getWpcSurfaceAnalysis", "parameters": [{"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "Surface analysis GeoJSON", "content": {"application/geo+json": {}}}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
-    "/api/v3/styles/colormaps": {"get": {"operationId": "listColormaps", "responses": {"200": {"description": "Colormap collection"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}}
+    "/api/v3/analyses/wpc/surface/{timestamp}": {"get": {"operationId": "getWpcSurfaceAnalysis", "parameters": [{"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "Surface analysis GeoJSON", "content": {"application/geo+json": {}}}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}}
   },
   "components": {
     "schemas": {

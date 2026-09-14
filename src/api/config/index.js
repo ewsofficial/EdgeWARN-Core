@@ -170,7 +170,6 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
     wpcDir: path.join(baseDir, 'wpc'),
     configDir: resolvedConfigRoot,
     repoDir: repoRoot(selectedConfigDir),
-    staticDir: resolveSourcePath(api.server.static_root, 'static_root'),
     openApiPath: resolveSourcePath(api.server.openapi_spec, 'openapi_spec'),
     api,
     wpc,

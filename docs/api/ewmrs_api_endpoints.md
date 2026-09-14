@@ -343,16 +343,6 @@ Example:
 ["CAPE_0-3km", "Temperature_2m", "UWind_925mb"]
 ```
 
-### GET /rap/mappings
-
-Serves `src/EWMRS/mappings.json`, the RAP layer-to-colormap mapping table used by client renderers.
-
-Responses:
-
-- `200`: parsed JSON contents of `mappings.json`
-- `404`: `mappings.json` not found
-- `500`: read/parse failure
-
 ### GET /rap/fetch?layer={layer}
 
 Returns available RAP timestamps for a layer from `<BASE_DIR>/gui/RAP/<layer>/index.json`.
@@ -411,7 +401,7 @@ Responses:
 - `404`: layer folder, timestamp folder, or `metadata.json` not found
 - `503`: `metadata.json` present but unparseable
 
-`colormap_key` resolves to a same-named entry from `GET /colormaps`, but it is
+`colormap_key` resolves to a same-named internal renderer entry, but it is
 **not** the layer name and not the folder name. Several layers share one key:
 `Temperature_2m` and `Temperature_Surface` both resolve to
 `RAP_Temperature_LL`, and both 10 m wind components resolve to `RAP_Wind_LL`.
@@ -543,18 +533,6 @@ Responses:
 - `400`: missing/unsupported `type`, missing timestamp, malformed timestamp, or resolved path escaping the WPC root
 - `404`: requested timestamp file not found
 - `500`: read/parse failure
-
-## Colormap Endpoint
-
-### GET /colormaps
-
-Returns `src/EWMRS/colormaps.json`.
-
-Responses:
-
-- `200`: `array` of colormap source blocks
-- `404`: `colormaps.json` not found
-- `500`: read/server failure
 
 ## GOES Product Notes
 

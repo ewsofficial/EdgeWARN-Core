@@ -8,7 +8,7 @@ It ingests operational weather datasets, processes storm-cell products, renders 
 
 - Three independently operable real-time services (primary EdgeWARN analysis, EWMRS/accessories, NEXRAD) coordinated through durable runtime records, plus an optional all-services supervisor
 - EdgeWARN storm-cell detection, optional tracking/lineage, integration, CTAM analytics, and alert generation
-- EWMRS raster rendering, tiling, WPC surface-analysis serving, and colormap delivery
+- EWMRS raster rendering, tiling, and WPC surface-analysis serving
 - Historical reprocessing via `src/process_historical.py`
 - One versioned file-backed API at `/api/v3`, with legacy EdgeWARN and EWMRS paths retained as temporary compatibility adapters
 

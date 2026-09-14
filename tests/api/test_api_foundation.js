@@ -59,7 +59,6 @@ describe('unified API configuration', () => {
       expect(config.configDir).toBe(configDir);
       expect(config.api.server.port).toBe(5100);
       expect(config.openApiPath).toBe(path.resolve('src/api/openapi/v3.yaml'));
-      expect(config.staticDir).toBe(path.resolve('src/EWMRS'));
     } finally {
       await fs.rm(parent, { recursive: true, force: true });
     }

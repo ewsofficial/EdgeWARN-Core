@@ -138,8 +138,3 @@ def max_tile_threads() -> int:
 def tile_index_cache_entries() -> int:
     """``lru_cache`` size for parsed chunk indexes. Read once at import."""
     return _section("caches")["tile_index_entries"]
-
-
-def colormap_cache_entries() -> int:
-    """``lru_cache`` size for parsed colormaps. Read once at import."""
-    return _section("caches")["colormap_entries"]

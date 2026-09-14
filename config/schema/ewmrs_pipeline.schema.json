@@ -77,10 +77,9 @@
     "caches": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tile_index_entries", "colormap_entries"],
+      "required": ["tile_index_entries"],
       "properties": {
-        "tile_index_entries": { "type": "integer", "minimum": 1 },
-        "colormap_entries": { "type": "integer", "minimum": 1 }
+        "tile_index_entries": { "type": "integer", "minimum": 1 }
       }
     }
   }

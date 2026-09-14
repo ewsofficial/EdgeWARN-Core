@@ -75,9 +75,9 @@ silently.
 | Route family | Required service |
 | --- | --- |
 | `/api/v3/cells*`, `/api/v3/storm-snapshots*`, `/api/v3/alert-snapshots*`, `/api/v3/alerts*` | `edgewarn` |
-| `/api/v3/render-products*`, `/api/v3/models/rap/*`, `/api/v3/analyses/wpc/*`, `/api/v3/styles/colormaps` | `ewmrs` |
+| `/api/v3/render-products*`, `/api/v3/models/rap/*`, `/api/v3/analyses/wpc/*` | `ewmrs` |
 | `/api/v3/radar-sites*` | `nexrad` |
-| Legacy adapters (`/renders/*`, `/wpc/*`, `/colormaps`, `/rap/*`, `/nexrad/*`) | same service as the v3 family they adapt |
+| Legacy adapters (`/renders/*`, `/wpc/*`, `/rap/*`, `/nexrad/*`) | same service as the v3 family they adapt |
 
 ## Implementation
 
