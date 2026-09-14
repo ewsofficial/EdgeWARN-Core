@@ -1,4 +1,4 @@
-"""Full-precision detection geometry for StormProb inputs (Phase 1).
+"""Original ProbSevere geometry for StormProb inputs.
 
 Ports the training convention from StormProb's
 ``stormprob/model/radial_morphology/model.py`` (``entry_to_radial_profile`` /
@@ -189,7 +189,8 @@ def attach_stormprob_geometry(
 
     Additive only: existing ``centroid``/``bbox``/``properties`` keys are
     untouched. ``centroid_full`` is the unrounded reflectivity-weighted
-    centroid; ``polygon_full`` is the pre-JSON-rounding detection polygon as
+    centroid from gates within the original ProbSevere polygon;
+    ``polygon_full`` is that polygon as
     ``[[lat, lon], ...]``. Never raises.
     """
     try:

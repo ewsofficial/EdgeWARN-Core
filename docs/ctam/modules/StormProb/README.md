@@ -5,6 +5,15 @@ feature windows from `<BASE_DIR>/data/stormprob/stormprob.sqlite3`, runs the
 packaged radial and motion ONNX graphs, and writes four versioned operational
 forecast envelopes for 15, 30, 45, and 60 minutes.
 
+The radial history uses each detection's original ProbSevere polygon and a
+reflectivity-weighted centroid calculated only from gates in that polygon.
+The operational envelope starts from the same committed polygon and centroid.
+Expanded detection footprints remain available to other EdgeWARN processing.
+A predicted-only track without a current ProbSevere observation is not
+inference-ready.
+Sampled radial boundaries use the v7 training and evaluation floor of 0.1 km
+before calibration, occupancy rasterization, or operational geometry.
+
 Each cell result is published under `modules.StormProb` with only the operational
 status, analysis time, and four lead records. Each lead contains its lead and
 valid times, status, and—when successful—centroid displacement, predicted

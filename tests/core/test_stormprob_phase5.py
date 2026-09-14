@@ -120,6 +120,82 @@ def test_operational_envelope_is_compact_and_buffered():
     assert all(0 <= point[0] <= 360 and -90 <= point[1] <= 90 for point in ring)
 
 
+def test_sampled_radii_use_scorecard_floor_before_geometry():
+    mean = np.zeros((1, 4, 33), np.float32)
+    current = np.ones((1, 64), np.float32)
+    current[0, :3] = [-5.0, 0.0, 0.05]
+    radii = postprocess.sample_radii(
+        mean, np.full_like(mean, -20), current,
+        noise=np.zeros((1, 20, 4, 33), np.float32))
+
+    assert radii.shape == (1, 20, 4, 64)
+    np.testing.assert_allclose(radii[0, :, :, :3], 0.1, atol=1e-7)
+    np.testing.assert_allclose(radii[0, :, :, 3:], 1.0, atol=1e-7)
+
+
+def test_outer_hull_fallback_fits_narrow_forecast_corridor():
+    from shapely.geometry import MultiPoint
+
+    points = np.asarray([
+        [-23.66762, -22.977], [-27.29762, -19.647],
+        [8.43233, 12.7975], [9.05953, 12.72074],
+        [10.20979, 12.56306], [14.28378, 9.66019],
+        [14.71007, 9.34348], [16.10515, 8.11069],
+        [16.69836, 7.5771], [16.92816, 6.93803],
+        [17.16558, 5.55444], [16.671, 4.97804],
+        [14.01289, 2.30393],
+    ])
+    hull = MultiPoint(points).convex_hull
+    result = postprocess._operational_envelope_local(points[:4], points[4:])
+
+    assert result.is_valid
+    assert len(result.exterior.coords) - 1 <= 12
+    assert result.covers(hull)
+    assert result.area / hull.buffer(1, join_style=2).area <= 1.25
+
+
+def test_forecast_geometry_uses_committed_ps_polygon_and_centroid(monkeypatch):
+    from EdgeWARN.ctam.builtins import stormprob as builtin
+
+    observed = []
+    monkeypatch.setattr(builtin, "predict_initial_wind", lambda _: {"u": 0.0, "v": 0.0})
+    monkeypatch.setattr(postprocess, "operational_envelope",
+                        lambda polygon, centroid, *args: observed.append(
+                            (polygon, centroid)) or {"type": "Polygon",
+                                                 "coordinates": [[[265.0, 35.0]] * 5]})
+    cell = _cell()
+    cell["centroid"] = [40.0, 270.0]
+    cell["bbox"] = [[40.0, 270.0], [40.0, 270.1],
+                    [40.1, 270.1], [40.1, 270.0]]
+    ps_polygon = [[35.0, 265.0], [35.0, 265.02],
+                  [35.02, 265.02], [35.02, 265.0]]
+    observation = {"centroid": [35.01, 265.01], "polygon": ps_polygon,
+                   "raw_values": {}}
+    outputs = {"coefficient_mean": np.zeros((1, 4, 33), np.float32),
+               "coefficient_log_std": np.full((1, 4, 33), -20, np.float32),
+               "residual_motion_mps": np.zeros((1, 4, 2), np.float32)}
+    inputs = {"radial_history": np.ones((30, 64), np.float32)}
+    result = BuiltinStormProbAdapter.__new__(BuiltinStormProbAdapter)._finish(
+        cell, inputs, observation, outputs, {})
+
+    assert observed == [(ps_polygon, observation["centroid"])] * 4
+    assert result["leads"][0]["predicted_centroid"] == observation["centroid"]
+
+
+def test_tracking_replaces_stormprob_geometry_with_matched_detection():
+    from EdgeWARN.process.detect.track import StormCellTracker
+
+    old = {"centroid": [35.0, 265.0], "bbox": [[35.0, 265.0]],
+           "stormprob": {"geometry": {"polygon_full": [[35.0, 265.0]]}}}
+    updated = {"centroid": [35.1, 265.1], "bbox": [[35.1, 265.1]],
+               "stormprob": {"geometry": {"polygon_full": [[35.1, 265.1]]}}}
+    StormCellTracker._update_cell_fields(None, old, updated, None)
+
+    assert old["stormprob"] == updated["stormprob"]
+    updated["stormprob"]["geometry"]["polygon_full"][0][0] = 99.0
+    assert old["stormprob"]["geometry"]["polygon_full"][0][0] == 35.1
+
+
 def test_public_projection_uses_operational_stormprob_contract():
     cell = {"id": 101, "modules": {"StormProb": {
         "status": "success", "model_version": "stormprob/v1",

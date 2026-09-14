@@ -670,6 +670,13 @@ class StormCellTracker:
         cell['max_refl'] = updated.get('max_refl', cell.get('max_refl', 0))
         if 'bbox' in updated:
             cell['bbox'] = updated['bbox']
+        # The model geometry belongs to this detection, not the previous track.
+        # Copy it with the public footprint across matches, merges, and splits.
+        if 'stormprob' in updated:
+            cell['stormprob'] = copy.deepcopy(updated['stormprob'])
+        else:
+            from EdgeWARN.stormprob.geometry import attach_stormprob_geometry
+            attach_stormprob_geometry(cell, None, None)
         
         # M3 Fix: Monitor reflectivity for decay state
         tracker_cfg = section("tracker")
@@ -761,6 +768,9 @@ class StormCellTracker:
         
         # Update cell with predicted position
         cell['centroid'] = [predicted_state.lat, predicted_state.lon]
+        # There is no current PS observation for a predicted-only track.
+        from EdgeWARN.stormprob.geometry import attach_stormprob_geometry
+        attach_stormprob_geometry(cell, None, None)
         cell['tracking_mode'] = 'predicted'
         cell['prediction_count'] = pred_state.scan_count
         cell['confidence'] = confidence

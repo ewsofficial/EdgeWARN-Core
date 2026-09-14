@@ -12,13 +12,14 @@ import math
 import numpy as np
 
 
-VERSION = "stormprob-postprocess/v1"
+VERSION = "stormprob-postprocess/v2"
 OPERATIONAL_GEOMETRY_VERSION = "stormprob-operational-envelope/v1"
 LEADS_MINUTES = (15, 30, 45, 60)
 ENSEMBLE_SIZE = 20
 GRID_HALF_WIDTH_KM = 100
 GRID_RESOLUTION_KM = 1
 THRESHOLD = 0.25
+MIN_SAMPLED_RADIUS_KM = 0.1
 OPERATIONAL_BUFFER_KM = 1.0
 OPERATIONAL_MIN_POINTS = 4
 OPERATIONAL_MAX_POINTS = 12
@@ -26,7 +27,7 @@ OPERATIONAL_MAX_AREA_INFLATION = 1.25
 
 
 def sample_radii(mean, log_std, current_radii, *, noise=None):
-    """Return `[1,20,4,64]` radii from the low-mode Fourier distribution."""
+    """Return `[1,20,4,64]` radii with the v7 scorecard's 0.1 km floor."""
     mean = np.asarray(mean, dtype=np.float32)
     log_std = np.asarray(log_std, dtype=np.float32)
     current = np.asarray(current_radii, dtype=np.float32)
@@ -47,7 +48,8 @@ def sample_radii(mean, log_std, current_radii, *, noise=None):
     decoded = coefficients[..., :1].copy()
     decoded = decoded + (coefficients[..., 1:17, None] * np.cos(phase)).sum(axis=-2)
     decoded = decoded + (coefficients[..., 17:, None] * np.sin(phase)).sum(axis=-2)
-    return current[:, None, None, :] + np.float32(30) * np.tanh(decoded / np.float32(30))
+    radii = current[:, None, None, :] + np.float32(30) * np.tanh(decoded / np.float32(30))
+    return np.maximum(radii, np.float32(MIN_SAMPLED_RADIUS_KM))
 
 
 def occupancy_probability(radii, displacement_km):
@@ -158,6 +160,67 @@ def _circumscribed_polygon(points, vertex_limit):
     return result
 
 
+def _reduced_outer_hull(envelope, vertex_limit):
+    """Remove the least costly convex-hull edges without excluding the hull."""
+    from shapely.geometry import Polygon
+
+    coords = np.asarray(envelope.exterior.coords[:-1], dtype=np.float64)
+    while len(coords) > vertex_limit:
+        best = None
+        count = len(coords)
+        for index in range(count):
+            a, b = coords[(index - 1) % count], coords[index]
+            c, d = coords[(index + 1) % count], coords[(index + 2) % count]
+            first, second = b - a, d - c
+            denominator = float(np.linalg.det(np.stack((first, second))))
+            if abs(denominator) < 1e-10:
+                continue
+            intersection = a + (float(np.linalg.det(np.stack((c - a, second))))
+                                / denominator) * first
+            if not np.all(np.isfinite(intersection)):
+                continue
+            candidate_coords = np.asarray([
+                intersection if i == index else coords[i]
+                for i in range(count) if i != (index + 1) % count
+            ])
+            candidate = Polygon(candidate_coords)
+            if not candidate.is_valid or not candidate.covers(envelope):
+                continue
+            if best is None or candidate.area < best[0]:
+                best = (candidate.area, candidate_coords)
+        if best is None:
+            return None
+        coords = best[1]
+    return Polygon(coords)
+
+
+def _simplified_outer_hull(envelope, vertex_limit, reference, buffer_km):
+    """Find a low-vertex simplification whose buffered form still covers hull."""
+    extent = max(float(envelope.bounds[2] - envelope.bounds[0]),
+                 float(envelope.bounds[3] - envelope.bounds[1]), 1.0)
+    # Douglas-Peucker tolerances are deterministic and span sub-grid detail to
+    # the full local footprint.  The buffered candidate is what must preserve
+    # containment, so simplification may remove vertices inside the 1 km margin.
+    tolerances = np.geomspace(1e-3, extent * 2.0, num=64)
+    best = None
+    for tolerance in tolerances:
+        candidate = envelope.simplify(float(tolerance), preserve_topology=True)
+        if candidate.geom_type != "Polygon" or not candidate.is_valid:
+            continue
+        if not OPERATIONAL_MIN_POINTS <= _vertex_count(candidate) <= vertex_limit:
+            continue
+        buffered = candidate.buffer(float(buffer_km), join_style=2)
+        if (buffered.geom_type != "Polygon" or not buffered.is_valid
+                or not buffered.covers(envelope)):
+            continue
+        inflation = buffered.area / max(reference.area, 1e-9)
+        if inflation <= OPERATIONAL_MAX_AREA_INFLATION:
+            score = (inflation, _vertex_count(buffered))
+            if best is None or score < best[0]:
+                best = (score, buffered)
+    return None if best is None else best[1]
+
+
 def _operational_envelope_local(original, predicted, *, buffer_km=OPERATIONAL_BUFFER_KM):
     """Build a compact buffered envelope in local east/north kilometres."""
     from shapely.geometry import MultiPoint, Polygon
@@ -186,6 +249,20 @@ def _operational_envelope_local(original, predicted, *, buffer_km=OPERATIONAL_BU
         inflation = buffered.area / max(reference.area, 1e-9)
         if inflation <= OPERATIONAL_MAX_AREA_INFLATION:
             return buffered
+    # Equal-angle support lines can miss a tight fit even when the original
+    # convex hull has a compliant outer simplification.
+    candidate = _reduced_outer_hull(envelope, OPERATIONAL_MAX_POINTS)
+    if candidate is not None:
+        buffered = candidate.buffer(float(buffer_km), join_style=2)
+        if (buffered.geom_type == "Polygon" and buffered.is_valid
+                and OPERATIONAL_MIN_POINTS <= _vertex_count(buffered) <= OPERATIONAL_MAX_POINTS
+                and buffered.covers(envelope)
+                and buffered.area / max(reference.area, 1e-9) <= OPERATIONAL_MAX_AREA_INFLATION):
+            return buffered
+    simplified = _simplified_outer_hull(
+        envelope, OPERATIONAL_MAX_POINTS, reference, float(buffer_km))
+    if simplified is not None:
+        return simplified
     raise ValueError("cannot fit forecast envelope within operational point and area limits")
 
 
