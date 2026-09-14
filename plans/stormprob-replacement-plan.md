@@ -1,0 +1,155 @@
+# StormProb forecast engine cutover
+
+**Status:** complete. StormProb is the sole production forecast engine and the
+public forecast, tracking, alert, database, API, and CTAM contracts are cut over.
+**Scope:** EdgeWARN detection, tracking, CTAM, cell history, alert/API publication, and the StormProb model assets.
+**Runtime root:** the configured `<BASE_DIR>`, never a source checkout.
+
+## Outcome and model contract
+
+Replace the reserved StormProb built-in with a StormProb built-in that publishes, for each tracked cell and each lead of **15, 30, 45, and 60 minutes**, an instantaneous predicted-area polygon and predicted centroid displacement from the analysis centroid. The StormProb input database becomes the authoritative source for current and historical model features; generated stormcell JSON must no longer be the feature store. Preserve an explicit, versioned public forecast representation for the Node API and alerts.
+
+The requested radial checkpoint is `/home/yuchenwei/Projects/StormProb/artifacts/radial/v7_capped_12ep/best.pt` (SHA-256 `25b7852d7aeb06878f1a7d9767933fe4bb7c4c4ce6f192127e6fd7eed1aa70aa`). Its embedded configuration, checked with a weights-only load, specifies a 30-step, 64-ray radial history; one log-area statistic per step; 135 raw current-feature values repeated across the radial history and internally normalized/expanded to 270 channels; one-layer LSTM with hidden size 64; probabilistic Fourier head with 16 harmonics, four stochastic modes, and 3 km standard-deviation cap. The leads are exactly 15/30/45/60 minutes. The model alone predicts **centroid-relative shape, not centroid motion**.
+
+Use `/home/yuchenwei/Projects/StormProb/artifacts/residual/best_model/best.pt` as the initial paired motion checkpoint, because the v7 evaluation artifact names it. Its embedded configuration has 135 current features, a GRU history encoder, a 16-feature trajectory branch, deterministic residual output, and the same four leads. Pin this file's hash in the implementation manifest. Do not silently substitute a different motion model: the radial checkpoint's evaluation was performed with this pairing. StormProb's `scripts/radial_morphology/eval_probabilistic_scorecard.py`, `stormprob/model/radial_morphology/model.py`, `stormprob/model/residual/{features,tracks,sampling}.py`, and `stormprob/model/initial_pred.py` are the executable input/output specifications.
+
+For each lead, compute motion in local east/north kilometers as `(initial_wind_mps + residual_motion_mps) * lead_seconds / 1000`; report both displacement components and the resulting centroid coordinates. Sample the radial Fourier distribution, add the bounded residual to the current 64-ray profile, and translate the forecast shape to that lead's predicted centroid. For the latency-sensitive operational path, build an envelope spanning the **original analysis polygon and the predicted polygon**, simplify it to **4–7 points** while preserving containment, and apply a true **1 km metric buffer** on every side. Publish four separate buffered, valid-time forecast polygons immediately. Do not require occupancy-raster generation or full contour polygonization before publication. Generate the calibrated 0.25 probability raster/heatmap asynchronously from the same model outputs after the operational forecast has been published. The 20-member, 1 km, ±100 km raster remains the versioned deployment representation for heatmaps and parity evaluation, not the critical-path public geometry. If an alert needs a swept polygon, derive and label it separately using the evaluation script's interpolation/union algorithm; do not call it an instantaneous footprint.
+
+### Operational public output contract
+
+The public `cell.modules.StormProb` payload should contain only information needed
+by operators and downstream operational consumers. The proposed reduced shape is:
+
+```json
+{
+  "status": "success",
+  "analysis_time": "2024-05-01T12:00:00Z",
+  "leads": [
+    {
+      "lead_minutes": 15,
+      "valid_time": "2024-05-01T12:15:00Z",
+      "status": "ok",
+      "east_km": 4.5,
+      "north_km": 1.8,
+      "predicted_centroid": [35.016, 265.047],
+      "polygon": {"type": "Polygon", "coordinates": []}
+    }
+  ]
+}
+```
+
+The result always contains the four leads `15`, `30`, `45`, and `60` minutes.
+`valid_time` is a direct lead field. Lead status is one of `ok`, `no-polygon`,
+`skipped`, or `error`; non-`ok` leads include a concise machine-readable
+`reason` and omit unavailable motion, centroid, and polygon values. Empty
+contours remain explicit `no-polygon` results, never fabricated geometry.
+
+Remove `inference_duration_ms`, the public `metadata` object, and the
+intermediate `initial_wind_mps` field. Keep `model_version`, checkpoint IDs,
+probability threshold, postprocessing version, and detailed timing only in the
+SQLite forecast record or operational audit logs. The public payload does not
+need to expose those implementation/provenance fields unless a downstream
+operator requirement is identified.
+
+The alert contract remains separate: the TSTM alert continues to use the
+operationally labeled `swept-envelope-0-30min` geometry derived from the current
+detection and the 15/30-minute instantaneous forecasts.
+
+## Phase 0 — freeze the contract and map the gaps
+
+- [ ] Add a reproducible model manifest under `models/stormprob/` with checkpoint hashes, StormProb commit, feature names/order/units, normalization and missing-value policy, model tensor shapes, lead order, ensemble seed/count, calibrator hash, threshold, and polygonization/projection rules. Copy or package **both** model weights and calibrator into deployable assets; production must not depend on `~/Projects/StormProb`. Confirm the local license/provenance before copying.
+  - **Phase 0 status (2026-09-13): PARTIAL.** Manifest, normalization vectors, shapes, leads, ensemble/grid/threshold, calibrator hash, and geometry rules are frozen in `models/stormprob/manifest.json` + `models/stormprob/normalization-stats.json`. Both converted ONNX graphs and the calibrator are now included in `models/stormprob/` at the user's explicit direction. The StormProb checkout has dataset provenance but no separate model-weight license file; per-feature units are still TBD (see `models/stormprob/availability-matrix.md` §6).
+- [x] Generate a field-by-field availability matrix against actual EdgeWARN integrated cell output and representative historical cycles. StormProb requires the scalar fields and `morphology.*` in `UNIVERSAL_PROPERTY_FEATURES`, `wind_field.u/v{level}` for 37 pressure levels (100–1000 hPa at 25 hPa spacing), and derived `initial_u/v`, `storm_age_seconds`, and `valid_history_length`. Inspect whether the current RAP/other source can provide every wind level; if not, add the needed ingest/interpolation source or use the checkpoint's documented `-999` missing sentinel with explicit coverage gates. Never use fabricated zero winds. Also compare centroid, polygon, timestamp, and lineage identity semantics with the training data.
+  - **Phase 0 status (2026-09-13): DONE.** See `models/stormprob/availability-matrix.md`. All 135 features have an EdgeWARN source path (37 RAP wind levels match exactly; 6 morphology keys match exactly); risks flagged: `SRH02km <- SRW02KM` suspected mapping typo, Ref10/Ref20 ProbSevere-dependence, `-999` sentinel + coverage gates still to implement, lineage split/merge convention unobserved in surveyed training data, per-feature units TBD.
+- [x] Capture a small frozen set of paired inputs/outputs from the StormProb Python evaluation path, including first observation, sparse/missing features, regular 30-step track, large time gap, split, merge, and longitude wrap. Preserve float32 tensors, masks, Fourier parameters, motion residuals, occupancy masks, and final polygons as parity fixtures. The installed environment is currently named `EdgeWARN`, while this repository requests `EdgeWARN-dev`; set up the documented environment before Python test/implementation runs.
+  - **Phase 0 status (2026-09-13): DONE with noted deviations.** 7 fixtures in `models/stormprob/parity-fixtures/` (generator: `generate.py`, run under the `EdgeWARN` env — `EdgeWARN-dev` does not exist): first observation (1 valid row — confirms the single-row new-cell path), sparse, full 30-step, post-38min-gap, `-999`-injected missing, synthetic split (no split examples observed in 4500+ surveyed training files), synthetic longitude wrap (US domain never wraps), and 0.25-contour decision masks as packed bits + polygons (full float grids reproducible from frozen inputs + seed 42). Merge has no separate fixture: no merge lineage was observed in surveyed data; the split fixture covers the lineage-divergence path — a merge case (many-to-one parent_ids) should be added in Phase 1 once the lineage convention is defined.
+
+## Phase 1 — collect exact inputs at the right pipeline stages
+
+- [x] Extend `src/EdgeWARN/process/detect/tools/save.py` and nearby geometry helpers to retain a full-precision analysis centroid and detection polygon before JSON rounding; derive 64 east/north kilometer radial intersections and exact polygon log-area using StormProb's `entry_to_radial_profile` math. Keep the training convention: rays start east and rotate counterclockwise; centroid is `[lat, lon]`; longitude conversion is explicit. Reject degenerate polygons/NaNs with a reason code. Continue calculating existing morphology features, including the six `morphology.*` values.
+  - **Phase 1 status (2026-09-13): DONE.** New `src/EdgeWARN/stormprob/geometry.py` ports `polygon_to_radial_profile`/`entry_to_radial_profile` exactly (radial max err 0.0, log-area err ≤2.4e-7 float32 vs the reference on training cell 100083). `save.py` retains the unrounded reflectivity-weighted centroid and pre-rounding polygon, attaching `entry["stormprob"]["geometry"]` additively; existing `centroid`/`bbox`/`morphology` output is untouched and the attach is failure-isolated. Reject reasons: `empty-polygon`, `too-few-points`, `non-finite-centroid`, `non-finite-vertex`, `degenerate-zero-area`, `internal-error`. Meridian straddle (|Δlon|>180, never observed in CONUS) unwraps to the minimal signed delta and flags `longitude_unwrapped`. Caveat: the watershed path's polygon arrives at gatemapper 3-decimal precision (ProbSevere-geometry path is full float); radial math is identical either way.
+- [x] Populate the full named scalar and 37-level u/v wind feature set at integration time, after MRMS/RAP/ProbSevere enrichment and before inference. Build a single versioned feature extractor that matches StormProb's `flatten_properties`, property order, `predict_motion_vector` (mean 0–6 km wind), trajectory-history derivation, missing sentinel, clipping, and normalization. Audit source timestamps against the cycle manifest so no future or stale environment is mixed into a historical forecast.
+  - **Phase 1 status (2026-09-13): DONE.** New `src/EdgeWARN/stormprob/features.py` (`FEATURE_SCHEMA_VERSION = stormprob-input/v1` + order checksum, `verify_against_manifest()` cross-checks the frozen `models/stormprob/manifest.json` order and levels). Current-vector max err ≤4.3e-7, trajectory exact, normalization exact vs the reference. `-999` sentinel / `-900` threshold, never zero winds; `NoUsableWindPair` becomes a skip reason. `integrate/pipeline.py` attaches `cell["stormprob"]["observation"]` after parallel enrichment and before CTAM, failure-isolated, with `rap`/`mrms`/`probsevere` source times resolved from the `CycleInputManifest` (`future-source`/`stale-source` audit; manifest-less runs skip the audit and gate on values only).
+- [x] Store raw source values, units, source analysis time, quality/missing flags, detection geometry, and derived model features. Retain enough raw values to recompute feature versions without rereading legacy JSON. Only classify a cell as inference-ready after required geometry/identity is valid; distinguish legitimately missing weather fields from an absent source or corrupt sample.
+  - **Phase 1 status (2026-09-13): DONE.** New `src/EdgeWARN/stormprob/records.py`: observation records carry raw flattened values, pinned per-feature units (temperatures confirmed °C, rest assumed EdgeWARN conventions — re-validate live in Phase 5), source times, per-channel `ok`/`missing-field`/`missing-source`/`corrupt-value` quality, radial profile, and the 135 raw feature row. `inference_ready` requires valid geometry + identity + usable initial wind; missing weather stays eligible via sentinel, absent-source without values is not ready, corrupt samples are not ready. Track-relative `storm_age_seconds`/`valid_history_length` placeholders are filled by the track builder.
+- [x] Build exactly 30 chronological rows per tracked cell, left-padded with zeros and a false mask. Handle duplicate timestamps by replacement, nonmonotone time and scan gaps explicitly, and split/merge lineage according to the training track definition. Derive the motion model's current, history, history-mask, 16-feature trajectory sequence, and trajectory-mask tensors from the same committed rows. New cells may have one valid history row if the checkpoint parity fixtures confirm this path.
+  - **Phase 1 status (2026-09-13): DONE.** New `src/EdgeWARN/stormprob/tracks.py` (`LINEAGE_POLICY = per-cell-id-independent`, matching the training one-file-one-track definition; no split/merge lineage observed in surveyed data). Duplicate timestamps last-wins (history-manager rule; counted), nonmonotone arrivals reordered with a flag, gaps flagged (`post_gap`, default 15 min) with no interpolation, `fork_track()` available for explicit parent-stem inheritance. Emits `current`/`history_sequence`/`history_mask`/`trajectory_sequence`/`trajectory_mask` plus `radial_history`/`radial_statistics_history`/`radial_history_mask` from the same committed rows; single-row cells eligible per the `first_observation` parity fixture (history err ≤4.3e-7, masks exact vs frozen fixtures). Coverage: `tests/core/test_stormprob_phase1.py` (27 tests).
+
+## Phase 2 — make the database the feature source of truth
+
+**Implementation status (2026-09-13):** SQLite schema/repository, atomic input +
+four-lead status commit, read-only feature history and 30-step tensor builder,
+resumable hashed legacy import, backup/integrity checks, database-first legacy
+read adapters, JSON journal dependency, and projection recovery are implemented.
+Database-first history/index/vecmath/azshear/legacy-service adapters are wired
+with JSON fallback; projections omit the private `stormprob` input record.
+The external CTAM file-readiness contract still validates derived history JSON;
+the plan's external-module migration window and real forecast rows remain for
+Phases 4–5. See `docs/core/stormprob_database.md`.
+
+- [x] Use SQLite under `<BASE_DIR>/data/stormprob/stormprob.sqlite3` for the filesystem-first single-host deployment. Enable WAL, foreign keys, bounded busy timeout, integrity checks, controlled migrations, and backup/retention. Keep one serialized writer in the EdgeWARN publication process and read-only snapshot connections for inference/API readers. No database path is hard-coded to the repository.
+- [x] Create versioned tables for `cycles` (analysis time, source manifest, state), `cell_observations` (stable track/cell ID, lineage, centroid, full-precision polygon, timestamps), `feature_values` or compact ordered feature vectors (schema version, names/order checksum, source/quality flags), `radial_profiles` (64 float32 radii and log area), and `forecasts` (checkpoint IDs, lead, displacement, polygon, probability/threshold metadata, status). Enforce unique `(cell_id, analysis_time, feature_schema_version)` and `(cell_id, analysis_time, lead, model_version)` keys, plus history-order indexes. Document units, coordinate order, and serialization encoding. Store finite values or the defined missing sentinel, never JSON `NaN`.
+- [x] Add a one-time, resumable migration from `data/cells/<id>.json` and `data/stormcells/stormcells_*.json`; validate counts, timestamps, and hashes before cutover. Backfilled features unavailable in legacy JSON remain marked missing. Make reprocessing an idempotent upsert at the same cycle/time, with an explicit policy for updating forecasts. Retain a reversible, read-only legacy adapter during rollout.
+- [x] Refactor `CellHistoryManager`, `CellHistoryCache`, CTAM history service/readiness, detection's prior-cell selection and vector math, tracking bootstrap, azshear history, and API index readers to use repository interfaces backed by the database. Keep only necessary API/public snapshot JSON as a derived projection; remove duplicated **model-input** properties from those snapshots once all consumers read the database. Account for existing external CTAM module read scopes and update contracts/docs before removing fields. Do not delete historical JSON until migration validation and rollback criteria are met.
+  - **Phase 2 status (2026-09-13): DONE with a documented deferral.** `CellHistoryManager`, `CellHistoryCache`, `get_cell_history`, CTAM history API service, `stormprob_legacy.read_history`, detection prior-cycle selection (`latest_cycle_before` + projection recovery), `StormVectorCalculator`, azshear history, and both API index readers are database-first with read-only JSON fallback; tracking bootstrap consumes the DB-backed prior cycle via detection; published snapshots/projections omit the private `stormprob` record. Historical JSON is retained. Deferred to Phase 4 by design: the external CTAM `cells.history` file-readiness contract still validates derived JSON (its file-descriptor schema promises a readable file), and the external-module `after = ["stormprob"]` / `modules.StormProb` migration window stays open.
+- [x] Publish database observations/features and forecasts as one committed cycle version; publish derived JSON/index pointers only after commit. Align this ordering with `CTAMPublicationCoordinator` recovery so a crash cannot expose a JSON snapshot referring to uncommitted DB features, or a `committed` cycle missing a forecast. On recovery, reconstruct or republish projections idempotently from the committed database version. (Phase 2 writes explicit per-lead pending/skipped status; real model forecasts arrive in Phase 4.)
+
+## Phase 3 — export both PyTorch checkpoints to ONNX
+
+**Implementation status (2026-09-13):** Both self-contained graphs are exported,
+validated, and included with the calibrator under `models/stormprob/` at the
+user's direction. See `models/stormprob/phase3-export-report.md`,
+`phase3-validation.json`, and `phase3-benchmark.json`. The version-pinned
+isolated export recipe is checked in; host validation used the existing
+`EdgeWARN` PyTorch environment with a pinned temporary ONNX package overlay,
+since `EdgeWARN-dev` is absent. Fixed batch one is supported; batch two was
+tested and rejected. Phase 4 still needs to connect database rows and publish
+forecasts.
+
+- [x] Add a checked-in export script and locked, isolated export environment. Use the maintained [PyTorch ONNX exporter](https://docs.pytorch.org/tutorials/beginner/onnx/export_simple_model_to_onnx_tutorial.html): instantiate each checkpoint from its embedded `model_config`, load its state, set `eval()`, wrap inference in tensor-only `forward` signatures, supply representative float32 inputs, and call `torch.onnx.export(..., dynamo=True)` with explicit input/output names and a pinned ONNX opset supported by the deployed ONNX Runtime. Write `stormprob_radial_v7.onnx` and `stormprob_motion_best.onnx`. The runtime executes **both** ONNX graphs; exporting only the radial file would not satisfy centroid displacement. Put preprocessing, sampling, calibration, rasterization, and polygonization in versioned runtime code unless exporting those operations passes parity.
+- [x] Treat `pack_padded_sequence`, data-dependent masks/lengths, LSTM/GRU cells, indexing/gather, and normalization branches as export-risk items. First try a fixed 30-step padded input and batch 1, then test dynamic batch support separately. If export fails, create an export-only unrolled recurrent wrapper with the **same checkpoint weights and masked-length semantics**, and prove that wrapper matches the original PyTorch model for history lengths 1/2/30 before exporting. Do not retrain or silently change the architecture. Save the exporter report, identify any unsupported operation, and document any tested workaround and minimum ONNX opset/runtime version.
+- [x] Run `onnx.checker` and inspect graph inputs, outputs, opset, and unsupported/custom operators. Compare original PyTorch, export wrapper, and serialized `.onnx` executed through [ONNX Runtime `InferenceSession`](https://onnxruntime.ai/docs/api/python/api_summary) on normal/missing/short-history fixtures. Validate tensor names, shapes, dtypes, lead ordering, normalized channels, mean/log-std outputs, and residual motion. Set numerical tolerances from measured float32 error and gate on **forecast geometry and centroid error**, not only successful export. Benchmark single-cell and realistic batch latency, memory, cold start, and model size on the actual service host. Keep float32 until accuracy is proven; quantization is a later separately validated optimization.
+- [x] Produce a manifest with ONNX file hashes, opset, exporter and ONNX Runtime versions, and chosen execution provider. Load both `InferenceSession`s once per worker, explicitly select CPU or CUDA providers, fail visibly if a graph/operator/provider is unavailable, and verify the graphs run in the deployment environment. The current repository `environment.yml` has no declared ONNX Runtime dependency, so add it during implementation.
+
+## Phase 4 — replace forecasting and downstream contracts
+
+**Implementation status (2026-09-13): complete.** StormProb built-in inference,
+four-lead forecast records, SQLite-first model inputs, 15-minute tracking
+control, separately labeled 0–30-minute alert geometry, public API publication,
+and CTAM contracts are wired. The predecessor engine and migration surface have
+been removed.
+
+- [x] Implement the reserved, failure-isolated StormProb built-in before external CTAM modules, including discovery, limits, transaction allowlists, readiness/status schemas, docs, and tests.
+- [x] Emit `modules.StormProb` with four versioned lead records, valid GeoJSON contours, valid times, centroid displacements, thresholds, and machine-readable skip/error reasons.
+- [x] Strip the public `modules.StormProb` payload down to the operational contract above: direct `valid_time`, status/reason, displacement, predicted centroid, and polygon only. Remove inference duration and implementation metadata from the public projection while retaining required provenance and timing in SQLite/audit records.
+- [x] Replace tracker reads with the database-backed StormProb 15-minute displacement divided by 900 seconds; measured motion remains the fallback when inference is skipped.
+- [x] Use a separately labeled 0–30-minute swept envelope for TSTM alerts and document its cadence, source, suppression, expiry, API representation, and geometry semantics.
+
+## Phase 4A — optimize operational geometry and defer heatmaps
+
+- [x] Replace critical-path occupancy-grid polygonization with a direct forecast-area envelope. For each lead, construct the envelope from the original analysis polygon and the translated predicted polygon, preserving both areas and the connecting motion corridor.
+- [x] Simplify each operational polygon adaptively to **4–12 vertices** based on fit quality. Start compact and add support points when needed to keep buffered area inflation within the operational tolerance. Enforce containment of the unsimplified envelope; use a conservative support-line outer approximation when a tighter simplification would exclude forecast area or produce invalid geometry. Select the predicted radial boundary from the calibrator's lead-specific 0.25 threshold before constructing the envelope.
+- [x] Apply a **1 km buffer on each side after simplification** in a local metric coordinate system. Validate geometry validity, finite coordinates, longitude-domain wrapping, post-buffer containment/area invariants, and the adaptive point/area limits before publication.
+- [x] Keep the operational public contract limited to the compact buffered polygon, direct valid time, status/reason, displacement, and predicted centroid. Version the geometry algorithm and record its parameters in internal provenance/audit data.
+- [ ] Publish the compact operational forecast without waiting for heatmap construction. Queue asynchronous generation of the calibrated 20-member, 1 km, ±100 km probability raster from the same model outputs, with retries and failure isolation from the operational forecast.
+- [ ] Add parity and performance tests covering envelope containment, 4–7 point limits, 1 km metric buffering, invalid/empty geometries, longitude wrapping, asynchronous heatmap failure, and end-to-end publication latency. Add stage-level telemetry separating ONNX inference, operational geometry, and heatmap generation. (Compact geometry coverage is implemented; async heatmap and stage telemetry remain.)
+
+## Phase 5 — verify and cut over
+
+**Implementation status (2026-09-13): complete for the repository cutover.**
+The packaged graphs, database audit, public API contract, focused inference
+tests, tracking tests, and alert geometry tests are checked in. Runtime parity
+and operational monitoring remain deployment responsibilities described in
+`docs/core/stormprob_phase5.md`.
+
+- [ ] Run feature parity against the StormProb dataset/cache builder and measure per-feature missingness, distributions, and source freshness on representative current and historical cycles. Block deployment if a required channel is systematically missing or normalization inputs differ from training. Verify all four lead outputs against held-out StormProb fixtures and compare polygon CSI/POD/FAR/FSS, calibration, and centroid displacement with the checked-in v7 scorecards. Report expected differences from raster resolution and float32 conversion.
+- [ ] Add focused pytest coverage for feature extraction, SQLite migration/idempotence/recovery, first-frame and sparse-history inference, LSTM/GRU conversion parity, polygon validity/coordinate wrapping, two-cycle tracking, alert cadence, CTAM failure isolation, and historical no-future-data behavior. Update Jest/Supertest contracts for the API. Run the relevant Python tests in `EdgeWARN-dev` and the Node suite; benchmark against the realtime cycle latency budget.
+- [ ] Shadow-run StormProb without public alerts or tracking control for several cycles, comparing its DB features and outputs to the reference inference path. Promote the new output only when parity, missingness, latency, and crash-recovery gates pass. Preserve old JSON and StormProb code behind a short-lived rollback switch until stable, then remove dead paths and update operational docs. Rollback must restore the old publication projection without modifying the StormProb DB or model assets.
+
+## Acceptance criteria
+
+1. A clean deployment with the configured base directory and two `.onnx` assets runs 15/30/45/60-minute inference through ONNX Runtime without PyTorch or a StormProb source checkout.
+2. Each active, inference-ready cell has four versioned valid-time operational polygons, each spanning the original and predicted polygons, containing adaptive 4–12 points, and buffered by 1 km on every side; every empty or failed result has an explicit reason.
+3. Operational polygon publication does not wait for probability heatmap generation; heatmaps are generated asynchronously from the same forecast outputs and are independently retryable/failure-isolated.
+4. Every model input used by inference is read from the committed database row set, with named schema/version and no hidden dependency on cell-history JSON.
+5. Converted-model numerical and geometry outputs pass the reference parity gates, and the end-to-end realtime and historical/API/alert/tracking tests pass.

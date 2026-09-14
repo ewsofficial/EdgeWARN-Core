@@ -3,7 +3,7 @@ CTAM Pipeline Entry Point
 
 Provides a single entry point for CTAM processing on storm cell data:
 
-- The reserved built-in StormCast module runs in-process through the host
+- The reserved built-in StormProb module runs in-process through the host
   service boundary and always runs first.
 - External modules are discovered from manifests below ``ctam_modules/`` and
   executed out of process in dependency order through the internal API v1.
@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from collections import Counter
 from EdgeWARN.alerts import AlertManager
-from .util.history_cache import CellHistoryCache
 from . import discovery, readiness
 from common.ingest.manifest import CycleInputManifest
 
@@ -101,31 +100,32 @@ def _run_external_modules(cells, timestamp, json_path, input_manifest, *, disabl
         return cells
 
 
-def _run_builtin_stormcast(cells, history_cache):
+def _run_builtin_stormprob(cells):
     """Run the reserved built-in before any discovered external module.
 
-    StormCast is deliberately not obtained from the import-time registry here:
+    StormProb is deliberately not obtained from the import-time registry here:
     an operator-installed manifest cannot shadow it and every data dependency
     crosses the same narrow host-service boundary.
     """
-    from .builtins import BuiltinStormCastAdapter, StormCastCycleService
-
-    adapter = BuiltinStormCastAdapter(StormCastCycleService(history_cache))
+    from .builtins import BuiltinStormProbAdapter, StormProbCycleService
+    from EdgeWARN.stormprob.onnx_runtime import BATCH_SIZE
+    adapter = BuiltinStormProbAdapter(StormProbCycleService())
     success_count = error_count = alert_count = 0
-    for cell_idx, cell in enumerate(cells):
-        cell.setdefault("modules", {})
+    for batch_start in range(0, len(cells), BATCH_SIZE):
+        batch = cells[batch_start:batch_start + BATCH_SIZE]
         try:
-            adapter.run(cell)
-            success_count += 1
+            adapter.run_batch(batch)
         except Exception as exc:
-            cell["modules"][adapter.name] = {"status": "error", "error": str(exc)}
-            print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: built-in StormCast FAILED: {exc}")
-            error_count += 1
-            continue
-        try:
-            alert_count += adapter.publish_alerts(adapter.alerts(cell))
-        except Exception as exc:
-            print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormCast alerts FAILED: {exc}")
+            for cell in batch:
+                cell.setdefault("modules", {})[adapter.name] = {
+                    "status": "error", "error": str(exc)}
+        for cell_idx, cell in enumerate(batch, batch_start):
+            success_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success")
+            error_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") != "success")
+            try:
+                alert_count += adapter.publish_alerts(adapter.alerts(cell))
+            except Exception as exc:
+                print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormProb alerts FAILED: {exc}")
     return success_count, error_count, alert_count
 
 
@@ -140,7 +140,7 @@ def run_ctam(
     """
     Run CTAM on the provided storm cells.
 
-    The reserved built-in StormCast module runs first, in-process. Discovered
+    The reserved built-in StormProb module runs first, in-process. Discovered
     external modules then execute out of process in dependency order through
     the internal API; only their sealed transactions reach the working set.
 
@@ -156,7 +156,6 @@ def run_ctam(
         The list of cells with 'modules' populated by each completed module.
     """
     start_time = time.time()
-
     if timestamp:
         _run_phase1_discovery_dry_run(cells, timestamp, json_path, input_manifest)
 
@@ -168,73 +167,68 @@ def run_ctam(
         print(f"[CTAM] Failed to clean up expired alerts: {e}")
     
     print("[CTAM] Starting CTAM pipeline...")
-    print("[CTAM] Built-in modules: ['StormCast']")
+    print("[CTAM] Built-in modules: ['StormProb']")
     print(f"[CTAM] Processing {len(cells)} storm cell(s)...")
     
     # Step 1: Run cell-based modules
     
-    # Pre-initialize history cache
-    hist_cache = CellHistoryCache()
-    active_cell_ids = [c["id"] for c in cells if "id" in c]
-    hist_cache.preload_active(active_cells=active_cell_ids)
+    cell_success_count, cell_error_count, builtin_alert_count = _run_builtin_stormprob(cells)
     
-    cell_success_count, cell_error_count, builtin_alert_count = _run_builtin_stormcast(cells, hist_cache)
-    
-    stormcast_status_counts = {}
-    stormcast_alert_eligibility_counts = {
+    stormprob_status_counts = {}
+    stormprob_alert_eligibility_counts = {
         True: 0,
         False: 0,
         None: 0,
     }
-    stormcast_alert_outcome_counts = Counter()
-    stormcast_alert_blocker_counts = Counter()
+    stormprob_alert_outcome_counts = Counter()
+    stormprob_alert_blocker_counts = Counter()
 
     for cell in cells:
-        stormcast_result = cell.get("modules", {}).get("StormCast")
-        if not stormcast_result:
+        stormprob_result = cell.get("modules", {}).get("StormProb")
+        if not stormprob_result:
             continue
 
-        status = stormcast_result.get("status", "unknown")
-        stormcast_status_counts[status] = stormcast_status_counts.get(status, 0) + 1
+        status = stormprob_result.get("status", "unknown")
+        stormprob_status_counts[status] = stormprob_status_counts.get(status, 0) + 1
 
-        eligibility = stormcast_result.get("can_generate_alerts")
+        eligibility = stormprob_result.get("can_generate_alerts")
         if eligibility is True:
-            stormcast_alert_eligibility_counts[True] += 1
+            stormprob_alert_eligibility_counts[True] += 1
         elif eligibility is False:
-            stormcast_alert_eligibility_counts[False] += 1
+            stormprob_alert_eligibility_counts[False] += 1
         else:
-            stormcast_alert_eligibility_counts[None] += 1
+            stormprob_alert_eligibility_counts[None] += 1
 
-        alert_outcome = stormcast_result.get("alert_outcome")
+        alert_outcome = stormprob_result.get("alert_outcome")
         if alert_outcome:
-            stormcast_alert_outcome_counts[alert_outcome] += 1
+            stormprob_alert_outcome_counts[alert_outcome] += 1
 
-        for blocker in stormcast_result.get("alert_blockers", []):
-            stormcast_alert_blocker_counts[str(blocker)] += 1
+        for blocker in stormprob_result.get("alert_blockers", []):
+            stormprob_alert_blocker_counts[str(blocker)] += 1
 
-    if stormcast_status_counts:
+    if stormprob_status_counts:
         status_summary = ", ".join(
-            f"{status}={count}" for status, count in sorted(stormcast_status_counts.items())
+            f"{status}={count}" for status, count in sorted(stormprob_status_counts.items())
         )
         eligibility_summary = (
-            f"true={stormcast_alert_eligibility_counts[True]}, "
-            f"false={stormcast_alert_eligibility_counts[False]}, "
-            f"none={stormcast_alert_eligibility_counts[None]}"
+            f"true={stormprob_alert_eligibility_counts[True]}, "
+            f"false={stormprob_alert_eligibility_counts[False]}, "
+            f"none={stormprob_alert_eligibility_counts[None]}"
         )
         print(
-            "[CTAM] StormCast summary: "
+            "[CTAM] StormProb summary: "
             f"status[{status_summary}] can_generate_alerts[{eligibility_summary}]"
         )
-        if stormcast_alert_outcome_counts:
+        if stormprob_alert_outcome_counts:
             outcome_summary = ", ".join(
-                f"{name}={count}" for name, count in sorted(stormcast_alert_outcome_counts.items())
+                f"{name}={count}" for name, count in sorted(stormprob_alert_outcome_counts.items())
             )
-            print(f"[CTAM] StormCast alert outcomes: {outcome_summary}")
-        if stormcast_alert_blocker_counts:
+            print(f"[CTAM] StormProb alert outcomes: {outcome_summary}")
+        if stormprob_alert_blocker_counts:
             blocker_summary = ", ".join(
-                f"{name}={count}" for name, count in sorted(stormcast_alert_blocker_counts.items())
+                f"{name}={count}" for name, count in sorted(stormprob_alert_blocker_counts.items())
             )
-            print(f"[CTAM] StormCast alert blockers: {blocker_summary}")
+            print(f"[CTAM] StormProb alert blockers: {blocker_summary}")
     
     total_elapsed = time.time() - start_time
     print(f"[CTAM] Pipeline complete: {cell_success_count} built-in success, {cell_error_count} built-in error(s), {builtin_alert_count} alert(s) in {total_elapsed:.3f}s")

@@ -1,4 +1,0 @@
-{
-  "status": "skipped",
-  "reason": "Insufficient motion data (missing dx, dy, or dt)"
-}

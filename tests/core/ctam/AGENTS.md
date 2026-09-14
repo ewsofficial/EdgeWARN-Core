@@ -10,7 +10,7 @@ Framework-level CTAM tests.
   `UPDATE_CTAM_BASELINE=1 python -m pytest tests/core/ctam`, and only when the
   source change was an intentional behavior change -- an unexplained diff is the
   regression these snapshots exist to catch.
-- The `*_baseline.py` modules freeze today's StormCast output, alert payloads,
+- The `*_baseline.py` modules freeze today's StormProb output, alert payloads,
   stormcell field inventory, and cell-history semantics. Treat a failure there as
   a behavior change to justify, not a test to update.
 - `contract/` covers the checked-in artifacts under `docs/ctam/` rather than any

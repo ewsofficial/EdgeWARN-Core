@@ -28,7 +28,7 @@ The primary contract is:
   outside the supported contract.
 - The CTAM host owns validation, conflict handling, atomic file replacement,
   history updates, index publication, failure isolation, and audit records.
-- StormCast remains bundled in the base CTAM package because its motion output
+- StormProb remains bundled in the base CTAM package because its motion output
   is consumed by tracking on later cycles. Its reserved module ID cannot be
   shadowed by an external installation.
 
@@ -46,7 +46,7 @@ The implementation is complete when all of the following are true:
   production discovery root by default, and may be absent or empty.
 - Adding a valid module folder makes it discoverable on the next safe reload
   boundary without editing `src/EdgeWARN/ctam/`.
-- Removing or disabling an external module cannot prevent StormCast from being
+- Removing or disabling an external module cannot prevent StormProb from being
   available as the base module.
 - No external module must subclass `AnalysisModule`, register itself at import
   time, or import EdgeWARN implementation modules to perform supported work.
@@ -73,10 +73,10 @@ The implementation is complete when all of the following are true:
 - Real-time and historical execution use the same API model and pinned
   per-cycle artifact catalog. A module cannot silently select a newer file by
   mtime while processing an older cycle.
-- Existing StormCast forecasts, alerts, diagnostics, and downstream tracking
+- Existing StormProb forecasts, alerts, diagnostics, and downstream tracking
   consumption remain covered by regression tests.
 - MorphoWind is deleted from the repository. No base package code imports it,
-  registers it, or depends on its output namespace, and the StormCast threat
+  registers it, or depends on its output namespace, and the StormProb threat
   field that previously read that namespace has an explicitly decided behavior.
 - CTAM documentation contains the manifest schema, API schema, module SDK
   usage, install/update/remove workflow, compatibility policy, and a complete
@@ -89,7 +89,7 @@ The current implementation is modular only at the Python class level:
 - `src/EdgeWARN/ctam/interface.py` defines `AnalysisModule` and
   `GridAnalysisModule`. Implementations receive mutable dictionaries or locate
   raw data themselves.
-- `src/EdgeWARN/ctam/modules/__init__.py` imports StormCast and MorphoWind by
+- `src/EdgeWARN/ctam/modules/__init__.py` imports StormProb and MorphoWind by
   name and registers instantiated classes at import time. Every new module
   therefore requires a base-repository code change.
 - `src/EdgeWARN/ctam/registry.py` stores process-global module instances, and
@@ -98,10 +98,10 @@ The current implementation is modular only at the Python class level:
   receives the full mutable cell, can import any EdgeWARN implementation, and
   has no declared input, write ownership, protocol version, timeout, or
   lifecycle contract.
-- StormCast reads `data/cells/<id>.json` through shared history helpers and reads
+- StormProb reads `data/cells/<id>.json` through shared history helpers and reads
   alerts directly. This makes filesystem access part of undocumented module
   behavior.
-- `src/EdgeWARN/ctam/modules/StormCast/__init__.py` derives its published
+- `src/EdgeWARN/ctam/modules/StormProb/__init__.py` derives its published
   `tstm_wind` threat from `modules.MorphoWind.severity_index`, defaulting to
   `0.0` when absent. A built-in module therefore depends on another module's
   output namespace with no declared requirement, no ordering guarantee, and no
@@ -121,9 +121,9 @@ The current implementation is modular only at the Python class level:
   roles, source families, analysis times, and validation state. CTAM should
   reuse it rather than rescan source directories.
 - `.gitignore` does not currently ignore `ctam_modules/`.
-- Tracking reads `modules.StormCast` from prior cell histories in
+- Tracking reads `modules.StormProb` from prior cell histories in
   `src/EdgeWARN/process/detect/track.py` and
-  `src/EdgeWARN/process/detect/kalman/filter.py`. StormCast is therefore a base
+  `src/EdgeWARN/process/detect/kalman/filter.py`. StormProb is therefore a base
   dependency, not merely an optional example plugin.
 
 ## Architectural decisions
@@ -184,23 +184,23 @@ dependency-sorted order. This makes conflicts and dependencies auditable.
 Parallel execution is deferred until write sets are proven disjoint and a
 benchmark shows material value.
 
-### 4. StormCast is a reserved built-in
+### 4. StormProb is a reserved built-in
 
-Keep StormCast and its forecasting core in `src/EdgeWARN/ctam/`. Register it
+Keep StormProb and its forecasting core in `src/EdgeWARN/ctam/`. Register it
 explicitly as the only built-in analysis module; do not discover it through
-`ctam_modules/`. Reserve the case-insensitive ID `stormcast` and output key
-`StormCast`.
+`ctam_modules/`. Reserve the case-insensitive ID `stormprob` and output key
+`StormProb`.
 
-Adapt StormCast to the same host service methods used by the HTTP handlers, but
+Adapt StormProb to the same host service methods used by the HTTP handlers, but
 call those methods in-process to avoid serializing every storm cell and
 history entry over loopback. Contract tests must prove the direct adapter and
-HTTP API enforce identical read/write rules. StormCast runs before external
-modules, so a module may declare `after = ["stormcast"]` and consume its
+HTTP API enforce identical read/write rules. StormProb runs before external
+modules, so a module may declare `after = ["stormprob"]` and consume its
 current-cycle output.
 
 Retain `--disable-ctam` as the explicit compatibility switch that disables
-both StormCast and external modules. Add `--disable-ctam-modules` if operators
-need to suppress only external modules while preserving StormCast. Do not
+both StormProb and external modules. Add `--disable-ctam-modules` if operators
+need to suppress only external modules while preserving StormProb. Do not
 silently change the existing flag's meaning.
 
 ## Target repository and runtime layout
@@ -228,7 +228,7 @@ EdgeWARN-Core/
 │   ├── publication.py                    # snapshot/history commit and recovery
 │   ├── sdk/                              # small optional Python HTTP client
 │   ├── builtins/
-│   │   └── stormcast/                    # adapter plus existing StormCast core
+│   │   └── stormprob/                    # adapter plus existing StormProb core
 │   └── util/
 └── tests/fixtures/ctam_modules/           # inert test-only module fixtures
 
@@ -270,7 +270,7 @@ required = false
 scope = "stormcells"                    # stormcells or cycle
 entrypoint = ["{python}", "main.py"]
 timeout_seconds = 30
-after = ["stormcast"]
+after = ["stormprob"]
 
 [[requires]]
 selector = "stormcells.current"
@@ -310,7 +310,7 @@ Manifest validation rules:
   environment executable, but reject shell operators, payload paths outside
   the module folder, and symlink escapes.
 - Dependencies form an acyclic graph and refer to installed modules or the
-  reserved `stormcast` ID. Ordering is stable by dependency then ID.
+  reserved `stormprob` ID. Ordering is stable by dependency then ID.
 - Requirement selectors are drawn from a documented registry. Unknown product,
   family, role, or resource selectors fail manifest validation rather than
   becoming perpetually unavailable.
@@ -332,7 +332,7 @@ Manifest validation rules:
 
 Discovery records invalid manifests as disabled with an actionable path and
 reason. One invalid optional module must not prevent valid modules or
-StormCast from running. Changes are loaded between cycles, never halfway
+StormProb from running. Changes are loaded between cycles, never halfway
 through a cycle.
 
 ## File catalog and readiness model
@@ -392,7 +392,7 @@ requirements_evaluated
       +--> not_ready / failed
       |
       v
-stormcast_running -> external_modules_running -> committing
+stormprob_running -> external_modules_running -> committing
                                                   |
                                       +-----------+-----------+
                                       v                       v
@@ -404,7 +404,7 @@ Per-module states are `discovered`, `invalid`, `waiting`, `ready`, `running`,
 `skipped_missing_requirements`, `timed_out`, and `failed`.
 
 `ctam_ready` becomes true only after the catalog is frozen, the current
-stormcells are available in memory, and every base requirement for StormCast
+stormcells are available in memory, and every base requirement for StormProb
 has been evaluated. It does not imply that every optional source exists.
 Every module receives its own `requirements_satisfied` boolean and detailed
 list; a missing optional file never masquerades as a ready file.
@@ -474,7 +474,7 @@ error before evaluation:
 not sufficient; the leaf key must also belong to the caller.
 
 - Under `modules`, the caller owns exactly `modules.<display-name>` from its
-  manifest. Reserved keys, including `StormCast` for non-StormCast callers and
+  manifest. Reserved keys, including `StormProb` for non-StormProb callers and
   the legacy `_grid_outputs`, are never grantable.
 - Under `properties`, the caller owns only keys declared in its manifest and
   prefixed with its module id. This matters because `properties` is *shared,
@@ -536,8 +536,8 @@ The target flow is:
 
 1. Integration finishes all normal enrichments using the pinned manifest.
 2. CTAM freezes a cycle catalog and loads only the active cell histories needed
-   by discovered manifests and StormCast.
-3. StormCast runs as the reserved base module and commits its namespaced cell
+   by discovered manifests and StormProb.
+3. StormProb runs as the reserved base module and commits its namespaced cell
    patches and alerts to the in-memory working set.
 4. The runner discovers valid external manifests, evaluates requirements, and
    sorts dependencies.
@@ -569,7 +569,7 @@ entry, module-requested historical patches, alerts, and index ordering.
 MorphoWind is deleted rather than migrated. It is the only optional built-in
 module, and keeping it would require either a second bundled production
 analytics module inside the base package or an external distribution channel
-this project does not have. The base package ships StormCast plus a synthetic
+this project does not have. The base package ships StormProb plus a synthetic
 example, and nothing else.
 
 Delete, in one reviewed change:
@@ -589,30 +589,30 @@ Do not delete `properties.morphology` or the detection-stage `MorphologyEngine`.
 Those are unrelated detection outputs; only the misleading MorphoWind comment in
 `src/EdgeWARN/process/detect/tools/save.py` should be corrected.
 
-### The StormCast `tstm_wind` coupling must be decided, not dropped
+### The StormProb `tstm_wind` coupling must be decided, not dropped
 
-StormCast currently sets `tstm_wind` from `modules.MorphoWind.severity_index`
+StormProb currently sets `tstm_wind` from `modules.MorphoWind.severity_index`
 with a `0.0` default. Deleting MorphoWind makes that threat unconditionally
 `"false"`, which is a silent alert-content regression rather than a refactor.
 Choose one option explicitly and record it in a release note:
 
-- **Remove the threat field.** StormCast stops publishing `tstm_wind` because it
+- **Remove the threat field.** StormProb stops publishing `tstm_wind` because it
   has no wind-risk input of its own. Alert consumers and the alert schema are
   updated accordingly.
-- **Keep it as a declared optional input.** StormCast reads a documented
+- **Keep it as a declared optional input.** StormProb reads a documented
   `severity_index` from a named optional module namespace through the host
   service, publishes `tstm_wind` only when that namespace is present, and
   distinguishes absent from `"false"`.
 
 Do not leave the current code shape in place after deletion, where a permanently
 missing namespace is indistinguishable from a measured absence of wind risk. The
-StormCast tests that inject a `MorphoWind` namespace
-(`tests/core/ctam/modules/stormcast/test_module.py`) must be rewritten to match
+StormProb tests that inject a `MorphoWind` namespace
+(`tests/core/ctam/modules/stormprob/test_module.py`) must be rewritten to match
 whichever option is chosen.
 
 ## Legacy framework compatibility
 
-During one deprecation window, keep import shims for documented StormCast core
+During one deprecation window, keep import shims for documented StormProb core
 imports. Do not preserve import-time external registration as a hidden fallback.
 Emit a targeted error for legacy third-party subclasses explaining how to add
 a manifest and use API v1. Remove `interface.py`, `registry.py`, and the generic
@@ -622,9 +622,9 @@ a manifest and use API v1. Remove `interface.py`, `registry.py`, and the generic
 
 ### Phase 0 — Freeze behavior and schemas
 
-- [ ] Add golden fixtures for StormCast current-cell outputs, history reads,
+- [ ] Add golden fixtures for StormProb current-cell outputs, history reads,
   alerts, skipped states, and error states.
-- [ ] Record the current StormCast alert payload with and without a populated
+- [ ] Record the current StormProb alert payload with and without a populated
   `modules.MorphoWind.severity_index`, so the `tstm_wind` decision is made
   against measured output rather than assumption.
 - [ ] Record the current stormcell and cell-history JSON shapes, including
@@ -637,7 +637,7 @@ a manifest and use API v1. Remove `interface.py`, `registry.py`, and the generic
 
 Acceptance:
 
-- Tests can distinguish a behavior-preserving StormCast migration from a
+- Tests can distinguish a behavior-preserving StormProb migration from a
   changed forecast/alert schema.
 - Every API example validates against the checked-in schema.
 
@@ -717,7 +717,7 @@ Tasks:
 - [ ] Implement revisioned staging, validation, ownership enforcement,
   idempotent commit, and conflict errors.
 - [ ] Implement the `modules`/`properties` pointer allowlist as segment-wise
-  validation in one place, shared by the HTTP handlers and the StormCast
+  validation in one place, shared by the HTTP handlers and the StormProb
   in-process adapter, so neither path can drift into broader access.
 - [ ] Stage alerts in the same semantic module transaction.
 - [ ] Consolidate stormcell, current history, historical patch, alert, and
@@ -771,36 +771,36 @@ Acceptance:
 - A required-module failure marks CTAM degraded/failed according to policy;
   optional failures remain isolated and visible.
 
-### Phase 5 — Move StormCast onto the host service boundary
+### Phase 5 — Move StormProb onto the host service boundary
 
 Files:
 
-- `src/EdgeWARN/ctam/modules/StormCast/` (move/adapt)
-- `src/EdgeWARN/ctam/builtins/stormcast/`
+- `src/EdgeWARN/ctam/modules/StormProb/` (move/adapt)
+- `src/EdgeWARN/ctam/builtins/stormprob/`
 - `src/EdgeWARN/ctam/run.py`
 - `src/EdgeWARN/process/detect/track.py`
 - `src/EdgeWARN/process/detect/kalman/filter.py`
-- `tests/core/ctam/modules/stormcast/`
+- `tests/core/ctam/modules/stormprob/`
 - `tests/integration/`
 
 Tasks:
 
-- [ ] Preserve StormCast core public imports through deprecation shims while
+- [ ] Preserve StormProb core public imports through deprecation shims while
   moving its adapter to the built-in runner.
 - [ ] Replace direct history/alert file access with host service calls.
 - [ ] Reserve its ID and execute it before external modules.
 - [ ] Preserve forecast, diagnostic, status, alert, and summary logging shapes.
-- [ ] Verify that prior-cycle StormCast velocity remains available to tracking
+- [ ] Verify that prior-cycle StormProb velocity remains available to tracking
   and Kalman prediction after history publication.
 - [ ] Add `--disable-ctam-modules` while retaining `--disable-ctam` behavior.
 
 Acceptance:
 
-- Golden StormCast tests match the frozen baseline or document an intentional
+- Golden StormProb tests match the frozen baseline or document an intentional
   correction separately.
-- An empty/missing external module root still produces StormCast output.
-- An external `stormcast` manifest is rejected and cannot shadow the built-in.
-- A two-cycle integration test proves cycle N StormCast output is consumed by
+- An empty/missing external module root still produces StormProb output.
+- An external `stormprob` manifest is rejected and cannot shadow the built-in.
+- A two-cycle integration test proves cycle N StormProb output is consumed by
   tracking in cycle N+1.
 
 ### Phase 6 — Delete MorphoWind and remove the legacy framework
@@ -809,7 +809,7 @@ Files:
 
 - `src/EdgeWARN/ctam/modules/MorphoWind/` (delete)
 - `src/EdgeWARN/ctam/modules/__init__.py`
-- `src/EdgeWARN/ctam/modules/StormCast/__init__.py`
+- `src/EdgeWARN/ctam/modules/StormProb/__init__.py`
 - `src/EdgeWARN/ctam/interface.py`
 - `src/EdgeWARN/ctam/registry.py`
 - `src/EdgeWARN/ctam/engine.py`
@@ -819,7 +819,7 @@ Files:
 
 Tasks:
 
-- [ ] Decide the `tstm_wind` question, implement it in StormCast, and write the
+- [ ] Decide the `tstm_wind` question, implement it in StormProb, and write the
   release note before deleting MorphoWind.
 - [ ] Delete the MorphoWind package, its import-time registration, its docs, and
   its tests as listed in the MorphoWind removal section.
@@ -838,10 +838,10 @@ Acceptance:
   except an intentional release note or changelog entry.
 - `rg` finds no production auto-registration or hard-coded optional module
   import.
-- A clean checkout runs StormCast normally with an absent or empty
+- A clean checkout runs StormProb normally with an absent or empty
   `ctam_modules/`, and detection-stage `properties.morphology` is byte-identical
   to the Phase 0 baseline.
-- StormCast alert payloads match the decided `tstm_wind` behavior, and no test
+- StormProb alert payloads match the decided `tstm_wind` behavior, and no test
   fixture injects a `MorphoWind` namespace to obtain a passing assertion.
 - No optional production analytics module source lives inside the base CTAM
   package.
@@ -857,7 +857,7 @@ Acceptance:
   the last cycle status without executing code.
 - [ ] Add protocol compatibility tests for the current and immediately previous
   supported API version.
-- [ ] Benchmark no-external-module, StormCast-only, and representative external
+- [ ] Benchmark no-external-module, StormProb-only, and representative external
   module cycles for latency, memory, serialization, and file I/O.
 - [ ] Set a measured regression budget before making the new runner default.
 
@@ -868,7 +868,7 @@ Acceptance:
 - Operators can explain why a module did not run from one status record.
 - The default path does not start an API server or child process when CTAM is
   disabled, and an empty external root adds negligible overhead beyond the
-  StormCast adapter.
+  StormProb adapter.
 
 ## Test matrix
 
@@ -888,7 +888,7 @@ Acceptance:
   container paths, other modules' keys, reserved keys, every core identity and
   geometry field, `/features` and root paths, array indices, traversal segments,
   encoded separators, and malformed pointers. The same table runs against both
-  the HTTP handlers and the StormCast in-process adapter.
+  the HTTP handlers and the StormProb in-process adapter.
 - Rejection of a `properties` write whose key already exists in the frozen entry
   and belongs to detection or another module.
 - Journal transitions, hashes, recovery, quarantine, and index-last ordering.
@@ -916,8 +916,8 @@ Acceptance:
 - Two modules cannot overwrite each other or a core field.
 - A module cannot corrupt a detection enrichment value that later physics reads:
   a fixture attempting to write `properties.p95VIL` is rejected, and the value
-  StormCast reads is unchanged.
-- StormCast output parity, alert parity, and next-cycle tracking use.
+  StormProb reads is unchanged.
+- StormProb output parity, alert parity, and next-cycle tracking use.
 - `--disable-ctam` and `--disable-ctam-modules` behavior.
 - Windows and Linux loopback launch, token propagation, termination, and path
   handling.
@@ -967,15 +967,15 @@ directory remains the source of truth for generated artifacts.
 2. Land the read-only API and synthetic example; run it in CI only.
 3. Land transactions/publication and execute a shadow module whose patches are
    validated but discarded; compare proposed output with current output.
-4. Move StormCast to the host service boundary and verify two-cycle tracking.
-5. Ship the decided StormCast `tstm_wind` behavior and its release note, then
+4. Move StormProb to the host service boundary and verify two-cycle tracking.
+5. Ship the decided StormProb `tstm_wind` behavior and its release note, then
    delete MorphoWind in a separate reviewed change.
 6. Enable external modules by default when present; an absent folder remains a
-   valid StormCast-only installation.
+   valid StormProb-only installation.
 7. Remove the legacy registry after one release of warnings and passing
    compatibility/performance gates.
 
-Rollback disables external discovery and returns to the built-in StormCast
+Rollback disables external discovery and returns to the built-in StormProb
 adapter. It must not restore hard-coded optional-module imports. Keep the
 transaction recovery reader for at least one additional release so prepared
 work from the new publisher can be resolved safely after a downgrade.
@@ -984,7 +984,7 @@ work from the new publisher can be resolved safely after a downgrade.
 
 - [ ] `/ctam_modules/` is ignored and tested as the default external root.
 - [ ] External discovery requires no base import or registry edit.
-- [ ] StormCast is present, reserved, regression-tested, and used by later
+- [ ] StormProb is present, reserved, regression-tested, and used by later
   tracking.
 - [ ] API v1 exposes file inventory, file availability, CTAM readiness, and
   per-module requirement readiness.
@@ -999,7 +999,7 @@ work from the new publisher can be resolved safely after a downgrade.
 - [ ] Exact cycle inputs are pinned in real-time and historical processing.
 - [ ] File publication is atomic per target, journal-recoverable across
   targets, and indexed last.
-- [ ] MorphoWind is fully deleted from code, tests, and docs, and the StormCast
+- [ ] MorphoWind is fully deleted from code, tests, and docs, and the StormProb
   `tstm_wind` behavior change is deliberate and released.
 - [ ] Legacy registry execution is gone rather than retained as a competing
   production path.

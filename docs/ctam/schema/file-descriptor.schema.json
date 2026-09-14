@@ -39,7 +39,7 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\Z"
     },
     "role": {
-      "description": "Which slot in the cycle this file fills. 'current' is the analysis time; 'previous' is the prior cycle StormCast needs for motion.",
+      "description": "Which slot in the cycle this file fills. 'current' is the analysis time; 'previous' is the prior cycle StormProb needs for motion.",
       "enum": ["current", "previous", "history", "forecast"]
     },
     "analysis_time": {

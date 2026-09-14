@@ -403,26 +403,6 @@ class TestCTAMPerformance:
             f"CTAM took {result.duration_s:.2f}s, expected < 2s"
         assert len(processed_cells) == len(sample_storm_cells)
     
-    def test_stormcast_module(self, sample_storm_cells):
-        """Test StormCast module performance."""
-        if sample_storm_cells is None or len(sample_storm_cells) == 0:
-            pytest.skip("No sample storm cells available")
-        
-        from EdgeWARN.ctam.modules.StormCast import StormCastModule
-        
-        result = PerformanceResult("StormCast Module")
-        result.start()
-        
-        module = StormCastModule()
-        for cell in sample_storm_cells:
-            module.process(cell)
-        
-        result.stop()
-        print(result.report())
-        
-        assert result.duration_s < 1.0, \
-            f"StormCast took {result.duration_s:.2f}s, expected < 1s"
-    
 # =============================================================================
 # GLM INTEGRATION BENCHMARKS
 # =============================================================================

@@ -186,11 +186,11 @@ class TestKalmanFilter:
         assert abs(kf.state.lon - pred_lon) < 0.001
     
     def test_control_input(self):
-        """Test prediction with StormCast control input."""
+        """Test prediction with StormProb control input."""
         kf = KalmanFilter()
         kf.initialize(lat=35.0, lon=-97.0, u=0.0, v=0.0)
         
-        # Predict with control input (StormCast velocity)
+        # Predict with control input (StormProb velocity)
         predicted = kf.predict(dt=120.0, control_u=15.0, control_v=10.0)
         
         # Velocity should be updated to control input
@@ -342,18 +342,18 @@ class TestKalmanFilterWithCell:
         assert abs(kf.state.u - 12.5) < 0.1
         assert abs(kf.state.v - 800/120) < 0.1
     
-    def test_initialize_from_cell_with_stormcast(self):
-        """Test initialization with StormCast velocity."""
+    def test_initialize_from_cell_with_stormprob(self, monkeypatch):
+        """Only promoted 15-minute StormProb displacement controls velocity."""
         cell = {
             'centroid': [35.0, -97.0],
             'dx': 1500.0,
             'dy': 800.0,
             'dt': 120.0,
             'modules': {
-                'StormCast': {
+                'StormProb': {
                     'status': 'success',
-                    'u': 15.0,
-                    'v': 10.0
+                    'leads': [{'lead_minutes': 15, 'east_km': 13.5,
+                               'north_km': 9.0}]
                 }
             }
         }
@@ -361,9 +361,10 @@ class TestKalmanFilterWithCell:
         kf = KalmanFilter()
         kf.initialize_from_cell(cell)
         
-        # Should use StormCast velocity
+        # 15-minute displacement divided by 900 seconds.
         assert kf.state.u == 15.0
         assert kf.state.v == 10.0
+
 
 
 if __name__ == '__main__':

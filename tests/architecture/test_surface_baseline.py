@@ -22,6 +22,8 @@ from tests.architecture.source_inspect import SRC, argparse_defaults
 REPO_ROOT = SRC.parent
 
 CLI_MODULES = [
+    "EdgeWARN/stormprob/audit.py",
+    "EdgeWARN/stormprob/migrate.py",
     # Package command: top-level version, Phase 2 run, and Phase 3 configuration.
     "edgewarn_cli/main.py",
     "edgewarn_cli/run.py",

@@ -1,0 +1,9 @@
+{
+  "shadows_yaml": [
+    "--cycles",
+    "--maximum-missing-fraction"
+  ],
+  "can_be_unset": [
+    "--base-dir"
+  ]
+}

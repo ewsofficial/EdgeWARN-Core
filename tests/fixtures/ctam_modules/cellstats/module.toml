@@ -10,7 +10,7 @@ entrypoint = ["{python}", "main.py"]
 # The 10-second default, not the plan example's 30: one 30-second module consumes
 # the entire external-module budget. See docs/ctam/internal-api-limits.md.
 timeout_seconds = 10
-after = ["stormcast"]
+after = ["stormprob"]
 
 [[requires]]
 selector = "stormcells.current"

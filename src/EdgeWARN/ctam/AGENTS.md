@@ -3,7 +3,7 @@
 ## Purpose
 CTAM module framework: manifest discovery, readiness evaluation, the loopback
 internal API, transactional mutation, publication, and external process
-execution. StormCast is the reserved built-in module.
+execution. StormProb is the reserved built-in module.
 
 ## Agent guidance
 - External modules are discovered from manifests below `ctam_modules/`; never

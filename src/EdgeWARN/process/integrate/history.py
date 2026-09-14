@@ -71,7 +71,12 @@ class CellHistoryManager:
             history = []
             
             # Load existing history
-            if file_path.exists():
+            try:
+                from EdgeWARN.stormprob.database import StormProbRepository
+                history = StormProbRepository().legacy_history(cell_id)
+            except FileNotFoundError:
+                pass
+            if not history and file_path.exists():
                 try:
                     with open(file_path, 'r') as f:
                         data = json.load(f)

@@ -73,6 +73,36 @@ describe('unified API app', () => {
     expectObjectToMatchSchema(missing.body, problemSchema);
   });
 
+  it('serves promoted StormProb leads without private model inputs', async () => {
+    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stormprob-api-'));
+    const snapshotDir = path.join(baseDir, 'data', 'stormcells');
+    const serviceDir = path.join(baseDir, 'state', 'realtime', 'services');
+    await fs.mkdir(snapshotDir, { recursive: true });
+    await fs.mkdir(serviceDir, { recursive: true });
+    await fs.writeFile(path.join(serviceDir, 'edgewarn.json'), JSON.stringify({
+      schema_version: 1, service: 'edgewarn', pid: 1, run_id: 'test-run',
+      updated_at: new Date().toISOString(), phase: 'cycling', degraded_children: []
+    }));
+    const leads = [15, 30, 45, 60].map((lead) => ({
+      lead_minutes: lead, model_version: 'stormprob/v1', status: 'ok',
+      east_km: lead / 3, north_km: 0, predicted_centroid: [35, 265 + lead / 300],
+      polygon: { type: 'MultiPolygon', coordinates: [[[[265, 35], [265.01, 35], [265.01, 35.01], [265, 35]]]] },
+      probability_threshold: 0.25,
+      metadata: { geometry_kind: 'instantaneous-probability-contour' }
+    }));
+    await fs.writeFile(path.join(snapshotDir, 'stormcells_20260317-200000.json'),
+      JSON.stringify({ features: [{ id: 4, modules: { StormProb: {
+        status: 'success', model_version: 'stormprob/v1', leads
+      } } }] }));
+    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir,
+      RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
+    const response = await request(app).get('/api/v3/storm-snapshots/20260317-200000').expect(200);
+    const cell = response.body.data.cells.features[0];
+    expect(cell.stormprob).toBeUndefined();
+    expect(cell.modules.StormProb.leads.map((lead) => lead.lead_minutes)).toEqual([15, 30, 45, 60]);
+    expect(cell.modules.StormProb.leads.every((lead) => lead.metadata.geometry_kind === 'instantaneous-probability-contour')).toBe(true);
+  });
+
   it('serves every v3 resource family from one configured runtime tree', async () => {
     baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-all-'));
     const write = async (relative, contents) => { const target = path.join(baseDir, relative); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, contents); };

@@ -118,7 +118,7 @@ def log_effective_flags(args):
     if args.disable_ctam:
         print("[Scheduler] CTAM execution disabled via --disable-ctam")
     elif args.disable_ctam_modules:
-        print("[Scheduler] External CTAM modules disabled; built-in StormCast remains enabled")
+        print("[Scheduler] External CTAM modules disabled; built-in StormProb remains enabled")
     if args.disable_tracking:
         print("[Scheduler] Tracking disabled via --disable-tracking")
     if args.disable_polygon_expansion:

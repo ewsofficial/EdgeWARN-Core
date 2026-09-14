@@ -150,7 +150,7 @@ def test_repeated_patterns_are_identical_across_schemas():
 def test_timestamp_pattern_rejects_a_naive_timestamp():
     """An explicit offset is required everywhere a time appears.
 
-    This is load-bearing rather than cosmetic: StormCast currently falls back to
+    This is load-bearing rather than cosmetic: StormProb currently falls back to
     a naive ``datetime.now()``, so a naive value is a real thing that can reach
     the boundary and it must be rejected there.
     """

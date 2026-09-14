@@ -11,7 +11,7 @@
       "p100EchoTop30": 11.5
     },
     "modules": {
-      "StormCast": {
+      "StormProb": {
         "status": "success"
       }
     }

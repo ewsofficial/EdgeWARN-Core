@@ -663,9 +663,9 @@ name.
 
 ### CTAM: out of scope
 
-CTAM MorphoWind and StormCast tunables are **not part of this plan**. No CTAM
+CTAM MorphoWind and StormProb tunables are **not part of this plan**. No CTAM
 config file exists under `config/`, and creating `config/ctam/morphowind.yaml`
-and `config/ctam/stormcast.yaml` would add a subdirectory to an otherwise flat
+and `config/ctam/stormprob.yaml` would add a subdirectory to an otherwise flat
 tree and a new nesting convention, while the 18 existing files are still
 unconsumed.
 
@@ -1148,7 +1148,7 @@ but the schemas and checked-in config remain authoritative.
 
 ## Out of scope, tracked separately
 
-- CTAM MorphoWind and StormCast configuration.
+- CTAM MorphoWind and StormProb configuration.
 - Relocating `src/EWMRS/colormaps.json` into `config/`.
 - Deleting `src/EWMRS/mappings.json` as an independent authority and fixing the
   `RAP_BestLiftedIndex_180_0mbAGL` drift.

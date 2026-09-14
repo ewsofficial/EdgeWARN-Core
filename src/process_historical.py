@@ -67,7 +67,7 @@ def main():
     if args.disable_ctam:
         io_manager.write_info("CTAM execution disabled via --disable-ctam")
     elif getattr(args, "disable_ctam_modules", False):
-        io_manager.write_info("External CTAM modules disabled; built-in StormCast remains enabled")
+        io_manager.write_info("External CTAM modules disabled; built-in StormProb remains enabled")
     if args.disable_tracking:
         io_manager.write_info("Tracking disabled via --disable-tracking")
     if args.disable_polygon_expansion:

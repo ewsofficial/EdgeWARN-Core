@@ -1,4 +1,19 @@
 {
+  "EdgeWARN/stormprob/audit.py": {
+    "--base-dir": {"default": null, "action": null},
+    "--cycles": {"default": 20, "action": null},
+    "--maximum-missing-fraction": {"default": 0.5, "action": null}
+  },
+  "EdgeWARN/stormprob/migrate.py": {
+    "--base-dir": {
+      "default": null,
+      "action": null
+    },
+    "--dry-run": {
+      "default": false,
+      "action": "store_true"
+    }
+  },
   "edgewarn_cli/main.py": {
     "--version": {
       "default": null,

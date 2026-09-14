@@ -488,20 +488,20 @@ def test_a_three_module_cycle_invalidates_every_member(tmp_path):
             assert member in module.reason
 
 
-def test_depending_on_the_builtin_stormcast_is_legal_and_adds_no_member(tmp_path):
-    """Every cell module that consumes forecasts declares ``after = ["stormcast"]``.
+def test_depending_on_the_builtin_stormprob_is_legal_and_adds_no_member(tmp_path):
+    """Every cell module that consumes forecasts declares ``after = ["stormprob"]``.
 
-    ``stormcast`` is the built-in adapter, so it must satisfy the dependency
+    ``stormprob`` is the built-in adapter, so it must satisfy the dependency
     without appearing in the result as an installed module that discovery could
     then report on, order, or count against capacity.
     """
-    install(tmp_path, "cellstats", after=["stormcast"])
+    install(tmp_path, "cellstats", after=["stormprob"])
 
     result = discover_modules(root=tmp_path)
 
     assert ids(result) == ["cellstats"]
     assert by_id(result, "cellstats").state == STATE_DISCOVERED
-    assert "stormcast" not in ids(result)
+    assert "stormprob" not in ids(result)
 
 
 # --------------------------------------------------------------------------

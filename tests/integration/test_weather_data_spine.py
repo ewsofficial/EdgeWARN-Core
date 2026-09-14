@@ -172,7 +172,7 @@ def test_two_connected_cycles_decode_enrich_publish_and_reopen():
 
     published_2 = json.loads(snapshot_2.read_text())
     assert [cell["id"] for cell in published_2["features"]] == [17]
-    assert published_2["features"][0]["modules"]["StormCast"]["status"] == "success"
+    assert published_2["features"][0]["modules"]["StormProb"]["status"] == "success"
     history = json.loads((fs.CELL_DIR / "17.json").read_text())
     assert [entry["timestamp"] for entry in history] == [
         "2026-03-17T20:00:00", "2026-03-17T20:02:00",

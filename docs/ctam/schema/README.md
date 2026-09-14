@@ -60,7 +60,7 @@ Consequences worth knowing before editing these files:
   `op` is `add` or `replace`"; that rule is enforced in host code.
 - **No `format`.** Timestamps and identifiers are constrained with `pattern`
   instead. The timestamp pattern accepts an explicit offset or `Z` and rejects a
-  naive timestamp, which matters because StormCast currently falls back to a
+  naive timestamp, which matters because StormProb currently falls back to a
   naive `datetime.now()`.
 - **No `minLength` or `maxLength`.** String length cannot be bounded. Where a
   string must merely be non-empty, the schema uses `"pattern": "\\S"`. Where a

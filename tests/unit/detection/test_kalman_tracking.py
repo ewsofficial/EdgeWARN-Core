@@ -85,10 +85,9 @@ class TestStormCellTrackerKalman:
                 'dy': 600.0,
                 'dt': 120.0,
                 'modules': {
-                    'StormCast': {
+                    'StormProb': {
                         'status': 'success',
-                        'u': 10.0,
-                        'v': 5.0
+                        'leads': [{'lead_minutes': 15, 'east_km': 9.0, 'north_km': 4.5}]
                     }
                 }
             },
@@ -192,9 +191,9 @@ class TestStormCellTrackerKalman:
         for i in range(1, len(confidences)):
             assert confidences[i-1] > confidences[i]
     
-    def test_stormcast_velocity_used_for_prediction(self, tracker, active_cells):
-        """Test that StormCast velocity is used for prediction."""
-        # Cell 1001 has StormCast velocity
+    def test_stormprob_velocity_used_for_prediction(self, tracker, active_cells):
+        """Test that StormProb velocity is used for prediction."""
+        # Cell 1001 has StormProb velocity
         updated_data = [
             {
                 'id': 1002,
@@ -214,10 +213,10 @@ class TestStormCellTrackerKalman:
         
         predicted = [c for c in result if c['tracking_mode'] == 'predicted'][0]
         
-        # Check that Kalman filter was initialized with StormCast velocity
+        # Check that Kalman filter was initialized with StormProb velocity
         kf = tracker._kalman_filters.get(1001)
         assert kf is not None
-        # StormCast velocity: u=10.0, v=5.0
+        # StormProb 15-minute displacement converted to m/s.
         assert kf.state.u == 10.0
         assert kf.state.v == 5.0
 

@@ -77,7 +77,7 @@ These side effects are required for stable API behavior.
 
 ## Integrated Data Sources
 
-The current integration configuration enriches storm cells with MRMS statistic groups such as reflectivity, NLDN density, echo tops, VIL/VIL density, VII, precipitation rate, RALA, and azimuthal shear summaries. It also copies selected ProbSevere fields, adds GLM flash count/energy when scan-time GLM files are available, and attaches RAP wind/environment fields used by StormCast and external CTAM modules.
+The current integration configuration enriches storm cells with MRMS statistic groups such as reflectivity, NLDN density, echo tops, VIL/VIL density, VII, precipitation rate, RALA, and azimuthal shear summaries. It also copies selected ProbSevere fields, adds GLM flash count/energy when scan-time GLM files are available, and attaches RAP wind/environment fields used by StormProb and external CTAM modules.
 
 MESH is not an MRMS statistic group here. It reaches cells only as a copied
 ProbSevere field via `probsevere_field_map`, so it is absent from

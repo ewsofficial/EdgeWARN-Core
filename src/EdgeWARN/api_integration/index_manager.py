@@ -46,17 +46,19 @@ class APIIndexManager:
         if not fs.STORMCELL_DIR.exists():
             fs.STORMCELL_DIR.mkdir(parents=True, exist_ok=True)
         
-        # Find all stormcells_*.json files
-        stormcell_files = sorted(fs.STORMCELL_DIR.glob("stormcells_*.json"))
-        
-        # Extract timestamps from filenames
         timestamps = []
-        for file in stormcell_files:
-            # Format: stormcells_YYYYMMDD-HHMMSS.json
-            name = file.stem  # Remove .json
-            if name.startswith("stormcells_"):
-                timestamp = name.replace("stormcells_", "")
-                timestamps.append(timestamp)
+        database_present = False
+        try:
+            from EdgeWARN.stormprob.database import StormProbRepository
+            repository = StormProbRepository()
+            database_present = repository.path.exists()
+            if database_present:
+                timestamps, _ = repository.index_projection()
+        except FileNotFoundError:
+            pass
+        if not database_present:
+            timestamps = [file.stem.removeprefix("stormcells_") for file in
+                          sorted(fs.STORMCELL_DIR.glob("stormcells_*.json"))]
 
         self.stormcell_timestamps = set(timestamps)
         self._stormcell_initial_scan_done = True
@@ -77,22 +79,24 @@ class APIIndexManager:
             
         current_time = datetime.now(timezone.utc).timestamp()
         
-        # Find all {id}.json files
-        cell_files = fs.CELL_DIR.glob("*.json")
-        
         self.cell_timestamps.clear()
-        
-        for file in cell_files:
-            name = file.stem  # Remove .json
-            if name == "cell_index":
-                continue
-            
-            try:
-                cell_id = name
-                # Initialize with file modification time or current time
-                self.cell_timestamps[cell_id] = file.stat().st_mtime
-            except Exception:
-                pass
+        database_present = False
+        try:
+            from EdgeWARN.stormprob.database import StormProbRepository
+            repository = StormProbRepository()
+            database_present = repository.path.exists()
+            if database_present:
+                _, self.cell_timestamps = repository.index_projection()
+        except FileNotFoundError:
+            pass
+        if not database_present:
+            for file in fs.CELL_DIR.glob("*.json"):
+                if file.stem == "cell_index":
+                    continue
+                try:
+                    self.cell_timestamps[file.stem] = file.stat().st_mtime
+                except Exception:
+                    pass
                 
         self._initial_scan_done = True
         self._write_cell_index()

@@ -376,6 +376,62 @@ def _run_parallel_enrichment(
     return _run_step("Integration - Merge", _merge_all)
 
 
+def _resolve_stormprob_source_times(input_manifest):
+    """Map source families to analysis times for the StormProb audit.
+
+    Returns ``{}`` when no manifest is available (audit skipped; readiness is
+    purely value-based). With a manifest, unresolvable families map to None
+    so records flag ``absent-source:<family>`` explicitly.
+    """
+    if input_manifest is None:
+        return {}
+
+    def _latest_time(predicate):
+        candidates = [record for record in input_manifest.current_inputs()
+                      if predicate(record)]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda record: record.analysis_time).analysis_time
+
+    return {
+        "rap": _latest_time(lambda record: record.family == "rap"),
+        "mrms": _latest_time(lambda record: record.family == "mrms"),
+        "probsevere": _latest_time(
+            lambda record: "probsevere" in record.product.lower()),
+    }
+
+
+def _attach_stormprob_inputs(cells, timestamp, input_manifest=None):
+    """Phase 1 StormProb input collection (post-enrichment, pre-inference).
+
+    Runs after MRMS/RAP/ProbSevere enrichment and before CTAM/inference.
+    Additive only (``cell["stormprob"]["observation"]``); failure-isolated so
+    enrichment output always survives.
+    """
+    try:
+        from EdgeWARN.stormprob.records import build_observation_record
+
+        source_times = _resolve_stormprob_source_times(input_manifest)
+        for cell in cells:
+            try:
+                record = build_observation_record(
+                    cell,
+                    analysis_time=cell.get("timestamp") or timestamp,
+                    source_times=source_times,
+                    cycle_manifest=input_manifest,
+                )
+                stormprob = cell.setdefault("stormprob", {})
+                stormprob["observation"] = record
+                stormprob["feature_schema"] = record["schema_version"]
+            except Exception as exc:
+                io_manager.write_warning(
+                    f"StormProb observation skipped for cell {cell.get('id')}: {exc}"
+                )
+    except Exception as exc:
+        io_manager.write_warning(f"StormProb input collection skipped: {exc}")
+    return cells
+
+
 def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_manifest=None, disable_ctam_modules=False):
     if disable_ctam:
         io_manager.write_info("CTAM module execution disabled via command-line flag")
@@ -412,17 +468,45 @@ def _save_cells(handler, timestamp, cells, json_path):
     handler.write_json(data, json_path)
 
 
-def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells):
-    """Publish snapshot and active histories first, then make indexes visible."""
+def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None):
+    """Commit StormProb inputs, then publish derived JSON and indexes."""
     from EdgeWARN.ctam.publication import CTAMPublicationCoordinator
+    from EdgeWARN.stormprob.database import StormProbRepository, clean_public_projection
     from .history import CellHistoryManager
 
-    snapshot = CellDataSaver(None, None, None, None, None, None).create_json_structure(timestamp, cells)
-    histories = CellHistoryManager(io_manager).prepare_cell_history_updates(cells)
+    projected_cells = [clean_public_projection(copy.deepcopy(cell)) for cell in cells]
+    for cell in projected_cells:
+        cell.pop("stormprob", None)
+    snapshot = CellDataSaver(None, None, None, None, None, None).create_json_structure(timestamp, projected_cells)
+    histories = CellHistoryManager(io_manager).prepare_cell_history_updates(projected_cells)
     payloads = {json_path: snapshot, **histories}
+    manifest_record = None
+    if input_manifest is not None:
+        manifest_record = {
+            "cycle_time": input_manifest.cycle_time,
+            "inputs": [{"family": item.family, "product": item.product,
+                        "analysis_time": item.analysis_time,
+                        "local_path": str(item.local_path), "validated": item.validated}
+                       for item in input_manifest.inputs],
+        }
+    repository = StormProbRepository()
+    forecasts = []
+    for cell in cells:
+        result = (cell.get("modules") or {}).get("StormProb") or {}
+        if result.get("status") in {"success", "error", "skipped"}:
+            forecasts.extend(result.get("leads", []))
+    repository.commit_cycle(str(timestamp), timestamp, cells, manifest_record,
+                            projection_cells=projected_cells, projection_path=json_path,
+                            forecasts=forecasts or None)
     coordinator = CTAMPublicationCoordinator(fs.DATA_DIR / "ctam" / "transactions")
     coordinator.recover()
-    coordinator.publish(payloads, publish_indexes=lambda: _update_api_indexes(cells, remove_old_cells), transaction_id=str(timestamp).replace(":", "-"))
+    coordinator.publish(payloads, publish_indexes=lambda: _update_api_indexes(projected_cells, remove_old_cells, timestamp), transaction_id=str(timestamp).replace(":", "-"),
+                        db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
+    repository.mark_projection_published(str(timestamp))
+    try:
+        repository.backup_if_due()
+    except Exception as exc:
+        io_manager.write_warning(f"StormProb daily backup failed: {exc}")
 
 
 def _update_history(cells, timestamp):
@@ -435,7 +519,7 @@ def _update_history(cells, timestamp):
         io_manager.write_error(f"Failed to update cell history: {e}")
 
 
-def _update_api_indexes(cells, remove_old_cells):
+def _update_api_indexes(cells, remove_old_cells, timestamp):
     try:
         from EdgeWARN.api_integration.index_manager import APIIndexManager
 
@@ -444,12 +528,14 @@ def _update_api_indexes(cells, remove_old_cells):
         active_cell_ids = [cell["id"] for cell in cells if "timestamp" in cell]
 
         def _update():
+            api_index.update_stormcell_index(datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).strftime("%Y%m%d-%H%M%S"))
             api_index.update_cell_index(active_cell_ids)
             api_index.cleanup_inactive_cells()
 
         _run_step("Integration - API Index", _update)
     except Exception as e:
         io_manager.write_error(f"Failed to update API indexes: {e}")
+        raise
 
 
 def main(
@@ -476,6 +562,18 @@ def main(
         include_rap=not mrms_core_only,
         input_manifest=input_manifest,
     )
+    result_cells = _run_step(
+        "Integration - StormProb Inputs",
+        lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),
+    )
+    # Forecast inference reads only committed database rows. Commit the input
+    # side of this cycle before CTAM; publication below upgrades the pending
+    # four-lead rows and publishes the derived projections afterward.
+    try:
+        from EdgeWARN.stormprob.database import StormProbRepository
+        StormProbRepository().commit_cycle(str(timestamp), timestamp, result_cells)
+    except Exception as exc:
+        io_manager.write_warning(f"StormProb input commit failed before CTAM: {exc}")
     result_cells = _run_ctam_if_enabled(
         result_cells,
         timestamp,
@@ -486,7 +584,7 @@ def main(
     )
 
     try:
-        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells))
+        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells, input_manifest))
     except Exception as exc:
         io_manager.write_error(f"Failed to save integrated stormcells to {json_path}: {exc}")
         raise

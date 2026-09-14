@@ -1,13 +1,13 @@
 # CTAM internal API
 
-CTAM runs a reserved built-in StormCast adapter followed by independently
+CTAM runs a reserved built-in StormProb adapter followed by independently
 installed external modules. External modules are discovered only from
 `ctam_modules/<module-id>/module.toml`; importing `EdgeWARN.ctam` does not
 register or execute any module.
 
-StormCast is bundled because its published motion is consumed by later tracking
+StormProb is bundled because its published motion is consumed by later tracking
 cycles. It runs through the same host-owned cycle boundary as external modules.
-The `stormcast` module ID and `StormCast` output key are reserved and cannot be
+The `stormprob` module ID and `StormProb` output key are reserved and cannot be
 installed externally.
 
 The former in-process `AnalysisModule`, registry, and grid-module conventions

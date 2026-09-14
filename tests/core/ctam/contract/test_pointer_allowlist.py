@@ -1,7 +1,7 @@
 """The pointer allowlist table, in its Phase 0 form.
 
 The plan's test matrix asks for pointer allowlist enforcement as a dedicated
-table-driven test run against both the HTTP handlers and the StormCast
+table-driven test run against both the HTTP handlers and the StormProb
 in-process adapter. Neither exists yet, so this module holds the table itself
 and runs it against the only gate Phase 0 ships: the ``patch-request`` schema
 pattern.
@@ -74,14 +74,14 @@ TABLE = (
     ("/modules/CellStats\x00", SCHEMA, "embedded NUL"),
 
     # Accepted by the pattern, and must be rejected by the host: ownership.
-    ("/modules/StormCast", HOST, "reserved built-in namespace, never grantable"),
-    ("/modules/StormCast/u", HOST, "reserved built-in namespace"),
+    ("/modules/StormProb", HOST, "reserved built-in namespace, never grantable"),
+    ("/modules/StormProb/u", HOST, "reserved built-in namespace"),
     ("/modules/_grid_outputs", HOST, "reserved legacy key, never grantable"),
     ("/modules/SomeOtherModule", HOST, "another module's namespace"),
     ("/modules/cellstats", HOST, "module id, not the manifest display name"),
     ("/properties/morphology", HOST, "written by detection, and read by downstream physics"),
-    ("/properties/p100EchoTop30", HOST, "enrichment value StormCast consumes as if measured"),
-    ("/properties/EchoTop50", HOST, "enrichment value StormCast consumes as if measured"),
+    ("/properties/p100EchoTop30", HOST, "enrichment value StormProb consumes as if measured"),
+    ("/properties/EchoTop50", HOST, "enrichment value StormProb consumes as if measured"),
     ("/properties/undeclared_key", HOST, "not declared in the caller's manifest"),
     ("/properties/severity", HOST, "declared keys must carry the module-id prefix"),
     ("/modules/CellStats/../id", HOST, "'..' is a literal key name here; it becomes a write to /id only if the host normalizes it as a path, which it must not"),
