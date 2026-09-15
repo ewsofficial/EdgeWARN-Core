@@ -29,6 +29,6 @@ contract change that required them.
 | Artifact | Producer encoder | Node consumer |
 | --- | --- | --- |
 | `RAP/CAPE/20260317-200000/data.u16` + `metadata.json` | `EWMRS.rap.uint16_pipeline` | `ancillary.rapData` / `rapMetadata` |
-| `render/CompRefQC/.../chunk_0_0.f16.gz` + index pair | `EWMRS.render.tiler.save_float16_chunk` | `renders.chunk` |
+| `render/MRMS_MergedReflectivityQC/.../chunk_0_0.f16.gz` + index pair | `EWMRS.render.tiler.save_float16_chunk` | `renders.chunk` |
 | `nexrad/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz` | `NEXRAD.render._write_nexrad_variable_bin` | `ancillary.radarField` |
 | `wpc/surface_analysis/wpc_sfc_20260317-200000.geojson` | `common.ingest.wpc` parser + converter | `ancillary.wpcSurface` |

@@ -45,7 +45,7 @@ describe('unified API services', () => {
 
   it('uses canonical render IDs while preserving storage prefixes', async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
-    const product = path.join(root, 'gui', 'CompRefQC');
+    const product = path.join(root, 'gui', 'MRMS_MergedReflectivityQC');
     await fs.mkdir(product, { recursive: true });
     await fs.writeFile(path.join(product, 'index.json'), '{"timestamps":["20260317-200000"]}');
     await fs.writeFile(path.join(product, 'MRMS_MergedReflectivityQC_20260317-200000.png'), 'png');
@@ -58,7 +58,7 @@ describe('unified API services', () => {
 
   it('uses a product tile grid when a timestamp index omits grid metadata', async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
-    const product = path.join(root, 'gui', 'CompRefQC');
+    const product = path.join(root, 'gui', 'MRMS_MergedReflectivityQC');
     await fs.mkdir(path.join(product, '20260317-200000'), { recursive: true });
     await fs.writeFile(path.join(product, 'index.json'), '{"tile_grid":{"rows":2,"cols":3,"tile_size":256}}');
     await fs.writeFile(path.join(product, '20260317-200000', 'index.json'), '{"tiles":[[2,1]]}');
@@ -68,7 +68,7 @@ describe('unified API services', () => {
 
   it('opens only indexed RGBA chunks with their exact expected length', async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
-    const product = path.join(root, 'gui', 'CompRefQC'); const timestamp = '20260317-200000';
+    const product = path.join(root, 'gui', 'MRMS_MergedReflectivityQC'); const timestamp = '20260317-200000';
     await fs.mkdir(path.join(product, timestamp, 'chunks'), { recursive: true });
     const format = { version: 2, encoding: 'float16', file_suffix: '.f16.gz', compression: 'gzip', channels: 1, value_kind: 'scalar', no_data: 'nan', bytes_per_component: 2, pixel_row_order: 'top_to_bottom', grid_origin: 'bottom_left' };
     await fs.writeFile(path.join(product, 'index.json'), JSON.stringify({ schema_version: 2, timestamps: [timestamp], representation: 'binary_chunks', chunk_format: { ...format, media_type: 'application/octet-stream' }, tile_grid: { rows: 1, cols: 1, tile_size: 2 } }));

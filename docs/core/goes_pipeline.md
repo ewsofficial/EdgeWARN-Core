@@ -116,7 +116,7 @@ GOES GUI products are written under `<BASE_DIR>/gui`.
 Examples:
 
 ```text
-<BASE_DIR>/gui/GOES_ABI_C13/
+<BASE_DIR>/gui/GOES_ABI_C13_BrightnessTemp/
 ├── 20260423-124000/
 │   ├── chunks/                       # gzip-compressed float16 value chunks
 │   └── index.json                    # timestamp-level index

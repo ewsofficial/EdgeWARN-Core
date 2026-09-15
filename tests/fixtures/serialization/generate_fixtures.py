@@ -116,7 +116,7 @@ def build_render_chunk(out_root: Path) -> None:
         [[10.25, np.nan], [1.0, 2.0]], dtype=np.float16
     )
     chunk_path = (
-        out_root / "render" / "CompRefQC" / TIMESTAMP / "chunks" / "chunk_0_0.f16.gz"
+        out_root / "render" / "MRMS_MergedReflectivityQC" / TIMESTAMP / "chunks" / "chunk_0_0.f16.gz"
     )
     chunk_path.parent.mkdir(parents=True, exist_ok=True)
     save_float16_chunk(np.ascontiguousarray(values), chunk_path)
@@ -136,9 +136,9 @@ def build_render_chunk(out_root: Path) -> None:
         "tile_grid": TILE_GRID,
         "chunks": [[0, 0]],
     }
-    _write_json(out_root / "render" / "CompRefQC" / "index.json", product_index)
+    _write_json(out_root / "render" / "MRMS_MergedReflectivityQC" / "index.json", product_index)
     _write_json(
-        out_root / "render" / "CompRefQC" / TIMESTAMP / "index.json", snapshot_index
+        out_root / "render" / "MRMS_MergedReflectivityQC" / TIMESTAMP / "index.json", snapshot_index
     )
 
 

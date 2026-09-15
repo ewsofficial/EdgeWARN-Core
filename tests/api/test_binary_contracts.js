@@ -21,9 +21,9 @@ const COPIES = [
   ['RAP/CAPE/index.json', 'gui/RAP/CAPE/index.json'],
   ['RAP/CAPE/20260317-200000/metadata.json', 'gui/RAP/CAPE/20260317-200000/metadata.json'],
   ['RAP/CAPE/20260317-200000/data.u16', 'gui/RAP/CAPE/20260317-200000/data.u16'],
-  ['render/CompRefQC/index.json', 'gui/CompRefQC/index.json'],
-  ['render/CompRefQC/20260317-200000/index.json', 'gui/CompRefQC/20260317-200000/index.json'],
-  ['render/CompRefQC/20260317-200000/chunks/chunk_0_0.f16.gz', 'gui/CompRefQC/20260317-200000/chunks/chunk_0_0.f16.gz'],
+  ['render/MRMS_MergedReflectivityQC/index.json', 'gui/MRMS_MergedReflectivityQC/index.json'],
+  ['render/MRMS_MergedReflectivityQC/20260317-200000/index.json', 'gui/MRMS_MergedReflectivityQC/20260317-200000/index.json'],
+  ['render/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz', 'gui/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz'],
   ['nexrad/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz', 'gui/NEXRAD/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz'],
   ['wpc/surface_analysis/wpc_sfc_20260317-200000.geojson', 'wpc/surface_analysis/wpc_sfc_20260317-200000.geojson'],
 ];
@@ -118,7 +118,7 @@ describe('binary producer/consumer contracts through the real API', () => {
   });
 
   it('serves the float16 chunk gzip payload with float16/no-data headers', async () => {
-    const reference = await fixtureBytes('render/CompRefQC/20260317-200000/chunks/chunk_0_0.f16.gz');
+    const reference = await fixtureBytes('render/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz');
     const response = await request(app)
       .get(`/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/${TIMESTAMP}/chunks/0/0`)
       .expect(200)

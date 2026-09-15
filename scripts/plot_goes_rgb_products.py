@@ -232,7 +232,7 @@ def main() -> None:
     parser.add_argument(
         "--base-dir",
         default=str(Path.home() / "EdgeWARN_input"),
-        help="Runtime base directory containing data/ABI_RadC",
+        help="Runtime base directory containing data/GOES_ABI",
     )
     parser.add_argument(
         "--output-dir",

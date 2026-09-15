@@ -7,7 +7,7 @@ PNG for manual alignment checks.
 
 Example:
   python scripts/verify_goes_tiles_conus.py \
-    --product-dir ~/EdgeWARN_input/gui/GOES_ABI_C02 \
+    --product-dir ~/EdgeWARN_input/gui/GOES_ABI_C02_Reflectance \
     --output /tmp/goes_c02_alignment.png
 """
 
@@ -175,7 +175,7 @@ def main():
     parser.add_argument(
         "--product-dir",
         default=None,
-        help="Path to GOES GUI product directory (for example, ~/EdgeWARN_input/gui/GOES_ABI_C02)",
+        help="Path to GOES GUI product directory (for example, ~/EdgeWARN_input/gui/GOES_ABI_C02_Reflectance)",
     )
     parser.add_argument(
         "--base-dir",

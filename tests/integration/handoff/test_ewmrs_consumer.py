@@ -33,7 +33,7 @@ def fake_render(tmp_path, monkeypatch):
     def fake_run_mrms(dt, max_entries=None, input_manifest=None):
         assert input_manifest is not None
         calls["mrms"].append((dt, input_manifest))
-        return {"CompRefQC": "gui/CompRefQC/x.png"}
+        return {"CompRefQC": "gui/MRMS_MergedReflectivityQC/x.png"}
 
     def fake_run_rap(rap_file, dt=None):
         calls["rap"].append((rap_file, dt))

@@ -111,9 +111,9 @@ describe('unified API app', () => {
     await write('data/Alerts/official/timestamps/20260317-200000.json', '{"alerts":[]}');
     await write('data/METAR/METAR_20260317-20z.json', '[]');
     const renderFormat = { version: 2, encoding: 'float16', file_suffix: '.f16.gz', compression: 'gzip', channels: 1, value_kind: 'scalar', no_data: 'nan', bytes_per_component: 2, pixel_row_order: 'top_to_bottom', grid_origin: 'bottom_left' };
-    await write('gui/CompRefQC/index.json', JSON.stringify({ schema_version: 2, timestamps: ['20260317-200000'], representation: 'binary_chunks', chunk_format: { ...renderFormat, media_type: 'application/octet-stream' }, tile_grid: { rows: 1, cols: 1, tile_size: 2 } }));
-    await write('gui/CompRefQC/20260317-200000/index.json', JSON.stringify({ schema_version: 2, timestamp: '20260317-200000', representation: 'binary_chunks', chunk_format: renderFormat, tile_grid: { rows: 1, cols: 1, tile_size: 2 }, chunks: [[0, 0]] }));
-    await write('gui/CompRefQC/20260317-200000/chunks/chunk_0_0.f16.gz', Buffer.from('H4sIAAAAAAAC/2NggAAAad8iZQgAAAA=', 'base64'));
+    await write('gui/MRMS_MergedReflectivityQC/index.json', JSON.stringify({ schema_version: 2, timestamps: ['20260317-200000'], representation: 'binary_chunks', chunk_format: { ...renderFormat, media_type: 'application/octet-stream' }, tile_grid: { rows: 1, cols: 1, tile_size: 2 } }));
+    await write('gui/MRMS_MergedReflectivityQC/20260317-200000/index.json', JSON.stringify({ schema_version: 2, timestamp: '20260317-200000', representation: 'binary_chunks', chunk_format: renderFormat, tile_grid: { rows: 1, cols: 1, tile_size: 2 }, chunks: [[0, 0]] }));
+    await write('gui/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz', Buffer.from('H4sIAAAAAAAC/2NggAAAad8iZQgAAAA=', 'base64'));
     await write('gui/NEXRAD/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz', 'gzip');
     // Route families require an active service heartbeat for their owner
     // (decomposition Phases 3-5); without them these routes return 503.

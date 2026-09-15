@@ -105,7 +105,7 @@
     "required": true
   },
   {
-    "name": "MRMS_NLDN",
+    "name": "MRMS_NLDN_CG_005min_AvgDensity",
     "colormap_key": "VILDensity",
     "filepath": "fs:MRMS_NLDN_DIR",
     "outdir": "fs:GUI_NLDN_DIR",

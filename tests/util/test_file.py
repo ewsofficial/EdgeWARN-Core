@@ -25,16 +25,16 @@ class TestDefinePaths:
         assert fs.DATA_DIR == tmp_path / "data"
         
         # Check various MRMS directories
-        assert fs.MRMS_RALA_DIR == tmp_path / "data" / "RALA"
-        assert fs.MRMS_PROBSEVERE_DIR == tmp_path / "data" / "ProbSevere"
-        assert fs.MRMS_COMPOSITE_DIR == tmp_path / "data" / "CompRefQC"
+        assert fs.MRMS_RALA_DIR == tmp_path / "data" / "MRMS_ReflectivityAtLowestAltitude"
+        assert fs.MRMS_PROBSEVERE_DIR == tmp_path / "data" / "MRMS_ProbSevere"
+        assert fs.MRMS_COMPOSITE_DIR == tmp_path / "data" / "MRMS_MergedReflectivityQC"
         
         # Check output directories
         assert fs.STORMCELL_DIR == tmp_path / "data" / "stormcells"
         assert fs.CELL_DIR == tmp_path / "data" / "cells"
         assert fs.METAR_DIR == tmp_path / "data" / "METAR"
         assert fs.GUI_DIR == tmp_path / "gui"
-        assert fs.GUI_RALA_DIR == tmp_path / "gui" / "RALA"
+        assert fs.GUI_RALA_DIR == tmp_path / "gui" / "MRMS_ReflectivityAtLowestAltitude"
         assert fs.WPC_SFC_DIR == tmp_path / "wpc" / "surface_analysis"
 
 
