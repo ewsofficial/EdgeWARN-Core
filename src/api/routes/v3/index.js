@@ -5,7 +5,7 @@ import { createServiceGate, problemJsonResponder } from '../../middleware/servic
 import { streamArtifact } from '../../streamArtifact.js';
 
 const listOptions = (req) => ({ cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined, limit: req.query.limit ? Number(req.query.limit) : undefined });
-const COLLECTION_PATHS = new Set(['/cells', '/storm-snapshots', '/alert-snapshots', '/observations/metar', '/render-products', '/radar-sites', '/models/rap/layers', '/analyses/wpc/surface']);
+const COLLECTION_PATHS = new Set(['/cells', '/storm-snapshots', '/alert-snapshots', '/observations/metar', '/render-products', '/radar-sites', '/models/rap/layers', '/analyses/wpc/surface', '/modules']);
 
 function validateQuery(apiConfig) {
   const limitPattern = new RegExp(apiConfig.query.limit_pattern);
@@ -32,7 +32,7 @@ function methodNotAllowed(openApi) {
   };
 }
 
-export function createV3Router({ analysis, renders, ancillary, openApi, apiConfig, serviceRegistry }) {
+export function createV3Router({ analysis, renders, ancillary, modules, openApi, apiConfig, serviceRegistry }) {
   const requireService = (service) => createServiceGate({
     serviceRegistry,
     service,
@@ -44,7 +44,7 @@ export function createV3Router({ analysis, renders, ancillary, openApi, apiConfi
   const send = (req, res, opened, type, headers = {}) => streamArtifact(req, res, opened, type, headers, { 'Cache-Control': `public, max-age=${apiConfig.cache_control_max_age.asset}, immutable`, ETag: opened.etag });
   const router = express.Router();
   router.use(validateQuery(apiConfig));
-  router.get('/', (req, res) => resource(req, res, { version: apiConfig.server.v3_api_version, links: { openapi: '/api/v3/openapi.json', cells: '/api/v3/cells', renderProducts: '/api/v3/render-products' } }));
+  router.get('/', (req, res) => resource(req, res, { version: apiConfig.server.v3_api_version, links: { openapi: '/api/v3/openapi.json', cells: '/api/v3/cells', modules: '/api/v3/modules', renderProducts: '/api/v3/render-products' } }));
   router.get('/openapi.json', (req, res) => res.type('application/json').send(openApi));
   router.get('/cells', requireService('edgewarn'), async (req, res, next) => { try { collection(req, res, await analysis.listCells()); } catch (error) { next(error); } });
   router.get('/cells/:cellId', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, await analysis.getCell(req.params.cellId)); } catch (error) { next(error); } });
@@ -53,6 +53,9 @@ export function createV3Router({ analysis, renders, ancillary, openApi, apiConfi
   router.get('/alert-snapshots', requireService('edgewarn'), async (req, res, next) => { try { collection(req, res, await analysis.listAlertSnapshots(req.query.source)); } catch (error) { next(error); } });
   router.get('/alert-snapshots/:timestamp', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, { timestamp: req.params.timestamp, validTime: timestamp(req.params.timestamp), alerts: await analysis.getAlertSnapshot(req.query.source, req.params.timestamp) }); } catch (error) { next(error); } });
   router.get('/alerts/:alertId', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, await analysis.getAlert(req.query.source, req.params.alertId)); } catch (error) { next(error); } });
+  router.get('/modules', requireService('edgewarn'), async (req, res, next) => { try { collection(req, res, await modules.listModules()); } catch (error) { next(error); } });
+  router.get('/modules/:moduleId', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, await modules.getModule(req.params.moduleId)); } catch (error) { next(error); } });
+  router.get('/modules/:moduleId/:routeId', requireService('edgewarn'), async (req, res, next) => { try { const result = await modules.getRoute(req.params.moduleId, req.params.routeId); res.set('Cache-Control', `public, max-age=${apiConfig.cache_control_max_age.resource}`).json(result); } catch (error) { next(error); } });
   router.get('/observations/metar', async (req, res, next) => { try { collection(req, res, await analysis.listMetarHours()); } catch (error) { next(error); } });
   router.get('/observations/metar/:timestamp', async (req, res, next) => { try { resource(req, res, await analysis.getMetar(req.params.timestamp)); } catch (error) { next(error); } });
   router.get('/render-products', requireService('ewmrs'), async (req, res, next) => { try { const available = new Set((await renders.listProducts()).map((item) => item.id)); collection(req, res, await Promise.all(productCatalog.filter((item) => available.has(item.id)).map((item) => renders.getProduct(item.id)))); } catch (error) { next(error); } });

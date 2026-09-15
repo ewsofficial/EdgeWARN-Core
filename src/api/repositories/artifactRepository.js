@@ -7,7 +7,7 @@ export class ArtifactError extends Error {
   constructor(code, message, { cause } = {}) {
     super(message, { cause });
     this.code = code;
-    this.status = code === 'NOT_FOUND' ? 404 : code === 'INVALID_ARTIFACT' || code === 'IN_PROGRESS' ? 503 : 400;
+    this.status = code === 'NOT_FOUND' ? 404 : ['INVALID_ARTIFACT', 'IN_PROGRESS', 'MODULE_ROUTE_UNAVAILABLE'].includes(code) ? 503 : 400;
   }
 }
 
