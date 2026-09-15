@@ -52,6 +52,14 @@ DEFAULT_TIMEOUT_SECONDS = 10
 # leading character class matches separately, so 127 + 1 == 128.
 MAX_MODULE_ID_LENGTH = 128
 
+# Public route declaration and inert JSON publication limits.
+MAX_PUBLIC_ROUTES_PER_MODULE = 16
+MAX_PUBLIC_ROUTE_ID_LENGTH = 128
+MAX_PUBLIC_ROUTE_DESCRIPTION_LENGTH = 256
+MAX_PUBLIC_ROUTE_PAYLOAD_BYTES = 1048576
+MAX_PUBLIC_ROUTE_TOTAL_BYTES = 4194304
+MAX_PUBLIC_ROUTE_DEPTH = 8
+
 # --- Runtime-enforced limits, declared here so discovery can pre-reject ------
 # Rows "Default history read window" and "Maximum history read window". The
 # maximum is a read-side clamp at runtime, but a manifest asking for more

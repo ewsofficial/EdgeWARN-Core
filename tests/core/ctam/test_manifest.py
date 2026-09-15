@@ -20,6 +20,7 @@ from EdgeWARN.ctam.limits import (
     DEFAULT_TIMEOUT_SECONDS,
     MAX_HISTORY_WINDOW,
     MAX_MODULE_ID_LENGTH,
+    MAX_PUBLIC_ROUTES_PER_MODULE,
     MAX_TIMEOUT_SECONDS,
     MIN_TIMEOUT_SECONDS,
 )
@@ -993,3 +994,33 @@ def test_encoded_separator_cannot_smuggle_a_container_name(tmp_path):
     # The reported container is the whole decoded key, which is the proof that
     # the segment was decoded rather than string-matched.
     assert "targets 'modules/CellStats'" in str(excinfo.value)
+
+
+def test_public_routes_are_optional_and_strictly_parsed(tmp_path):
+    manifest = parse_manifest(write_module(tmp_path, "cellstats", MINIMAL))
+    assert manifest.public_routes == ()
+
+    body = MINIMAL + '''\n[[public_routes]]\nid = "forecast-summary"\ndescription = "Latest forecast summary"\n'''
+    manifest = parse_manifest(write_module(tmp_path, "cellstats", body))
+    assert manifest.public_routes[0].route_id == "forecast-summary"
+    assert manifest.public_routes[0].description == "Latest forecast summary"
+
+
+@pytest.mark.parametrize("route_id", ["../secret", "a/b", "a\\\\b", "%2F", ".hidden"])
+def test_public_route_id_rejects_non_safe_segments(tmp_path, route_id):
+    body = MINIMAL + f'''\n[[public_routes]]\nid = "{route_id}"\ndescription = "Bad route"\n'''
+    with pytest.raises(ManifestError, match="public_routes\\[0\\]\\.id"):
+        parse_manifest(write_module(tmp_path, "cellstats", body))
+
+
+def test_public_routes_reject_duplicates_controls_and_overflow(tmp_path):
+    duplicate = MINIMAL + '''\n[[public_routes]]\nid = "same"\ndescription = "First"\n[[public_routes]]\nid = "same"\ndescription = "Second"\n'''
+    with pytest.raises(ManifestError, match="duplicated"):
+        parse_manifest(write_module(tmp_path, "cellstats", duplicate))
+
+    routes = "".join(
+        f'\n[[public_routes]]\nid = "route-{index}"\ndescription = "Route {index}"\n'
+        for index in range(MAX_PUBLIC_ROUTES_PER_MODULE + 1)
+    )
+    with pytest.raises(ManifestError, match="at most"):
+        parse_manifest(write_module(tmp_path, "cellstats", MINIMAL + routes))

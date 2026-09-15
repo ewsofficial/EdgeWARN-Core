@@ -40,6 +40,7 @@
               "file_unavailable",
               "requirement_unmet",
               "forbidden_path",
+              "route_not_declared",
               "stale_revision",
               "conflict",
               "invalid_patch",

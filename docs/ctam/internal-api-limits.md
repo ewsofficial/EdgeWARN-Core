@@ -48,6 +48,12 @@ and then fails. The plan's per-module state set is `discovered`, `invalid`,
 | Maximum patch value depth below the operation path | 8 | levels | Runtime | Invalid-patch error. |
 | Maximum leaf values per patch operation value | 256 | values | Runtime | Invalid-patch error. |
 | Maximum module ID length | 128 | characters | Discovery | Manifest rejected, module `invalid`. |
+| Maximum public routes per module | 16 | routes | Discovery | Manifest rejected, module `invalid`. |
+| Maximum public route ID length | 128 | characters | Discovery | Manifest rejected, module `invalid`. |
+| Maximum public route description length | 256 | characters | Discovery | Manifest rejected, module `invalid`. |
+| Maximum public route payload | 1048576 | bytes (1 MiB) | Runtime | Request-too-large error. Nothing is staged. |
+| Maximum aggregate public route payload per module | 4194304 | bytes (4 MiB) | Runtime | Request-too-large error. The prior staged routes survive. |
+| Maximum public route JSON depth | 8 | levels | Runtime | Invalid-patch error. Nothing is staged. |
 | Maximum `properties` key and string value length | 256 | characters | Runtime | Invalid-patch error. |
 | Default history read window | 5 | entries | Runtime | Not applicable. |
 | Maximum history read window | 120 | entries | Runtime | The requested `limit` is clamped down to 120, not rejected. |

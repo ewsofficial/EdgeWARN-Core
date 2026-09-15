@@ -177,6 +177,13 @@ class IOManager:
                 print(f"FAIL {module.module_id} ({module.state}) -> {module.reason}")
             else:
                 print(f"OK   {module.module_id} ({module.state}) -> {module.reason or 'manifest is valid'}")
+                if module.manifest is not None:
+                    for route in module.manifest.public_routes:
+                        print(
+                            f"     route {route.route_id} -> "
+                            f"/api/v3/modules/{module.manifest.module_id}/{route.route_id} "
+                            f"({route.description})"
+                        )
 
         total = len(result.modules)
         if failures:

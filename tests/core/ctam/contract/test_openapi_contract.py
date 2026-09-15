@@ -45,6 +45,7 @@ PLAN_OPERATIONS = frozenset({
     ("get", "/cells/{cell_id}"),
     ("patch", "/cells/{cell_id}/entries/{timestamp}"),
     ("post", "/alerts"),
+    ("put", "/routes/{routeId}"),
     ("get", "/transaction"),
     ("post", "/transaction/validate"),
     ("post", "/transaction/commit"),
@@ -58,12 +59,14 @@ ENVELOPE_ONLY = {
     "listCtamStormcells.responses.200": "the working snapshot mirrors detection's cell shape, which Phase 0 freezes by snapshot test rather than by schema",
     "getCtamStormcell.responses.200": "same as listCtamStormcells",
     "getCtamCellHistory.responses.200": "history entries mirror the stored cell shape, frozen by the cell-history baseline tests",
+    "registerCtamRoute.responses.200": "route staging returns only the accepted route id and byte count",
 }
 
 # Request bodies that are not patch requests.
 REQUEST_ENVELOPE_ONLY = {
     "stageCtamAlert.requestBody": "alert payload shape is owned by EdgeWARN.alerts.schema, not by this API",
     "commitCtamTransaction.requestBody": "commit body is an api_version and an idempotency key",
+    "registerCtamRoute.requestBody": "a public route may contain any finite JSON value",
 }
 
 HTTP_METHODS = ("get", "post", "patch", "delete", "put")
@@ -265,7 +268,7 @@ def test_every_error_code_in_the_envelope_enum_is_exercised():
     }
     # Recorded rather than asserted-empty: these have no natural single-route
     # example, and Phase 2 adds them with the handlers that raise them.
-    deferred = {"unsupported_version", "requirement_unmet", "conflict", "timed_out", "internal_error"}
+    deferred = {"unsupported_version", "requirement_unmet", "conflict", "timed_out", "internal_error", "route_not_declared"}
     assert used <= enum, f"example uses a code absent from the enum: {sorted(used - enum)}"
     assert enum - used == deferred, f"error-code example coverage changed: missing {sorted(enum - used - deferred)}"
 

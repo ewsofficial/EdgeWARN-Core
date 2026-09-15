@@ -9,6 +9,10 @@ scope = "stormcells"
 entrypoint = ["{python}", "main.py"]
 timeout_seconds = 10
 
+[[public_routes]]
+id = "summary"
+description = "Latest example module summary"
+
 [[requires]]
 selector = "stormcells.current"
 required = true

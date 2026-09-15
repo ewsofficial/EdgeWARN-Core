@@ -6,17 +6,22 @@ from pathlib import Path
 import pytest
 
 from EdgeWARN.ctam.api.models import APIError
-from EdgeWARN.ctam.manifest import ModuleManifest, ModuleWrite
+from EdgeWARN.ctam.manifest import ModuleManifest, ModuleWrite, PublicRoute
 from EdgeWARN.ctam.transaction import CTAMTransactionService, validate_patch_path
 from tests.core.ctam.contract.test_pointer_allowlist import ALLOWED, HOST, TABLE
 
 
 def manifest(tmp_path: Path) -> ModuleManifest:
-    return ModuleManifest("cellstats", "CellStats", "1.0.0", "1", True, False, "stormcells", (), 10, (), (), (
-        ModuleWrite("stormcells.current", "/features/*/modules/CellStats"),
-        ModuleWrite("stormcells.current", "/features/*/properties/cellstats_severity"),
-        ModuleWrite("cells.history", "/*/modules/CellStats"),
-    ), tmp_path, tmp_path / "module.toml")
+    return ModuleManifest(
+        module_id="cellstats", name="CellStats", version="1.0.0", api_version="1",
+        enabled=True, required=False, scope="stormcells", entrypoint=(), timeout_seconds=10,
+        after=(), requires=(), writes=(
+            ModuleWrite("stormcells.current", "/features/*/modules/CellStats"),
+            ModuleWrite("stormcells.current", "/features/*/properties/cellstats_severity"),
+            ModuleWrite("cells.history", "/*/modules/CellStats"),
+        ), directory=tmp_path, manifest_path=tmp_path / "module.toml",
+        public_routes=(PublicRoute("summary", "Latest summary"),),
+    )
 
 
 def service(tmp_path):
@@ -93,3 +98,25 @@ def test_only_sealed_transactions_expose_alerts_for_host_publication(tmp_path):
     assert transactions.committed_alerts() == []
     transactions.commit("cellstats")
     assert transactions.committed_alerts()[0]["id"] == "a"
+
+
+def test_routes_replace_transactionally_and_only_committed_routes_are_visible(tmp_path):
+    transactions = service(tmp_path)
+    assert transactions.stage_route("cellstats", "summary", {"risk": "low"})["route_id"] == "summary"
+    transactions.stage_route("cellstats", "summary", {"risk": "elevated"})
+    assert transactions.transaction("cellstats")["staged"]["routes"] == 1
+    assert transactions.committed_routes() == {}
+    transactions.commit("cellstats")
+    assert transactions.committed_routes() == {"cellstats": {"summary": {"risk": "elevated"}}}
+
+
+def test_undeclared_nonfinite_and_abandoned_routes_are_not_committed(tmp_path):
+    transactions = service(tmp_path)
+    with pytest.raises(APIError) as excinfo:
+        transactions.stage_route("cellstats", "undeclared", {})
+    assert excinfo.value.code == "route_not_declared"
+    with pytest.raises(APIError):
+        transactions.stage_route("cellstats", "summary", {"bad": float("nan")})
+    transactions.stage_route("cellstats", "summary", {"discard": True})
+    transactions.abandon("cellstats")
+    assert transactions.committed_routes() == {}

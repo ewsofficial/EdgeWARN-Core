@@ -96,6 +96,14 @@ class LoopbackCTAMServer:
                     elif self.command == "POST" and route == "/transaction/commit": data = outer.service.commit_transaction(module_id, idempotency_key=self.headers.get("Idempotency-Key"))
                     elif self.command == "DELETE" and route == "/transaction": data = outer.service.abandon_transaction(module_id)
                     elif self.command == "POST" and route == "/alerts": data = outer.service.stage_alert(module_id, self._body())
+                    elif self.command == "PUT" and route.startswith("/routes/"):
+                        raw_route_id = route[len("/routes/"):]
+                        if not raw_route_id or "/" in raw_route_id:
+                            raise APIError("not_found", "route was not found", 404)
+                        route_id = unquote(raw_route_id)
+                        if "/" in route_id or "\\" in route_id or unquote(route_id) != route_id:
+                            raise APIError("invalid_patch", "route id must be one safe decoded path segment", 400)
+                        data = outer.service.stage_route(module_id, route_id, self._body())
                     elif self.command == "PATCH" and route.startswith("/cells/") and "/entries/" in route:
                         cell_part, timestamp = route[len("/cells/"):].split("/entries/", 1)
                         body = self._body(); data = outer.service.stage_history(module_id, unquote(cell_part), unquote(timestamp), revision=body.get("revision"), operations=body.get("operations"))
@@ -151,6 +159,7 @@ class LoopbackCTAMServer:
                 return int(status)
             do_GET = _handle
             do_POST = _handle
+            do_PUT = _handle
             do_PATCH = _handle
             do_DELETE = _handle
 

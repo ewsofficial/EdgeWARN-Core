@@ -68,3 +68,6 @@ class CTAMClient:
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         return self._request("/transaction/commit", method="POST", payload={}, headers=headers)
     def stage_alert(self, payload): return self._request("/alerts", method="POST", payload=payload)
+    def register_route(self, route_id, payload):
+        from urllib.parse import quote
+        return self._request("/routes/" + quote(str(route_id), safe=""), method="PUT", payload=payload)

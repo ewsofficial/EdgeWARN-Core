@@ -20,6 +20,8 @@ wire contract. Phase 2 implements the read endpoints: `/health`, `/cycle`,
 `PATCH /stormcells/{cell_id}` and
 `PATCH /cells/{cell_id}/entries/{timestamp}` stage only manifest-owned
 `modules`/`properties` paths; `POST /alerts` stages caller-owned alerts; and
+`PUT /routes/{routeId}` stages inert JSON only for a route declared by the
+authenticated module;
 the `/transaction` endpoints validate, seal idempotently, or abandon the
 module's private transaction. Staged work is never visible through the API or
 filesystem until the host validates and publishes the completed cycle.

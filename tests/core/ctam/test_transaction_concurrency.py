@@ -18,10 +18,11 @@ from EdgeWARN.ctam.transaction import CTAMTransactionService
 
 def _manifest(module_id: str) -> ModuleManifest:
     return ModuleManifest(
-        module_id, module_id.title(), "1.0.0", "1", True, False, "stormcells",
-        ("{python}", "main.py"), 10, (), (),
-        (ModuleWrite("stormcells.current", f"/features/*/modules/{module_id.title()}"),),
-        None, None,
+        module_id=module_id, name=module_id.title(), version="1.0.0", api_version="1",
+        enabled=True, required=False, scope="stormcells", entrypoint=("{python}", "main.py"),
+        timeout_seconds=10, after=(), requires=(),
+        writes=(ModuleWrite("stormcells.current", f"/features/*/modules/{module_id.title()}"),),
+        directory=None, manifest_path=None,
     )
 
 

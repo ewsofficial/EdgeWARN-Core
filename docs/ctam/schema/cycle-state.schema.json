@@ -73,6 +73,7 @@
           "patch_stormcells",
           "patch_history",
           "stage_alerts",
+          "register_routes",
           "commit"
         ]
       }

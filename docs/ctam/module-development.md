@@ -21,6 +21,11 @@ only declared selectors, stage owned JSON patches, and call
 `/transaction/commit` only after all intended changes are staged. Do not write
 stormcells, histories, indexes, or alerts directly.
 
+For every `[[public_routes]]` declaration, stage or replace its JSON value with
+`client.register_route(route_id, payload)` before committing. Registration is a
+transactional `PUT`: repeating it replaces that route's staged value, and a
+failed, abandoned, timed-out, or uncommitted run publishes none of it.
+
 See [module-manifest.md](module-manifest.md) for declarations and
 [internal-api.md](internal-api.md) plus the [OpenAPI contract](openapi/ctam-internal-v1.json)
 for the wire format.

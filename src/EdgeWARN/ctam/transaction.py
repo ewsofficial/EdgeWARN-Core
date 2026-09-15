@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import threading
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
-from .manifest import ModuleManifest
+from .manifest import ModuleManifest, PUBLIC_ROUTE_ID_PATTERN
+from .limits import MAX_PUBLIC_ROUTE_DEPTH, MAX_PUBLIC_ROUTE_PAYLOAD_BYTES, MAX_PUBLIC_ROUTE_TOTAL_BYTES
 from .api.models import APIError
 
 _PATCH_OPS = frozenset({"add", "replace", "test"})
@@ -94,6 +96,24 @@ def _json_safe(value: Any) -> None:
         raise APIError("request_too_large", "patch value exceeds the CTAM API limit", 413)
 
 
+def _json_payload(value: Any) -> tuple[Any, int]:
+    def depth(item: Any) -> int:
+        if isinstance(item, Mapping):
+            return 1 + max((depth(child) for child in item.values()), default=0)
+        if isinstance(item, (list, tuple)):
+            return 1 + max((depth(child) for child in item), default=0)
+        return 0
+    try:
+        encoded = json.dumps(value, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise APIError("invalid_patch", "route payload must be finite JSON data", 400) from exc
+    if depth(value) > MAX_PUBLIC_ROUTE_DEPTH:
+        raise APIError("invalid_patch", "route payload exceeds the maximum JSON nesting depth", 400)
+    if len(encoded) > MAX_PUBLIC_ROUTE_PAYLOAD_BYTES:
+        raise APIError("request_too_large", "route payload exceeds the per-route limit", 413, limit=MAX_PUBLIC_ROUTE_PAYLOAD_BYTES)
+    return deepcopy(value), len(encoded)
+
+
 def _resolve_parent(cell: dict[str, Any], segments: tuple[str, ...], *, create: bool) -> tuple[dict[str, Any], str]:
     container = segments[0]
     if container not in cell:
@@ -121,6 +141,7 @@ class ModuleTransaction:
     staged_cells: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     staged_history: dict[tuple[str, str], list[dict[str, Any]]] = field(default_factory=dict)
     alerts: list[dict[str, Any]] = field(default_factory=list)
+    staged_routes: dict[str, Any] = field(default_factory=dict)
     sealed: bool = False
     abandoned: bool = False
     commit_result: dict[str, Any] | None = None
@@ -203,6 +224,22 @@ class CTAMTransactionService:
             _json_safe(dict(payload)); tx.alerts.append(deepcopy(dict(payload)))
             return {"staged_alerts": len(tx.alerts)}
 
+    def stage_route(self, module_id: str, route_id: str, payload: Any) -> dict[str, Any]:
+        with self._lock:
+            tx = self._transaction(module_id)
+            self._require_open(tx)
+            if not isinstance(route_id, str) or re.fullmatch(PUBLIC_ROUTE_ID_PATTERN, route_id) is None:
+                raise APIError("invalid_patch", "route id must be one safe decoded path segment", 400)
+            declared = {route.route_id for route in self.manifests[module_id].public_routes}
+            if route_id not in declared:
+                raise APIError("route_not_declared", "route is not declared by the caller's manifest", 403)
+            candidate, byte_count = _json_payload(payload)
+            existing_bytes = sum(len(json.dumps(value, allow_nan=False, separators=(",", ":")).encode("utf-8")) for key, value in tx.staged_routes.items() if key != route_id)
+            if existing_bytes + byte_count > MAX_PUBLIC_ROUTE_TOTAL_BYTES:
+                raise APIError("request_too_large", "staged routes exceed the per-module aggregate limit", 413, limit=MAX_PUBLIC_ROUTE_TOTAL_BYTES)
+            tx.staged_routes[route_id] = candidate
+            return {"route_id": route_id, "bytes": byte_count}
+
     def transaction(self, module_id: str) -> dict[str, Any]:
         with self._lock:
             return self._transaction_snapshot(module_id)
@@ -212,14 +249,15 @@ class CTAMTransactionService:
         cell_ops = sum(map(len, tx.staged_cells.values()))
         history_ops = sum(map(len, tx.staged_history.values()))
         state = "sealed" if tx.sealed else "abandoned" if tx.abandoned else "open"
-        return {"transaction_id": tx.transaction_id, "module_id": module_id, "state": state, "staged": {"stormcell_operations": cell_ops, "history_operations": history_ops, "alerts": len(tx.alerts), "cells_touched": sorted({int(key) if key.isdigit() else key for key in (*tx.staged_cells, *(key for key, _ in tx.staged_history))}, key=str), "bytes": len(json.dumps([*tx.staged_cells.values(), *tx.staged_history.values(), tx.alerts], allow_nan=False, default=str).encode())}, "conflicts": [], "commit_id": tx.commit_result.get("commit_id") if tx.commit_result else None, "idempotency_key": tx.commit_result.get("idempotency_key") if tx.commit_result else None, "revisions": {"stormcells.current": max(self.cell_revisions.values(), default=0), "cells.history": max(self.history_revisions.values(), default=0)}}
+        route_bytes = sum(len(json.dumps(value, allow_nan=False, separators=(",", ":")).encode("utf-8")) for value in tx.staged_routes.values())
+        return {"transaction_id": tx.transaction_id, "module_id": module_id, "state": state, "staged": {"stormcell_operations": cell_ops, "history_operations": history_ops, "alerts": len(tx.alerts), "routes": len(tx.staged_routes), "route_bytes": route_bytes, "cells_touched": sorted({int(key) if key.isdigit() else key for key in (*tx.staged_cells, *(key for key, _ in tx.staged_history))}, key=str), "bytes": len(json.dumps([*tx.staged_cells.values(), *tx.staged_history.values(), tx.alerts], allow_nan=False, default=str).encode()) + route_bytes}, "conflicts": [], "commit_id": tx.commit_result.get("commit_id") if tx.commit_result else None, "idempotency_key": tx.commit_result.get("idempotency_key") if tx.commit_result else None, "revisions": {"stormcells.current": max(self.cell_revisions.values(), default=0), "cells.history": max(self.history_revisions.values(), default=0)}}
 
     def abandon(self, module_id: str) -> dict[str, Any]:
         with self._lock:
             tx = self._transaction(module_id)
             if tx.sealed or tx.abandoned:
                 raise APIError("transaction_sealed", "transaction is already sealed", 409)
-            tx.staged_cells.clear(); tx.staged_history.clear(); tx.alerts.clear(); tx.abandoned = True
+            tx.staged_cells.clear(); tx.staged_history.clear(); tx.alerts.clear(); tx.staged_routes.clear(); tx.abandoned = True
             return self._transaction_snapshot(module_id)
 
     def validate(self, module_id: str) -> dict[str, Any]:
@@ -250,6 +288,15 @@ class CTAMTransactionService:
         """Alerts eligible for host publication; unsealed work stays private."""
         with self._lock:
             return [deepcopy(alert) for tx in self.transactions.values() if tx.sealed for alert in tx.alerts]
+
+    def committed_routes(self) -> dict[str, dict[str, Any]]:
+        """Committed route payloads keyed by authenticated module and route id."""
+        with self._lock:
+            return {
+                module_id: deepcopy(tx.staged_routes)
+                for module_id, tx in self.transactions.items()
+                if tx.sealed and tx.staged_routes
+            }
 
     @staticmethod
     def _apply(cell: dict[str, Any], operations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
