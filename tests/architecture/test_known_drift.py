@@ -1481,19 +1481,6 @@ def test_nexrad_cli_declares_no_volume_count_it_cannot_use():
         ) == 1
 
 
-def test_every_configured_colormap_key_exists_in_colormaps_json():
-    from EWMRS.rap.config import get_rap_uint16_layers
-    from EWMRS.render.config import get_file_list
-
-    document = json.loads((REPO_ROOT / "src/EWMRS/colormaps.json").read_text(encoding="utf-8"))
-    available = {entry["name"] for entry in document[0]["colormaps"]}
-
-    used = {layer["colormap_key"] for layer in get_file_list()}
-    used |= {l["colormap_key"] for l in get_rap_uint16_layers() if "colormap_key" in l}
-
-    assert used - available == set()
-
-
 def test_reflectance_colormap_ternary_is_resolved():
     """RESOLVED: the ternary was dropped when the layers moved to the catalog.
 
@@ -1605,52 +1592,20 @@ def test_base_dir_argv_resolution_beats_the_platform_default(monkeypatch, tmp_pa
     assert bare.stdout.strip() != str(chosen)
 
 
-def test_colormap_json_resolution_no_longer_depends_on_the_working_directory():
-    """RESOLVED: the candidate list moved to filesystem.yaml, tokenized.
-
-    `Path.cwd() / "colormaps.json"` led the list, so which file the renderer drew
-    with depended on the directory the operator launched from -- and silently, since
-    a colormaps.json anywhere on the launch path simply won. It is not carried over:
-    `src/EWMRS/colormaps.json` is the shipped file and the `<src_dir>` candidate
-    that replaces it resolves against the installed tree instead.
-
-    The two surviving candidates are tokens rather than absolute paths because
-    neither location is knowable when the catalog is written: `<gui_dir>` follows
-    `--base_dir`, and `<src_dir>` is wherever the tree was installed.
-    """
+def test_removed_colormap_catalog_support_stays_removed():
+    """The server publishes raw values and no longer owns display colormaps."""
     from common.config.loader import load_config
 
-    source = (REPO_ROOT / "src/util/file.py").read_text(encoding="utf-8")
-    assert 'Path.cwd() / "colormaps.json"' not in source
-    assert '"EWMRS" / "colormaps.json"' not in source
-    assert "colormap_search_path(" in source, "the candidate list belongs to the catalog now"
+    filesystem = load_config("filesystem")
+    pipeline = _ewmrs_pipeline_yaml()
+    file_source = (REPO_ROOT / "src/util/file.py").read_text(encoding="utf-8")
+    render_source = (REPO_ROOT / "src/EWMRS/render/render.py").read_text(encoding="utf-8")
 
-    assert list(load_config("filesystem")["colormap_search_path"]) == [
-        "<src_dir>/EWMRS/colormaps.json",
-        "<gui_dir>/colormaps.json",
-    ]
-
-    # `EWMRS/pipeline.py` overwrote the resolved path with its own `__file__`-relative
-    # literal at module scope, which would have silently outranked the catalog for
-    # every EWMRS run. It resolved to the same file, so deleting it is not a
-    # behavior change -- it is what leaves the catalog as the only owner.
-    pipeline = (REPO_ROOT / "src/EWMRS/pipeline.py").read_text(encoding="utf-8")
-    assert "fs.GUI_COLORMAP_JSON =" not in pipeline
-    assert "EWMRS_COLORMAP_JSON" not in pipeline
-
-
-def test_the_colormap_candidates_still_find_the_shipped_file():
-    """The tokens have to land on the same file the `__file__` candidate used to.
-
-    Asserted against the shipped path directly rather than against `fs`, because
-    the point is that the expansion agrees with the repository layout -- a
-    `<src_dir>` that resolved one directory too high would still produce a plausible
-    path and only fail at open time.
-    """
-    import util.file as fs
-
-    assert fs.GUI_COLORMAP_JSON == (REPO_ROOT / "src/EWMRS/colormaps.json").resolve()
-    assert fs.GUI_COLORMAP_JSON.is_file()
+    assert not (REPO_ROOT / "src/EWMRS/colormaps.json").exists()
+    assert "colormap_search_path" not in filesystem
+    assert "colormap_entries" not in pipeline["caches"]
+    assert "GUI_COLORMAP_JSON" not in file_source
+    assert "_get_cached_cmap" not in render_source
 
 
 def test_run_module_scope_is_outside_a_main_guard():
@@ -2044,38 +1999,34 @@ def test_ewmrs_tile_threads_env_bypasses_the_cpu_cap_but_the_catalog_does_not():
     assert "min(tile_count, max_tile_threads(), cpu_cap)" in render_source
 
 
-def test_ewmrs_lru_cache_sizes_come_from_the_catalog_at_import(tmp_path):
-    """DECISION PRESERVED: two keys are read once at import, not per call.
+def test_ewmrs_lru_cache_size_comes_from_the_catalog_at_import(tmp_path):
+    """DECISION PRESERVED: the tile-index cache size is read once at import.
 
     `maxsize` is a decorator argument, so Python evaluates it when the module
     loads and a cache cannot be resized per call. Every other key in this file is
-    read per use; these two need a restart, which is why the catalog says so.
+    read per use; this one needs a restart, which is why the catalog says so.
 
     Re-examined alongside the other import-time bindings and deliberately left
-    alone. It is the one import-time read that `--config-dir` cannot reach, since
-    both modules are imported before `get_args()` exports `EDGEWARN_CONFIG_DIR`.
+    alone. It is an import-time read that `--config-dir` cannot reach, since the
+    module is imported before `get_args()` exports `EDGEWARN_CONFIG_DIR`.
     Two facts make that acceptable rather than merely tolerated:
 
     - It cannot mislead a later reader. `load_config` memoizes on
       `(resolved_root, name)`, asserted below, so an import-time load under the
       repo default does not become the answer a subsequent `--config-dir` load
-      receives. The stale value is confined to these two `maxsize` arguments.
+      receives. The stale value is confined to this `maxsize` argument.
     - The only fix is to build the cache lazily behind a first-call check, which
-      puts an extra indirection and a mutable module global into the per-tile and
-      per-colormap paths. A cache holding 512 entries instead of a configured 256
+      puts an extra indirection and a mutable module global into the per-tile
+      path. A cache holding 512 entries instead of a configured 256
       is a memory-footprint difference, not a wrong answer.
     """
     from common.config import loader as config_loader
     from EWMRS.pipeline import _load_timestamp_chunk_index_cached
-    from EWMRS.pipeline_config import colormap_cache_entries, tile_index_cache_entries
-    from EWMRS.render.render import _get_cached_cmap
+    from EWMRS.pipeline_config import tile_index_cache_entries
 
     recorded = _ewmrs_pipeline_yaml()
     assert tile_index_cache_entries() == recorded["caches"]["tile_index_entries"] == 512
-    assert colormap_cache_entries() == recorded["caches"]["colormap_entries"] == 128
-
     assert _load_timestamp_chunk_index_cached.cache_info().maxsize == tile_index_cache_entries()
-    assert _get_cached_cmap.cache_info().maxsize == colormap_cache_entries()
 
     # The keying claim is exercised by loading the same catalog from a second
     # root, not by inspecting the existing keys: a loader keyed by name alone

@@ -157,20 +157,6 @@ def test_default_config_defines_rap_uint16_layers():
             assert layer["outdir"].name == name.removeprefix("RAP_")
 
 
-def test_rap_colormap_keys_exist_in_colormaps_catalog():
-    layers = get_rap_uint16_layers()
-    colormaps_path = Path(__file__).resolve().parents[3] / "src" / "EWMRS" / "colormaps.json"
-    colormaps = json.loads(colormaps_path.read_text(encoding="utf-8"))[0]["colormaps"]
-    colormap_names = {entry["name"] for entry in colormaps}
-
-    for layer in layers:
-        key = layer.get("colormap_key")
-        if key is None:
-            continue
-        assert key in colormap_names
-
-
-
 def test_scale_to_uint16_clips_and_reserves_nodata():
     values = np.array([[-10.0, 0.0, 50.0, 100.0, 150.0, np.nan]])
 

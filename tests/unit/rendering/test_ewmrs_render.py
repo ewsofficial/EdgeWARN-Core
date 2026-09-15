@@ -1,16 +1,12 @@
 """Tests for EWMRS colormap rendering and image conversion."""
-from pathlib import Path
 import json
-import threading
 
 import numpy as np
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
-import EWMRS.render.render as render_module
 import EWMRS.render.render as render
 from EWMRS.render.config import TILE_SIZE
-import util.file as fs
 
 
 class _FakeDataset:
@@ -37,113 +33,27 @@ class _FakeDataArray:
         return self._data
 
 
-class TestGetCmap:
-    @pytest.fixture(autouse=True)
-    def setup(self, tmp_path):
-        self.cmap_file = tmp_path / "colormaps.json"
-        cmap_data = [
-            {
-                "colormaps": [
-                    {
-                        "name": "TestCmap",
-                        "interpolate": True,
-                        "thresholds": [
-                            {"value": 0, "rgb": [0, 0, 0, 255]},
-                            {"value": 50, "rgb": [128, 128, 128, 255]},
-                            {"value": 100, "rgb": [255, 255, 255, 255]},
-                        ],
-                    },
-                    {
-                        "name": "DiscreteCmap",
-                        "interpolate": False,
-                        "thresholds": [
-                            {"value": 0, "rgb": [0, 0, 0, 255]},
-                            {"value": 10, "rgb": [255, 0, 0, 255]},
-                            {"value": 20, "rgb": [0, 255, 0, 255]},
-                        ],
-                    },
-                ]
-            }
-        ]
-        self.cmap_file.write_text(json.dumps(cmap_data))
-        render_module._COLORMAP_CACHE.clear()
-        self._orig = fs.GUI_COLORMAP_JSON
-        fs.GUI_COLORMAP_JSON = self.cmap_file
-        yield
-        fs.GUI_COLORMAP_JSON = self._orig
-        render_module._COLORMAP_CACHE.clear()
-
-    def test_returns_cached_colormap_on_second_call(self):
-        renderer = render.GUILayerRenderer(
-            _FakeDataset(np.array([[0]])), Path("/tmp"), "TestCmap", "test", "2026-03-17T20:00:00"
-        )
-        result1 = renderer._get_cmap()
-        result2 = renderer._get_cmap()
-        assert result1 is result2
-
-    def test_cache_shared_across_instances(self):
-        r1 = render.GUILayerRenderer(_FakeDataset(np.array([[0]])), Path("/tmp"), "TestCmap", "t1", "2026-03-17T20:00:00")
-        r2 = render.GUILayerRenderer(_FakeDataset(np.array([[0]])), Path("/tmp"), "TestCmap", "t2", "2026-03-17T20:00:00")
-        assert r1._get_cmap() is r2._get_cmap()
-
-    def test_unknown_colormap_key_raises(self):
-        renderer = render.GUILayerRenderer(_FakeDataset(np.array([[0]])), Path("/tmp"), "NoSuchCmap", "t", "2026-03-17T20:00:00")
-        with pytest.raises(ValueError, match="Colormap 'NoSuchCmap' not found"):
-            renderer._get_cmap()
-
-    def test_interpolate_flag_parsed(self):
-        renderer = render.GUILayerRenderer(_FakeDataset(np.array([[0]])), Path("/tmp"), "TestCmap", "t", "2026-03-17T20:00:00")
-        thresholds, colors, colors_uint8, interpolate = renderer._get_cmap()
-        assert interpolate is True
-        assert len(thresholds) == 3
-        assert colors_uint8.dtype == np.uint8
-
-    def test_discrete_flag_parsed(self):
-        renderer = render.GUILayerRenderer(_FakeDataset(np.array([[0]])), Path("/tmp"), "DiscreteCmap", "t", "2026-03-17T20:00:00")
-        thresholds, colors, colors_uint8, interpolate = renderer._get_cmap()
-        assert interpolate is False
-
-
 class TestColormapInterpolation:
     @pytest.fixture(autouse=True)
-    def setup(self, tmp_path):
-        self.cmap_file = tmp_path / "colormaps.json"
-        cmap_data = [
-            {
-                "colormaps": [
-                    {
-                        "name": "InterpCmap",
-                        "interpolate": True,
-                        "thresholds": [
-                            {"value": 0, "rgb": [0, 0, 0, 255]},
-                            {"value": 50, "rgb": [128, 128, 128, 255]},
-                            {"value": 100, "rgb": [255, 255, 255, 255]},
-                        ],
-                    },
-                    {
-                        "name": "DiscreteCmap",
-                        "interpolate": False,
-                        "thresholds": [
-                            {"value": 0, "rgb": [0, 0, 0, 255]},
-                            {"value": 10, "rgb": [255, 0, 0, 255]},
-                            {"value": 20, "rgb": [0, 255, 0, 255]},
-                        ],
-                    },
-                ]
-            }
-        ]
-        self.cmap_file.write_text(json.dumps(cmap_data))
-        render_module._COLORMAP_CACHE.clear()
-        self._orig = fs.GUI_COLORMAP_JSON
-        fs.GUI_COLORMAP_JSON = self.cmap_file
-        yield
-        fs.GUI_COLORMAP_JSON = self._orig
-        render_module._COLORMAP_CACHE.clear()
+    def setup(self):
+        self.interpolated = (
+            np.array([0, 50, 100], dtype=np.float32),
+            np.array([[0, 0, 0, 255], [128, 128, 128, 255], [255, 255, 255, 255]], dtype=np.float32),
+            np.array([[0, 0, 0, 255], [128, 128, 128, 255], [255, 255, 255, 255]], dtype=np.uint8),
+            True,
+        )
+        self.discrete = (
+            np.array([0, 10, 20], dtype=np.float32),
+            np.array([[0, 0, 0, 255], [255, 0, 0, 255], [0, 255, 0, 255]], dtype=np.float32),
+            np.array([[0, 0, 0, 255], [255, 0, 0, 255], [0, 255, 0, 255]], dtype=np.uint8),
+            False,
+        )
 
     def _render_data(self, data, colormap_key, outdir):
-        ds = _FakeDataset(data)
         outdir.mkdir(parents=True, exist_ok=True)
-        thresholds, colors, colors_uint8, interpolate = render._get_cached_cmap(colormap_key)
+        thresholds, colors, colors_uint8, interpolate = (
+            self.interpolated if colormap_key == "InterpCmap" else self.discrete
+        )
         return render._scalar_data_to_rgba(data, thresholds, colors, colors_uint8, interpolate)
 
     def test_interpolated_values_blend_colors(self, tmp_path):
@@ -190,14 +100,6 @@ class TestUpdateIndex:
     def setup(self, tmp_path):
         self.outdir = tmp_path / "gui" / "layer"
         self.outdir.mkdir(parents=True)
-        self._orig = fs.GUI_COLORMAP_JSON
-        cmap_data = [{"colormaps": [{"name": "T", "interpolate": True, "thresholds": [{"value": 0, "rgb": [0,0,0,255]}]}]}]
-        fs.GUI_COLORMAP_JSON = tmp_path / "cmap.json"
-        fs.GUI_COLORMAP_JSON.write_text(json.dumps(cmap_data))
-        render_module._COLORMAP_CACHE.clear()
-        yield
-        fs.GUI_COLORMAP_JSON = self._orig
-        render_module._COLORMAP_CACHE.clear()
 
     def _renderer(self, outdir=None):
         ds = _FakeDataset(np.array([[0.0]]))
@@ -248,28 +150,6 @@ class TestUpdateIndex:
 
 
 class TestConvertToPng:
-    @pytest.fixture(autouse=True)
-    def setup(self, tmp_path):
-        self.cmap_file = tmp_path / "colormaps.json"
-        cmap_data = [
-            {
-                "colormaps": [
-                    {
-                        "name": "TestCmap",
-                        "interpolate": True,
-                        "thresholds": [{"value": 0, "rgb": [0, 0, 0, 255]}, {"value": 100, "rgb": [255, 255, 255, 255]}],
-                    }
-                ]
-            }
-        ]
-        self.cmap_file.write_text(json.dumps(cmap_data))
-        render_module._COLORMAP_CACHE.clear()
-        self._orig = fs.GUI_COLORMAP_JSON
-        fs.GUI_COLORMAP_JSON = self.cmap_file
-        yield
-        fs.GUI_COLORMAP_JSON = self._orig
-        render_module._COLORMAP_CACHE.clear()
-
     def _make_renderer(self, data, outdir, timestamp="20260317-200000"):
         ds = _FakeDataset(data)
         return render.GUILayerRenderer(ds, outdir, "TestCmap", "TestLayer", timestamp)
