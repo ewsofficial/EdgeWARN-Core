@@ -142,3 +142,36 @@ def test_installed_command_validates_and_edits_deployed_config(installed_command
     assert "validation: passed" in result.stdout
     document = yaml.safe_load((config / "runtime.yaml").read_text(encoding="utf-8"))
     assert document["run"]["disable_nexrad"] is True
+
+
+def test_installed_wheel_loads_and_runs_stormprob_models(installed_command):
+    """The installed artifact must carry usable StormProb inference assets."""
+    _root, python, _edgewarn = installed_command
+    probe = _run(
+        [
+            python,
+            "-c",
+            (
+                "import numpy as np; "
+                "from EdgeWARN.stormprob import assets, onnx_runtime; "
+                "directory = assets.validate_assets(); "
+                "sessions = onnx_runtime.load_sessions(directory, assets.manifest_path()); "
+                "outputs = onnx_runtime.infer_pair(*sessions, "
+                "radial_history=np.zeros((128,30,64), np.float32), "
+                "statistics_history=np.zeros((128,30,1), np.float32), "
+                "current_features=np.zeros((128,135), np.float32), "
+                "history_mask=np.zeros((128,30), np.bool_), "
+                "history_sequence=np.zeros((128,30,135), np.float32), "
+                "trajectory_sequence=np.zeros((128,30,16), np.float32), "
+                "trajectory_mask=np.zeros((128,30), np.bool_)); "
+                "assert outputs['coefficient_mean'].shape == (128,4,33); "
+                "assert outputs['residual_motion_mps'].shape == (128,4,2); "
+                "print(directory)"
+            ),
+        ],
+        cwd=_root,
+    )
+    if "onnxruntime is not installed" in probe.stderr:
+        pytest.skip("onnxruntime is not installed in this test environment")
+    assert probe.returncode == 0, probe.stderr
+    assert "models/stormprob" in probe.stdout

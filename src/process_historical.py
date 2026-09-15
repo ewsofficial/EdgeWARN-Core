@@ -6,6 +6,7 @@ import time
 
 import common.ingest.mrms.config as mrms_config
 from EdgeWARN import historical_pipeline, initialize_runtime, parse_utc_time
+from EdgeWARN.stormprob.assets import validate_assets
 from EdgeWARN.api_integration.config import initialize_at_startup_historical
 from EdgeWARN.historical_config import (
     historical_step_minutes,
@@ -39,6 +40,12 @@ def _validated_historical_output(path: Path, requested_time: datetime) -> bool:
 def main():
     """Historical scheduler: iterate through time range and process each available timestamp."""
     args = io_manager.get_historical_args()
+
+    try:
+        validate_assets()
+    except (FileNotFoundError, RuntimeError) as exc:
+        io_manager.write_error(f"StormProb startup validation failed: {exc}")
+        sys.exit(1)
 
     # Initialize custom filesystem if provided
     initialize_runtime(

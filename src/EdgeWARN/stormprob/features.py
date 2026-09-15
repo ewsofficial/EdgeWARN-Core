@@ -136,12 +136,13 @@ def feature_order_checksum() -> str:
 
 
 def _repo_manifest_path() -> Path | None:
-    here = Path(__file__).resolve()
-    for parent in (here, *here.parents):
-        candidate = parent / "models" / "stormprob" / "manifest.json"
-        if candidate.is_file():
-            return candidate
-    return None
+    from .assets import manifest_path
+
+    try:
+        path = manifest_path()
+    except FileNotFoundError:
+        return None
+    return path if path.is_file() else None
 
 
 def verify_against_manifest() -> dict:
@@ -358,12 +359,13 @@ def build_current_feature_vector(
 
 @lru_cache(maxsize=1)
 def _normalization_path() -> Path | None:
-    here = Path(__file__).resolve()
-    for parent in (here, *here.parents):
-        candidate = parent / "models" / "stormprob" / "normalization-stats.json"
-        if candidate.is_file():
-            return candidate
-    return None
+    from .assets import asset_dir
+
+    try:
+        candidate = asset_dir() / "normalization-stats.json"
+    except FileNotFoundError:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 @lru_cache(maxsize=1)

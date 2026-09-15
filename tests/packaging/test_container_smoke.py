@@ -166,7 +166,19 @@ def test_container_run_with_disposable_mount_and_sigterm(tmp_path):
                 "docker", "run", "-d", "--name", container,
                 "-v", f"{mount}:/var/lib/edgewarn", image,
                 "python", "-c",
-                "import signal,sys,time; "
+                "import numpy as np, signal, sys, time; "
+                "from EdgeWARN.stormprob import assets, onnx_runtime; "
+                "directory = assets.validate_assets(); "
+                "sessions = onnx_runtime.load_sessions(directory, assets.manifest_path()); "
+                "outputs = onnx_runtime.infer_pair(*sessions, "
+                "radial_history=np.zeros((128,30,64), np.float32), "
+                "statistics_history=np.zeros((128,30,1), np.float32), "
+                "current_features=np.zeros((128,135), np.float32), "
+                "history_mask=np.zeros((128,30), np.bool_), "
+                "history_sequence=np.zeros((128,30,135), np.float32), "
+                "trajectory_sequence=np.zeros((128,30,16), np.float32), "
+                "trajectory_mask=np.zeros((128,30), np.bool_)); "
+                "assert outputs['coefficient_mean'].shape == (128,4,33); "
                 "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
                 "print('ready', flush=True); time.sleep(300)",
             ],

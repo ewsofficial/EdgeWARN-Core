@@ -12,6 +12,7 @@ WORKDIR /tmp/edgewarn-build
 COPY environment.yml pyproject.toml README.md ./
 COPY src ./src
 COPY config ./config
+COPY models ./models
 RUN conda env create --file environment.yml \
     && /opt/conda/envs/EdgeWARN/bin/python -m pip wheel \
         --no-deps --no-build-isolation --wheel-dir /tmp/edgewarn-wheel . \

@@ -76,3 +76,11 @@ def test_ci_builds_and_smoke_tests_the_installed_wheel():
     assert "edgewarn --version" in workflow
     assert "edgewarn configure" in workflow
     assert "test_run_all_launcher.py" in workflow
+
+
+def test_stormprob_assets_are_built_into_the_wheel_and_container():
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert '[tool.setuptools.data-files]' in pyproject
+    assert '"models/stormprob" = ["models/stormprob/*"]' in pyproject
+    assert "COPY models ./models" in dockerfile

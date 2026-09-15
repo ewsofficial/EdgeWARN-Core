@@ -53,3 +53,10 @@ namespaces = true
 
 [tool.setuptools.package-data]
 EWMRS = ["*.json"]
+
+# StormProb is intentionally kept outside the Python package in the source
+# tree, but must be installed with the wheel.  ``data-files`` preserves the
+# existing ``models/stormprob`` layout under the active environment prefix so
+# the same artifact works from a wheel and from the container image.
+[tool.setuptools.data-files]
+"models/stormprob" = ["models/stormprob/*"]

@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 from common.config import loader as config_loader
 from EdgeWARN import initialize_runtime
+from EdgeWARN.stormprob.assets import validate_assets
 from EdgeWARN.schedule.scheduler import MRMSUpdateChecker
 from util.io import TimestampedOutput, IOManager
 from util.release import get_release_version
@@ -55,6 +56,12 @@ def main():
 
     io_manager = IOManager("[EdgeWARN]")
     args = io_manager.get_args()
+
+    try:
+        validate_assets()
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(f"[EdgeWARN] StormProb startup validation failed: {exc}")
+        sys.exit(1)
 
     initialize_runtime(base_dir=args.base_dir, io_manager=io_manager)
 
