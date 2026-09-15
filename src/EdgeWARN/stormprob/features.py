@@ -357,7 +357,9 @@ def build_current_feature_vector(
 # Normalization (checkpoint vectors from normalization-stats.json)
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
+# NOTE: intentionally uncached so a miss never poisons a long-lived worker;
+# load_normalization below caches only successful loads (lru_cache does not
+# cache raised exceptions), giving self-healing once assets appear.
 def _normalization_path() -> Path | None:
     from .assets import asset_dir
 
