@@ -105,6 +105,8 @@ UNMET_CONDITIONS = (
 CYCLE_STATE_CATALOG_BUILDING = "catalog_building"
 CYCLE_STATE_REQUIREMENTS_EVALUATED = "requirements_evaluated"
 CYCLE_STATE_NOT_READY = "not_ready"
+CYCLE_STATE_COMPLETED = "completed"
+CYCLE_STATE_FAILED = "failed"
 CYCLE_STATES = (
     CYCLE_STATE_CATALOG_BUILDING,
     CYCLE_STATE_REQUIREMENTS_EVALUATED,
@@ -112,8 +114,8 @@ CYCLE_STATES = (
     "stormprob_running",
     "external_modules_running",
     "committing",
-    "completed",
-    "failed",
+    CYCLE_STATE_COMPLETED,
+    CYCLE_STATE_FAILED,
 )
 
 # status-record.schema.json, modules.*.state.
@@ -476,6 +478,27 @@ def _host_artifact_absent_readiness(
     return PENDING
 
 
+def _same_cycle(recorded: str, cycle_time: datetime) -> bool:
+    """True when a snapshot's ``latest_timestamp`` names this cycle.
+
+    The snapshot records an ISO timestamp (``2026-09-15T13:40:40``) while the
+    catalog tracks the compact cycle id (``20260915-134040``); a raw string
+    comparison can never match, so both sides are normalized to UTC datetimes.
+    An unparseable stamp is treated as a different cycle (stale), never as a
+    match.
+    """
+    try:
+        moment = datetime.fromisoformat(str(recorded).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        try:
+            moment = datetime.strptime(str(recorded), "%Y%m%d-%H%M%S")
+        except (TypeError, ValueError):
+            return False
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return _as_utc(moment) == _as_utc(cycle_time)
+
+
 def _describe_stormcells(
     stormcell_path: Path | None,
     *,
@@ -562,7 +585,7 @@ def _describe_stormcells(
         )
 
     recorded = payload.get("latest_timestamp")
-    if isinstance(recorded, str) and recorded and recorded != cycle_id:
+    if isinstance(recorded, str) and recorded and not _same_cycle(recorded, cycle_time):
         # `stale`: a real snapshot, but of another cycle. This is the wrong-cycle
         # file the readiness enum has to be able to distinguish from a missing
         # one, because the bytes parse perfectly and only the timestamp betrays it.
