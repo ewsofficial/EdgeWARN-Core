@@ -13,11 +13,20 @@ services:
       # receives the mounted container path through its supported environment
       # contract, so every supervised worker uses the same runtime root.
       EDGEWARN_BASE_DIR: /var/lib/edgewarn
+      # Operator-owned CTAM modules.  Resolution precedence is CLI flag >
+      # this variable > runtime.yaml run.ctam_module_dir; the absolute path
+      # here skips the relative-path repo-root guessing entirely.
+      EDGEWARN_CTAM_MODULE_DIR: /opt/edgewarn/ctam_modules
     volumes:
       - ${EDGEWARN_HOST_BASE_DIR:-./EdgeWARN_input}:/var/lib/edgewarn
       - ./config:/etc/edgewarn/config:ro
       - ${EDGEWARN_NWS_ASSETS_DIR:-./assets/nws_zones}:/etc/edgewarn/assets/nws_zones:ro
       - ${EDGEWARN_LOG_DIR:-./EdgeWARN_logs}:/var/log/edgewarn
+      # CTAM modules are operator-supplied code, never baked into the image.
+      # Mounted read-only: modules may only mutate data through the loopback
+      # CTAM API, never by writing the filesystem.  An absent host directory
+      # is a supported empty-module configuration.
+      - ${EDGEWARN_CTAM_MODULES_DIR:-./ctam_modules}:/opt/edgewarn/ctam_modules:ro
     stop_grace_period: 25s
 
   edgewarn-configure:
