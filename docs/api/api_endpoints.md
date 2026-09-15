@@ -213,7 +213,7 @@ Responses:
 
 ## EWMRS Render Products
 
-The unified API's EWMRS compatibility adapter exposes tiled GUI products through:
+The unified API's EWMRS compatibility adapter exposes product discovery through:
 
 - `GET /renders/get-items`
 - `GET /renders/fetch?product={product}`
@@ -221,7 +221,8 @@ The unified API's EWMRS compatibility adapter exposes tiled GUI products through
 - `GET /renders/tile?product={product}&timestamp={YYYYMMDD-HHMMSS}[&x={int}&y={int}]`
 - `GET /renders/tile-info?product={product}`
 
-For `/renders/tile`, supplying both `x` and `y` returns a PNG tile; omitting both returns the valid tile coordinates listed in the timestamp folder's `index.json`.
+`/renders/download` and `/renders/tile` are retired and always return `410
+Gone`. They are retained only to give old clients an explicit migration error.
 
 GOES products exposed through those routes include:
 
@@ -231,13 +232,7 @@ Behavior notes:
 
 - ABI single-channel products are generated from staged `ABI-L1b-RadC` channels on the GOES CONUS `EPSG:3857` tile grid.
 - Missing or time-misaligned channels skip only the affected layer; other GOES products continue rendering.
-- Current GOES renders are tile-first; `/renders/download` only resolves the legacy flat PNG naming contract when such files exist.
-- Listing mode reads the timestamp folder's `index.json` and never scans the
-  directory for filenames. It looks for a `tiles` array, which is the legacy
-  key. Schema-version-2 indexes written by the current renderers publish
-  `chunks` instead, so against a freshly rendered product this route reports
-  `tiles: []` with a valid `tile_grid` rather than failing. That is not an error
-  condition; it means the product has no PNG tiles to list.
+- Current GOES and MRMS renders publish only schema-version-2 float16 chunks.
 
 See `docs/api/ewmrs_api_endpoints.md` for the full EWMRS route contracts and `docs/core/goes_pipeline.md` for the ingest-to-render flow.
 
@@ -250,8 +245,9 @@ The second resource is `application/octet-stream`, not PNG. It returns exact
 scalar float16 value chunks (gzip-compressed, `NaN` no-data) with top-to-bottom
 rows and bottom-left chunk-grid coordinates.
 The index's sparse `chunks` list is authoritative; omitted chunks are
-transparent. Legacy `/renders/download` and `/renders/tile` remain PNG-only
-and return missing-artifact responses when no compatibility PNG exists.
+transparent. The API does not publish a colormap catalog: clients own their
+visualization palette and must treat the returned floats as source values.
+Legacy `/renders/download` and `/renders/tile` return `410 Gone`.
 
 ## EWMRS RAP Uint16 Products
 

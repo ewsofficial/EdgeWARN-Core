@@ -6,14 +6,14 @@
 - Unified, secured `/api/v3` service for EdgeWARN and EWMRS artifacts, with an
   OpenAPI contract, cursor-based collection responses, problem-detail errors,
   request IDs, conditional caching, and weather, analysis, render, radar, RAP,
-  WPC, and colormap resources, including native WPC GeoJSON delivery. It adds
+  and WPC resources, including native WPC GeoJSON delivery. It adds
   configured security headers, strict proxy/origin handling, rate limiting,
   safe access logging, and artifact-path containment; consolidates the former
   Node servers; and retains deprecated v2 and product-route compatibility
   adapters.
-- EWMRS binary chunk delivery: renders now publish sparse RGBA artifacts and
-  gzip-compressed float16 value chunks with versioned indexes and metadata for
-  client-side colormapping and GOES RGB composition.
+- EWMRS binary chunk delivery: renders now publish gzip-compressed float16
+  source-value chunks with versioned indexes and metadata for client-owned
+  styling and GOES RGB composition.
 - Schema-validated YAML configuration catalogs for runtime, historical,
   processing, ingest, rendering, API, filesystem, and tracking settings.
   Deployments can select a complete catalog tree with `--config-dir` or
@@ -63,8 +63,9 @@
   grid analytics use the cycle-scoped external module API.
 - Removed server-side GOES RGB composite rendering; clients compose RGB from
   ABI channel data delivered through EWMRS binary chunks.
-- Deprecated legacy EWMRS PNG routes in favor of binary chunk delivery.
-- Deprecated `/api/v2`, render, WPC, colormap, health, RAP, and NEXRAD API
+- Removed PNG image/tile resources from v3; the legacy EWMRS PNG download and
+  tile routes return `410 Gone` with the v3 chunk successor.
+- Deprecated `/api/v2`, render-discovery, WPC, health, RAP, and NEXRAD API
   routes as compatibility adapters; legacy v1-style `/features` and `/data`
   paths now return `410 Gone`.
 - Removed NEXRAD launch from the old runner and the dead EWMRS tandem worker

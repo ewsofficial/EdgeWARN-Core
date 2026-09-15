@@ -181,7 +181,7 @@ goes_transform:
   # Bilinear is the normal imagery tradeoff; change only after visual validation.
   resampling: bilinear
 
-# Colormap keys must exist in the colormap catalog.
+# Optional client-style identifiers. The API publishes values, not palettes.
 nexrad_gui:
   variable_colormaps:
     DBZH: NWS_Reflectivity

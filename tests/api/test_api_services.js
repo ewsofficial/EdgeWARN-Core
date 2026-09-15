@@ -43,27 +43,15 @@ describe('unified API services', () => {
     await expect(service.getCell('../7')).rejects.toMatchObject({ code: 'INVALID_PATH' });
   });
 
-  it('uses canonical render IDs while preserving storage prefixes', async () => {
+  it('uses canonical render IDs and exposes the chunk representation', async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
     const product = path.join(root, 'gui', 'MRMS_MergedReflectivityQC');
     await fs.mkdir(product, { recursive: true });
-    await fs.writeFile(path.join(product, 'index.json'), '{"timestamps":["20260317-200000"]}');
-    await fs.writeFile(path.join(product, 'MRMS_MergedReflectivityQC_20260317-200000.png'), 'png');
+    const format = { version: 2, encoding: 'float16', file_suffix: '.f16.gz', compression: 'gzip', channels: 1, value_kind: 'scalar', no_data: 'nan', bytes_per_component: 2, pixel_row_order: 'top_to_bottom', grid_origin: 'bottom_left' };
+    await fs.writeFile(path.join(product, 'index.json'), JSON.stringify({ schema_version: 2, timestamps: ['20260317-200000'], representation: 'binary_chunks', chunk_format: format, tile_grid: { rows: 1, cols: 1, tile_size: 2 } }));
     const service = createRenderService(new ArtifactRepository({ gui: path.join(root, 'gui') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT), RENDER_DEFAULTS, 1024);
     await expect(service.listSnapshots('MRMS_MergedReflectivityQC')).resolves.toEqual(['20260317-200000']);
-    const opened = await service.image('MRMS_MergedReflectivityQC', '20260317-200000');
-    await expect(opened.handle.readFile()).resolves.toEqual(Buffer.from('png'));
-    await opened.handle.close();
-  });
-
-  it('uses a product tile grid when a timestamp index omits grid metadata', async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
-    const product = path.join(root, 'gui', 'MRMS_MergedReflectivityQC');
-    await fs.mkdir(path.join(product, '20260317-200000'), { recursive: true });
-    await fs.writeFile(path.join(product, 'index.json'), '{"tile_grid":{"rows":2,"cols":3,"tile_size":256}}');
-    await fs.writeFile(path.join(product, '20260317-200000', 'index.json'), '{"tiles":[[2,1]]}');
-    const service = createRenderService(new ArtifactRepository({ gui: path.join(root, 'gui') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT), RENDER_DEFAULTS, 1024);
-    await expect(service.tiles('MRMS_MergedReflectivityQC', '20260317-200000')).resolves.toEqual({ grid: { rows: 2, cols: 3, tileSize: 256 }, tiles: [[2, 1]] });
+    await expect(service.getProduct('MRMS_MergedReflectivityQC')).resolves.toMatchObject({ representation: 'binary_chunks', grid: { rows: 1, cols: 1, tileSize: 2 } });
   });
 
   it('opens only indexed RGBA chunks with their exact expected length', async () => {

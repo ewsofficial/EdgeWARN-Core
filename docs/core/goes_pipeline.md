@@ -106,7 +106,7 @@ For `source_type="goes_abi"` layers, the pipeline:
 3. loads the ABI radiance payload from `CMI` with `Rad` fallback
 4. converts radiance to reflectance for `C01` through `C06`, or to brightness temperature for `C07` through `C16`
 5. reprojects the normalized array into the GOES Web Mercator target grid
-6. applies the configured colormap
+6. retains the scalar source values after masking
 7. writes tiled float16 value chunks, updates product-level `index.json`, and writes timestamp-level `index.json`
 
 ## Output Layout
@@ -208,8 +208,10 @@ Notes:
   schema-version-2 `index.json`
 - the timestamp index's sparse `chunks` array, sorted by y then x, is the
   authority for available coordinates; omitted chunks are fully transparent
-- legacy `/renders/download` and `/renders/tile` remain PNG-only compatibility
-  routes and do not serve binary chunks
+- visualization palettes are client-owned; the API does not publish a
+  colormap catalog
+- legacy `/renders/download` and `/renders/tile` return `410 Gone` and point
+  clients to the v3 chunk resource
 
 See `docs/api/ewmrs_api_endpoints.md` for route-level behavior.
 

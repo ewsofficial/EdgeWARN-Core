@@ -19,7 +19,7 @@ independently overridable as `--ctam-module-dir`, then
 | --- | --- |
 | `runtime.yaml` | Realtime run bounds, feature switches, retry and supervisor timing. |
 | `historical.yaml` | Historical scan bounds, cadence, and throttling. |
-| `filesystem.yaml` | Platform base-directory defaults, cleanup retention, colormap lookup. |
+| `filesystem.yaml` | Platform base-directory defaults and cleanup retention. |
 | `detection.yaml` | Cell-detection thresholds, masks, expansion, and retention. |
 | `lineage.yaml` | Tracking and lineage matching controls. |
 | `integration.yaml` | Dataset sources, statistics, rounding, and RAP products. |
@@ -45,8 +45,8 @@ PYTHONPATH=src python -m common.config.validate
 ```
 
 The GUI renderer writes float16 chunk artifacts and JSON indexes under
-`<BASE_DIR>/gui`; PNG routes are compatibility endpoints only where legacy PNG
-artifacts exist.
+`<BASE_DIR>/gui`. The retired PNG compatibility routes return `410 Gone`;
+clients consume the v3 float16 chunk resources.
 
 ## Package command
 

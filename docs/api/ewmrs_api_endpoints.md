@@ -7,7 +7,8 @@ These legacy EWMRS routes are compatibility adapters mounted by the unified
 ## API Overview
 
 - Base URL: `/`
-- Response format: JSON for metadata/list routes, PNG for render downloads/tiles, raw binary for RAP Uint16 arrays
+- Response format: JSON for metadata/list routes, gzip-compressed float16 for
+  render chunks, raw binary for RAP Uint16 arrays
 
 There is no separate EWMRS process, port, or configuration surface. These routes
 share the unified service's runtime settings, documented in
@@ -89,88 +90,22 @@ Responses:
 
 ### GET /renders/download?product={product}&timestamp={YYYYMMDD-HHMMSS}
 
-Resolves a rendered PNG in the legacy non-tiled naming format when that file exists:
-
-- `<GUI_DIR>/<product>/<file_prefix>_{timestamp}.png`
-
-This legacy route remains PNG-only. Current GOES and MRMS renderers publish
-binary float16 value chunks through the unified v3 `/api/v3/render-products/.../chunks`
-resources; a missing compatibility PNG returns `404` rather than binary bytes
-under the PNG contract. In practice no current renderer writes these flat PNGs,
-so this route is `404` for freshly rendered products. Responses carry
-`Deprecation: true` and the successor-version `Link`; no `Sunset` header is sent.
+Retired PNG endpoint. It is retained as a migration sentinel and does not read
+runtime artifacts. Responses carry `Deprecation: true` and point clients to the
+v3 OpenAPI contract and float16 chunk successor.
 
 Responses:
 
-- `200`: PNG image
-- `400`: missing `product` or `timestamp`, unknown product, or invalid timestamp
-- `404`: file not found
+- `410`: `{ "code": "RENDER_PNG_REMOVED", ... }`
 
 ### GET /renders/tile?product={product}&timestamp={YYYYMMDD-HHMMSS}[&x={int}&y={int}]
 
-Supports two modes:
-
-- image mode when both `x` and `y` are supplied
-- listing mode when both `x` and `y` are omitted
-
-Image mode downloads a compatibility tile PNG from:
-
-- `<GUI_DIR>/<product>/<timestamp>/tile_{x}_{y}.png`
-
-Tile bounds are validated from the timestamp-level `index.json` `tile_grid` when present, with fallback to the product-level `index.json` `tile_grid`.
-
-Current renderer-written GOES and MRMS products persist:
-
-- `rows=10`
-- `cols=20`
-- `tile_size=350`
-
-If product-level `index.json` is missing, the route falls back to defaults `rows=10`, `cols=20`, `tile_size=350` for coordinate validation.
-
-Listing mode reads `<GUI_DIR>/<product>/<timestamp>/index.json` and filters
-out-of-bounds coordinates. It does not scan the timestamp directory for tile
-filenames.
-
-The key it reads is `tiles`, which is the legacy shape below. Schema-version-2
-indexes written by the current renderers publish `chunks` instead, so a freshly
-rendered product returns a valid `tile_grid` with an empty `tiles` array rather
-than an error — there are no PNG tiles to list. Use the v3 `/chunks` resource for
-those products.
-
-Legacy timestamp-level tile index format:
-
-```json
-{
-  "tiles": [[0, 0], [1, 3], [2, 6]],
-  "tile_grid": {
-    "rows": 10,
-    "cols": 20,
-    "tile_size": 350
-  }
-}
-```
-
-Listing response:
-
-```json
-{
-  "product": "CompRefQC",
-  "timestamp": "20260317-200000",
-  "tile_grid": {
-    "rows": 10,
-    "cols": 20,
-    "tile_size": 350
-  },
-  "tiles": [[0, 0], [1, 3], [2, 6]]
-}
-```
+Retired PNG endpoint. Both its former image and listing modes have been removed;
+clients list chunk coordinates with the v3 `/chunks` resource.
 
 Responses:
 
-- `200`: PNG image in image mode, JSON tile listing in listing mode
-- `400`: missing `product` or `timestamp`, unknown product, invalid timestamp,
-  out-of-bounds coordinates, or only one of `x`/`y` supplied
-- `404`: missing tile file, or missing timestamp `index.json`
+- `410`: `{ "code": "RENDER_PNG_REMOVED", ... }`
 
 ### GET /renders/tile-info?product={product}
 
@@ -401,14 +336,13 @@ Responses:
 - `404`: layer folder, timestamp folder, or `metadata.json` not found
 - `503`: `metadata.json` present but unparseable
 
-`colormap_key` resolves to a same-named internal renderer entry, but it is
-**not** the layer name and not the folder name. Several layers share one key:
+`colormap_key` is an optional client-style hint, not a reference to an API
+palette resource. It is **not** the layer name and not the folder name. Several
+layers share one key:
 `Temperature_2m` and `Temperature_Surface` both resolve to
 `RAP_Temperature_LL`, and both 10 m wind components resolve to `RAP_Wind_LL`.
-Look the key up from the metadata rather than constructing it from the layer
-name. RAP colormaps use NOAA/SPC/GEMPAK lineage palettes where practical source
-tables exist, with documented project fallbacks for variables without a usable
-standard reference.
+Clients may map the hint to a locally versioned palette, but must not construct
+it from the layer name or expect a server-side colormap lookup endpoint.
 
 ### GET /rap/data?layer={layer}&timestamp={YYYYMMDD-HHMM00}
 

@@ -34,8 +34,8 @@ Errors use `application/problem+json`.
 - Renders: `/api/v3/render-products`, and
   `/api/v3/render-products/{productId}/snapshots/{timestamp}/chunks`
   lists sparse float16 value chunks; `/chunks/{x}/{y}` returns the binary payload.
-  The historical `/image` and `/tiles` resources remain PNG-only compatibility
-  endpoints and never relabel a binary chunk as an image.
+  Render products use the `binary_chunks` representation. V3 does not expose
+  `/image` or `/tiles` resources.
 - Radar: `/api/v3/radar-sites`
 - RAP: `/api/v3/models/rap/layers`
 - WPC: `/api/v3/analyses/wpc/surface`
@@ -52,9 +52,11 @@ MRMS and GOES ABI renders publish one-channel float16 value chunks. They are
 gzip-compressed `chunk_{x}_{y}.f16.gz` files under
 `<BASE_DIR>/gui/<product>/<timestamp>/chunks/`. `NaN` is the no-data value;
 gzip uses deterministic metadata and the API sends `Content-Encoding: gzip`.
-Clients apply the published product colormap to the scalar values; GOES RGB
-composites are derived client-side from the raw ABI channel chunks. Chunks
-retain top-to-bottom row order and a bottom-left chunk-grid origin.
+The API publishes source values, not visualization styles. Clients choose and
+version their own color scales for scalar values; there is no public colormap
+catalog. GOES RGB composites are likewise derived client-side from the raw ABI
+channel chunks. Chunks retain top-to-bottom row order and a bottom-left
+chunk-grid origin.
 
 Fetch the `/chunks` listing first. It provides the grid, format descriptor,
 and the authoritative sparse coordinate list—missing coordinates are fully
@@ -87,4 +89,5 @@ The prior `/api/v2`, `/renders`, `/nexrad`, `/rap`, and `/wpc`,
 `/health`, and `/healthz` paths are compatibility adapters on the same
 process. They retain legacy bodies/representations and include `Deprecation:
 true` plus a link to this API contract. New clients should use v3; no data
-route redirects are issued.
+route redirects are issued. The obsolete PNG-producing `/renders/download`
+and `/renders/tile` routes return `410 Gone` with the successor chunk resource.

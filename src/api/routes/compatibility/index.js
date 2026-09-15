@@ -6,6 +6,12 @@ import { streamArtifact } from '../../streamArtifact.js';
 const deprecate = (res) => res.set({ Deprecation: 'true', Link: '</api/v3/openapi.json>; rel="deprecation"' });
 const send = (req, res, opened, type, headers = {}) => streamArtifact(req, res, opened, type, headers);
 const value = (input) => typeof input === 'string' && input ? input : null;
+const renderPngGone = (req, res) => deprecate(res).status(410).json({
+  error: 'PNG render delivery was removed in API v3; use the float16 chunk resources.',
+  code: 'RENDER_PNG_REMOVED',
+  documentation: '/api/v3/openapi.json',
+  successor: '/api/v3/render-products/{productId}/snapshots/{timestamp}/chunks',
+});
 
 export function createCompatibilityRouter({ analysis, renders, ancillary, packageVersion, serviceRegistry }) {
   const requireService = (service) => createServiceGate({
@@ -27,8 +33,8 @@ export function createCompatibilityRouter({ analysis, renders, ancillary, packag
   router.get('/api/v2/data/metar', async (req, res, next) => { try { deprecate(res); const ts = value(req.query.timestamp); if (!ts) return res.json(await analysis.listMetarHours()); const result = await analysis.getMetar(ts); return res.json({ type: 'metar', timestamp: result.requestedTimestamp, data: result.observations }); } catch (e) { next(e); } });
   router.get('/renders/get-items', requireService('ewmrs'), async (req, res, next) => { try { deprecate(res); res.json((await renders.listProducts()).map((item) => item.storageDirectory)); } catch (e) { next(e); } });
   router.get('/renders/fetch', requireService('ewmrs'), async (req, res, next) => { try { deprecate(res); const product = getProductByLegacyId(value(req.query.product)); if (!product) return res.status(404).json({ error: 'Unknown product or no mapping found' }); res.json(await renders.listSnapshots(product.id)); } catch (e) { next(e); } });
-  router.get('/renders/download', requireService('ewmrs'), async (req, res, next) => { try { deprecate(res); const product = getProductByLegacyId(value(req.query.product)); const ts = value(req.query.timestamp); if (!product || !ts) return res.status(400).json({ error: 'Missing product or timestamp parameter' }); await send(req, res, await renders.image(product.id, ts), 'image/png'); } catch (e) { next(e); } });
-  router.get('/renders/tile', requireService('ewmrs'), async (req, res, next) => { try { deprecate(res); const product = getProductByLegacyId(value(req.query.product)); const ts = value(req.query.timestamp); if (!product || !ts) return res.status(400).json({ error: 'Missing required parameters: product, timestamp' }); const hasX = req.query.x !== undefined; const hasY = req.query.y !== undefined; if (hasX !== hasY) return res.status(400).json({ error: 'Missing required parameters: x and y must both be provided together' }); if (!hasX) { const result = await renders.tiles(product.id, ts); return res.json({ product: product.storageDirectory, timestamp: ts, tile_grid: { rows: result.grid.rows, cols: result.grid.cols, tile_size: result.grid.tileSize }, tiles: result.tiles }); } await send(req, res, await renders.tile(product.id, ts, Number(req.query.x), Number(req.query.y)), 'image/png'); } catch (e) { next(e); } });
+  router.get('/renders/download', renderPngGone);
+  router.get('/renders/tile', renderPngGone);
   router.get('/renders/tile-info', requireService('ewmrs'), async (req, res, next) => { try { deprecate(res); const product = getProductByLegacyId(value(req.query.product)); if (!product) return res.status(404).json({ error: 'Unknown product or no mapping found' }); const details = await renders.getProduct(product.id); const timestamps = await renders.listSnapshots(product.id); res.json({ product: product.storageDirectory, rows: details.grid.rows, cols: details.grid.cols, tile_size: details.grid.tileSize, timestamps }); } catch (e) { next(e); } });
   router.get('/nexrad', requireService('nexrad'), async (req, res, next) => { try { deprecate(res); res.json(await ancillary.listRadarSites()); } catch (e) { next(e); } });
   router.get('/nexrad/:site/:timestamp/:elevation', requireService('nexrad'), async (req, res, next) => { try { deprecate(res); const product = value(req.query.product); const opened = await ancillary.radarField(req.params.site, req.params.timestamp, req.params.elevation, product); await send(req, res, opened, 'application/gzip', { 'Content-Disposition': `attachment; filename="${req.params.site}_${req.params.timestamp}_${req.params.elevation}_${product}.bin.gz"` }); } catch (e) { next(e); } });

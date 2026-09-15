@@ -9,7 +9,7 @@ function assertCatalog(entries) {
   const ids = new Set();
   const directories = new Set();
   for (const entry of entries) {
-    if (!entry || !PRODUCT_ID.test(entry.id) || !entry.storageDirectory || !entry.legacyFilePrefix) {
+    if (!entry || !PRODUCT_ID.test(entry.id) || !entry.storageDirectory || !entry.legacyFilePrefix || entry.representation !== 'binary_chunks') {
       throw new Error('Invalid render product catalog entry');
     }
     for (const [set, value, field] of [[ids, entry.id, 'id'], [directories, entry.storageDirectory, 'storageDirectory']]) {

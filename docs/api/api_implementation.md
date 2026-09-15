@@ -31,7 +31,7 @@ src/api/
 │   └── artifactRepository.js   # rooted, symlink-refusing file reads
 ├── services/
 │   ├── analysis.js             # cells, storm snapshots, alerts, METAR
-│   ├── renders.js              # products, snapshots, PNG tiles, float16 chunks
+│   ├── renders.js              # products, snapshots, and float16 chunks
 │   ├── ancillary.js            # NEXRAD, RAP, and WPC
 │   └── validation.js           # identifier validators and pagination
 └── routes/
