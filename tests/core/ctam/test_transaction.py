@@ -60,6 +60,23 @@ def test_invalid_or_host_owned_values_never_change_working_set(tmp_path):
     assert transactions.cells["7"] == before
 
 
+def test_owned_property_key_stays_rewritable_across_cycles(tmp_path):
+    """A module-owned properties key written by a prior cycle (now pre-existing
+    on the cell) must accept a rewrite; a host-owned key must stay frozen."""
+    cell = {"id": "7", "properties": {"morphology": "cluster", "cellstats_severity": 2}, "modules": {}}
+    transactions = CTAMTransactionService(cells=[cell], manifests={"cellstats": manifest(tmp_path)})
+    result = transactions.stage_cell("cellstats", "7", revision=0, operations=[
+        {"op": "replace", "path": "/properties/cellstats_severity", "value": 3},
+    ])
+    assert result["staged_operations"] == 1
+    with pytest.raises(APIError) as error:
+        transactions.stage_cell("cellstats", "7", revision=0, operations=[
+            {"op": "replace", "path": "/modules/CellStats", "value": {}},
+            {"op": "replace", "path": "/properties/morphology", "value": "bad"},
+        ])
+    assert error.value.code == "forbidden_path"
+
+
 def test_stale_revision_is_rejected_before_staging(tmp_path):
     transactions = service(tmp_path)
     transactions.stage_cell("cellstats", "7", revision=0, operations=[{"op": "add", "path": "/modules/CellStats", "value": {}}])

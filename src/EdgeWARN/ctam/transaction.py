@@ -210,7 +210,13 @@ class CTAMTransactionService:
                 raise APIError("invalid_patch", "patch operation requires value", 400)
             if "value" in operation: _json_safe(operation["value"])
             if segments[0] == "properties" and segments[1] in existing.get("properties", {}):
-                raise APIError("forbidden_path", "modules cannot overwrite host-owned properties", 403, pointer=operation.get("path"))
+                # A pre-existing key is host-owned unless this module owns it
+                # (same rule as manifest admission: exactly module_id or
+                # module_id + "_"). Owned keys stay rewritable across cycles;
+                # anything else is never grantable, so it stays frozen.
+                owned = segments[1] == manifest.module_id or segments[1].startswith(f"{manifest.module_id}_")
+                if not owned:
+                    raise APIError("forbidden_path", "modules cannot overwrite host-owned properties", 403, pointer=operation.get("path"))
             destination.append(deepcopy(dict(operation)))
 
     def stage_alert(self, module_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
