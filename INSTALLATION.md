@@ -283,12 +283,26 @@ Build the image and start the default all-service topology:
 docker build -t edgewarn-core:3.0.0 .
 export EDGEWARN_HOST_BASE_DIR=/srv/edgewarn/runtime
 export EDGEWARN_NWS_ASSETS_DIR=/srv/edgewarn/nws-zones
+export EDGEWARN_CTAM_MODULES_DIR=/srv/edgewarn/ctam_modules
 docker run --rm --name edgewarn \
   -v "$EDGEWARN_HOST_BASE_DIR:/var/lib/edgewarn" \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
   -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
+  -v "$EDGEWARN_CTAM_MODULES_DIR:/opt/edgewarn/ctam_modules:ro" \
+  -e EDGEWARN_CTAM_MODULE_DIR=/opt/edgewarn/ctam_modules \
   edgewarn-core:3.0.0
 ```
+
+CTAM modules are operator-owned code and are never baked into the image:
+`ctam_modules/` is gitignored and excluded from the build context, so a
+`COPY` of it would fail the build. Instead, mount the host module directory
+read-only at `/opt/edgewarn/ctam_modules` and point
+`EDGEWARN_CTAM_MODULE_DIR` at it (CLI flag `--ctam-module-dir` wins over the
+variable, which wins over `runtime.yaml run.ctam_module_dir`). An absent host
+directory is a supported empty-module configuration. Validate manifests before
+deploying with `edgewarn --check-ctam-modules --ctam-module-dir
+/srv/edgewarn/ctam_modules`. In Compose these are already wired: set
+`EDGEWARN_CTAM_MODULES_DIR` to choose the host directory.
 
 The image installs a built wheel. `tini` runs as PID 1 and the entrypoint pipes
 the installed `edgewarn` command through `rotatelogs` for persisted, rotated

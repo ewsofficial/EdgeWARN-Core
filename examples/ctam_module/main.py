@@ -22,4 +22,5 @@ for cell in request("/stormcells")["cells"]:
     current = request(f"/stormcells/{cell_id}")
     request(f"/stormcells/{cell_id}", method="PATCH", payload={"revision": current["revision"], "operations": [{"op": "add", "path": "/modules/ExampleStats", "value": {"status": "ok"}}]})
 
+request("/routes/summary", method="PUT", payload={"status": "ok"})
 request("/transaction/commit", method="POST", payload={})

@@ -32,7 +32,10 @@
     "/api/v3/models/rap/layers/{layerId}/snapshots/{timestamp}/metadata": {"get": {"operationId": "getRapMetadata", "parameters": [{"$ref":"#/components/parameters/layerId"}, {"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "RAP metadata"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
     "/api/v3/models/rap/layers/{layerId}/snapshots/{timestamp}/data": {"get": {"operationId": "getRapData", "parameters": [{"$ref":"#/components/parameters/layerId"}, {"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "Uint16 data", "content": {"application/octet-stream": {}}}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
     "/api/v3/analyses/wpc/surface": {"get": {"operationId": "listWpcSurfaceAnalyses", "responses": {"200": {"description": "WPC surface analysis collection"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
-    "/api/v3/analyses/wpc/surface/{timestamp}": {"get": {"operationId": "getWpcSurfaceAnalysis", "parameters": [{"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "Surface analysis GeoJSON", "content": {"application/geo+json": {}}}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}}
+    "/api/v3/analyses/wpc/surface/{timestamp}": {"get": {"operationId": "getWpcSurfaceAnalysis", "parameters": [{"$ref":"#/components/parameters/timestamp"}], "responses": {"200": {"description": "Surface analysis GeoJSON", "content": {"application/geo+json": {}}}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
+    "/api/v3/modules": {"get": {"operationId": "listModules", "responses": {"200": {"description": "Modules declaring public routes", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ModuleCollectionEnvelope"}}}}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
+    "/api/v3/modules/{moduleId}": {"get": {"operationId": "getModule", "parameters": [{"$ref": "#/components/parameters/moduleId"}], "responses": {"200": {"description": "Module descriptor", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ModuleEnvelope"}}}}, "400": {"description": "Malformed identifier (INVALID_PATH)", "$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
+    "/api/v3/modules/{moduleId}/{routeId}": {"get": {"operationId": "getModuleRoute", "parameters": [{"$ref": "#/components/parameters/moduleId"}, {"$ref": "#/components/parameters/routeId"}], "responses": {"200": {"description": "Latest committed module JSON payload", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ModuleRouteEnvelope"}}}}, "400": {"description": "Malformed identifier (INVALID_PATH)", "$ref": "#/components/responses/Problem"}, "404": {"$ref": "#/components/responses/Problem"}, "503": {"description": "EdgeWARN is disabled/stale (SERVICE_NOT_ENABLED), or the declared route has no committed representation (MODULE_ROUTE_UNAVAILABLE)", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}}}}}
   },
   "components": {
     "schemas": {
@@ -57,7 +60,12 @@
           "requestId": {"type": "string"},
           "code": {"type": "string"}
         }
-      }
+      },
+      "ModuleRouteDescriptor": {"type": "object", "required": ["id", "description", "href", "available"], "additionalProperties": false, "properties": {"id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"}, "description": {"type": "string", "maxLength": 256}, "href": {"type": "string"}, "available": {"type": "boolean"}}},
+      "ModuleDescriptor": {"type": "object", "required": ["id", "name", "version", "href", "routes"], "additionalProperties": false, "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "version": {"type": "string"}, "href": {"type": "string"}, "routes": {"type": "array", "items": {"$ref": "#/components/schemas/ModuleRouteDescriptor"}}}},
+      "ModuleCollectionEnvelope": {"type": "object", "required": ["data", "meta"], "additionalProperties": false, "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/ModuleDescriptor"}}, "meta": {"type": "object"}}},
+      "ModuleEnvelope": {"type": "object", "required": ["data", "meta"], "additionalProperties": false, "properties": {"data": {"$ref": "#/components/schemas/ModuleDescriptor"}, "meta": {"type": "object"}}},
+      "ModuleRouteEnvelope": {"type": "object", "required": ["data", "meta"], "additionalProperties": false, "properties": {"data": {}, "meta": {"type": "object", "required": ["moduleId", "moduleVersion", "routeId", "cycleId", "publishedAt"], "properties": {"moduleId": {"type": "string"}, "moduleVersion": {"type": "string"}, "routeId": {"type": "string"}, "cycleId": {"type": "string"}, "publishedAt": {"type": "string", "format": "date-time"}}}}}
     },
     "parameters": {
       "cellId": {"name": "cellId", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -71,6 +79,8 @@
       "source": {"name": "source", "in": "query", "required": true, "schema": {"type": "string", "enum": ["official", "edgewarn"]}},
       "x": {"name": "x", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 0}},
       "y": {"name": "y", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 0}}
+      ,"moduleId": {"name": "moduleId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"}}
+      ,"routeId": {"name": "routeId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"}}
     },
     "responses": {"Problem": {"description": "RFC 9457 problem detail", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}}, "ServiceNotEnabled": {"description": "Required service is not active (SERVICE_NOT_ENABLED; carries service, state, and lastSeen extension members)", "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}}}
   }

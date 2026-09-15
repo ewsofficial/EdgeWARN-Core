@@ -80,7 +80,7 @@ def test_path_attribute_count_and_uniqueness():
     catalog entries onto one baseline token.
     """
     attributes = _path_attributes()
-    assert len(attributes) == 113
+    assert len(attributes) == 111
 
     values = [str(value) for value in attributes.values()]
     assert len(values) == len(set(values))

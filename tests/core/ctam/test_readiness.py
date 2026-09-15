@@ -510,6 +510,29 @@ def test_stormcells_stale_when_snapshot_is_a_different_cycle(cell_dir, tmp_path)
     assert "20260805-115800" in entry.reason
 
 
+def test_stormcells_ready_when_snapshot_uses_iso_timestamp(cell_dir, tmp_path):
+    """The pipeline writes ISO ``latest_timestamp``; the catalog tracks the
+    compact cycle id. A same-cycle snapshot must be ready, not stale."""
+    path = snapshot(tmp_path / "stormcells.json", latest="2026-08-05T12:00:00")
+    catalog = build(stormcell_path=path)
+    entry = sole(catalog, R.KIND_STORMCELLS)
+    assert entry.readiness == R.READY
+
+
+def test_same_cycle_normalizes_iso_and_compact_forms():
+    assert R._same_cycle("2026-08-05T12:00:00", CYCLE_TIME) is True
+    assert R._same_cycle("20260805-120000", CYCLE_TIME) is True
+    assert R._same_cycle("2026-08-05T12:02:00", CYCLE_TIME) is False
+    assert R._same_cycle("not-a-timestamp", CYCLE_TIME) is False
+
+
+def test_external_module_terminal_states_are_defined():
+    """``run.py`` writes these after the external-module phase; a missing
+    constant fails every external module before launch."""
+    assert R.CYCLE_STATE_COMPLETED in R.CYCLE_STATES
+    assert R.CYCLE_STATE_FAILED in R.CYCLE_STATES
+
+
 def test_stormcells_invalid_when_not_json(cell_dir, tmp_path):
     path = tmp_path / "stormcells.json"
     path.write_text("not json {{{", encoding="utf-8")

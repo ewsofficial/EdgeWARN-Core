@@ -2,7 +2,7 @@ import json
 import copy
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
@@ -435,10 +435,10 @@ def _attach_stormprob_inputs(cells, timestamp, input_manifest=None):
 def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_manifest=None, disable_ctam_modules=False):
     if disable_ctam:
         io_manager.write_info("CTAM module execution disabled via command-line flag")
-        return cells
+        return cells, None
 
     try:
-        from EdgeWARN.ctam.run import run_ctam
+        from EdgeWARN.ctam.run import run_ctam_result
 
         io_manager.write_info(f"Running CTAM modules for {len(cells)} cells")
         cycle_id = timestamp
@@ -446,9 +446,9 @@ def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_m
             cycle_id = datetime.fromisoformat(str(timestamp)).strftime("%Y%m%d-%H%M%S")
         except (TypeError, ValueError):
             pass
-        cells = _run_step(
+        ctam_result = _run_step(
             "Integration - CTAM",
-            lambda: run_ctam(
+            lambda: run_ctam_result(
                 cells,
                 timestamp=cycle_id,
                 json_path=json_path,
@@ -456,11 +456,13 @@ def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_m
                 disable_ctam_modules=disable_ctam_modules,
             ),
         )
+        cells = ctam_result.cells
         io_manager.write_debug("CTAM module execution completed successfully")
     except Exception as e:
         io_manager.write_error(f"Failed to run CTAM modules: {e}")
 
-    return cells
+        ctam_result = None
+    return cells, ctam_result
 
 
 def _save_cells(handler, timestamp, cells, json_path):
@@ -468,7 +470,45 @@ def _save_cells(handler, timestamp, cells, json_path):
     handler.write_json(data, json_path)
 
 
-def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None):
+def _public_route_payloads(timestamp, ctam_result):
+    """Build host-owned registry/wrappers while retaining declared LKG routes."""
+    if ctam_result is None:
+        return {}
+    public_root = fs.DATA_DIR / "ctam" / "public"
+    prior = {}
+    try:
+        prior_doc = json.loads((public_root / "registry.json").read_text(encoding="utf-8"))
+        prior = {item["id"]: item for item in prior_doc.get("modules", []) if isinstance(item, dict) and isinstance(item.get("id"), str)}
+    except (OSError, ValueError, TypeError):
+        pass
+    published_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    cycle_id = ctam_result.cycle_id or str(timestamp)
+    payloads = {}
+    modules = []
+    for manifest in ctam_result.manifests:
+        if not manifest.public_routes:
+            continue
+        routes = []
+        for declaration in manifest.public_routes:
+            value = ctam_result.committed_routes.get(manifest.module_id, {}).get(declaration.route_id)
+            prior_path = public_root / "modules" / manifest.module_id / f"{declaration.route_id}.json"
+            was_available = prior_path.is_file() and any(route.get("id") == declaration.route_id and route.get("available") is True for route in prior.get(manifest.module_id, {}).get("routes", []) if isinstance(route, dict))
+            available = value is not None or was_available
+            href = f"/api/v3/modules/{manifest.module_id}/{declaration.route_id}"
+            routes.append({"id": declaration.route_id, "description": declaration.description, "href": href, "available": available})
+            if value is not None:
+                payloads[public_root / "modules" / manifest.module_id / f"{declaration.route_id}.json"] = {
+                    "schema_version": 1, "module_id": manifest.module_id,
+                    "module_version": manifest.version, "route_id": declaration.route_id,
+                    "cycle_id": cycle_id, "published_at": published_at, "data": value,
+                }
+        modules.append({"id": manifest.module_id, "name": manifest.name, "version": manifest.version,
+                        "href": f"/api/v3/modules/{manifest.module_id}", "routes": routes})
+    payloads[public_root / "registry.json"] = {"schema_version": 1, "modules": modules}
+    return payloads
+
+
+def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None, ctam_result=None):
     """Commit StormProb inputs, then publish derived JSON and indexes."""
     from EdgeWARN.ctam.publication import CTAMPublicationCoordinator
     from EdgeWARN.stormprob.database import StormProbRepository, clean_public_projection
@@ -479,7 +519,7 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
         cell.pop("stormprob", None)
     snapshot = CellDataSaver(None, None, None, None, None, None).create_json_structure(timestamp, projected_cells)
     histories = CellHistoryManager(io_manager).prepare_cell_history_updates(projected_cells)
-    payloads = {json_path: snapshot, **histories}
+    payloads = {json_path: snapshot, **histories, **_public_route_payloads(timestamp, ctam_result)}
     manifest_record = None
     if input_manifest is not None:
         manifest_record = {
@@ -574,7 +614,7 @@ def main(
         StormProbRepository().commit_cycle(str(timestamp), timestamp, result_cells)
     except Exception as exc:
         io_manager.write_warning(f"StormProb input commit failed before CTAM: {exc}")
-    result_cells = _run_ctam_if_enabled(
+    ctam_output = _run_ctam_if_enabled(
         result_cells,
         timestamp,
         disable_ctam,
@@ -582,9 +622,15 @@ def main(
         input_manifest=input_manifest,
         disable_ctam_modules=disable_ctam_modules,
     )
+    # Preserve compatibility with tests and integrations that replace the
+    # historical helper and return only the cell list.
+    if isinstance(ctam_output, tuple) and len(ctam_output) == 2:
+        result_cells, ctam_result = ctam_output
+    else:
+        result_cells, ctam_result = ctam_output, None
 
     try:
-        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells, input_manifest))
+        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells, input_manifest, ctam_result))
     except Exception as exc:
         io_manager.write_error(f"Failed to save integrated stormcells to {json_path}: {exc}")
         raise

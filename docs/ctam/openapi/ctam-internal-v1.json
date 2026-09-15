@@ -54,7 +54,7 @@
                   "ctam_ready": true,
                   "module_state": "running",
                   "requirements_satisfied": true,
-                  "allowed_operations": ["read_files", "read_stormcells", "read_history", "patch_stormcells", "patch_history", "commit"],
+                  "allowed_operations": ["read_files", "read_stormcells", "read_history", "patch_stormcells", "patch_history", "stage_alerts", "register_routes", "commit"],
                   "historical": false,
                   "cell_count": 3,
                   "deadline": "2026-08-05T12:00:30+00:00"
@@ -498,6 +498,22 @@
           "409": {"$ref": "#/components/responses/StaleRevision"},
           "413": {"$ref": "#/components/responses/RequestTooLarge"},
           "422": {"$ref": "#/components/responses/InvalidPatch"}
+        }
+      }
+    },
+    "/routes/{routeId}": {
+      "put": {
+        "operationId": "registerCtamRoute",
+        "summary": "Stage or replace inert JSON for a declared public route",
+        "description": "The authenticated caller must declare routeId in module.toml. Data remains private until the transaction commits.",
+        "parameters": [{"name": "routeId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {}, "example": {"risk": "elevated"}}}},
+        "responses": {
+          "200": {"description": "Route payload staged", "content": {"application/json": {"schema": {"$ref": "../schema/response-envelope.schema.json"}, "example": {"api_version": "1", "cycle_id": "20260805-120000", "module_id": "cellstats", "request_id": "req-01HFZ9K3M7R0", "data": {"route_id": "forecast-summary", "bytes": 19}, "errors": []}}}},
+          "400": {"$ref": "#/components/responses/InvalidPatch"},
+          "401": {"$ref": "#/components/responses/AuthenticationFailed"},
+          "403": {"$ref": "#/components/responses/ForbiddenPath"},
+          "413": {"$ref": "#/components/responses/RequestTooLarge"}
         }
       }
     },

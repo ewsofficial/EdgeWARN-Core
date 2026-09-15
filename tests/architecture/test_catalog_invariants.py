@@ -379,19 +379,13 @@ def test_the_api_config_delegates_token_expansion_to_the_shared_loader():
     assert "Invalid api.yaml base_dir.derived" not in source
 
 
-def test_the_filesystem_schema_pattern_names_exactly_the_code_allowlist():
-    """The schema repeats the allowlist so both loaders reject a typo at validation.
-
-    A second owner, so it is pinned to the first. The schema catches the common
-    case (a misspelled token) before any expander runs, and in both languages at
-    once; the expander is what enforces the rules a `pattern` cannot express.
-    """
+def test_the_filesystem_schema_has_no_removed_colormap_search_path():
+    """The server no longer loads a colormap catalog from the filesystem."""
     schema = json.loads(
         (REPO_ROOT / "config/schema/filesystem.schema.json").read_text(encoding="utf-8")
     )
-    pattern = schema["properties"]["colormap_search_path"]["items"]["pattern"]
-    named = re.findall(r"[a-z_]+_dir", pattern)
-    assert named == list(loader.PATH_TOKENS)
+    assert "colormap_search_path" not in schema["properties"]
+    assert "colormap_search_path" not in schema["required"]
 
 
 def test_every_listed_catalog_has_a_file_and_a_schema():

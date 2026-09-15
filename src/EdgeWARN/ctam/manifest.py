@@ -27,6 +27,8 @@ from pathlib import Path
 from .limits import (
     DEFAULT_TIMEOUT_SECONDS,
     MAX_HISTORY_WINDOW,
+    MAX_PUBLIC_ROUTES_PER_MODULE,
+    MAX_PUBLIC_ROUTE_DESCRIPTION_LENGTH,
     MAX_TIMEOUT_SECONDS,
     MIN_TIMEOUT_SECONDS,
     RESERVED_MODULE_IDS,
@@ -51,6 +53,7 @@ SELECTOR_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:*-]{0,191}\Z"
 # The display name becomes the module's `modules.<name>` output key, so it is
 # bounded like one and must not collide with a reserved container key.
 NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z"
+PUBLIC_ROUTE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z"
 
 VALID_SCOPES = ("stormcells", "cycle")
 VALID_WRITE_RESOURCES = ("stormcells.current", "cells.history")
@@ -122,6 +125,14 @@ class ModuleWrite:
 
 
 @dataclass(frozen=True)
+class PublicRoute:
+    """One host-owned public JSON route declared by a module."""
+
+    route_id: str
+    description: str
+
+
+@dataclass(frozen=True)
 class ModuleManifest:
     """The whole manifest, frozen.
 
@@ -144,6 +155,7 @@ class ModuleManifest:
     writes: tuple[ModuleWrite, ...]
     directory: Path
     manifest_path: Path
+    public_routes: tuple[PublicRoute, ...] = ()
 
 
 def parse_selector(raw: str) -> Selector:
@@ -318,6 +330,7 @@ def parse_manifest(manifest_path: Path) -> ModuleManifest:
     after = _require_after(raw, module_id)
     requires = _require_requires(raw)
     writes = _require_writes(raw, module_id, name)
+    public_routes = _require_public_routes(raw)
 
     return ModuleManifest(
         module_id=module_id,
@@ -334,7 +347,48 @@ def parse_manifest(manifest_path: Path) -> ModuleManifest:
         writes=writes,
         directory=directory,
         manifest_path=manifest_path,
+        public_routes=public_routes,
     )
+
+
+def _require_public_routes(raw: dict) -> tuple[PublicRoute, ...]:
+    value = raw.get("public_routes", [])
+    if not isinstance(value, list):
+        raise ManifestError("'public_routes' must be an array of TOML tables written as [[public_routes]]")
+    if len(value) > MAX_PUBLIC_ROUTES_PER_MODULE:
+        raise ManifestError(
+            f"'public_routes' declares {len(value)} routes; at most "
+            f"{MAX_PUBLIC_ROUTES_PER_MODULE} are allowed per module"
+        )
+    routes: list[PublicRoute] = []
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        key = f"public_routes[{index}]"
+        if not isinstance(item, dict):
+            raise ManifestError(f"{key} must be a TOML table")
+        unknown = set(item) - {"id", "description"}
+        if unknown:
+            raise ManifestError(f"{key} has unknown field(s): {', '.join(sorted(unknown))}")
+        route_id = item.get("id")
+        if not isinstance(route_id, str) or not re.fullmatch(PUBLIC_ROUTE_ID_PATTERN, route_id):
+            raise ManifestError(
+                f"{key}.id must be 1-128 characters, start with a letter or digit, "
+                "and contain only letters, digits, '.', '_' and '-'"
+            )
+        if route_id in {".", ".."} or route_id in seen:
+            reason = "is duplicated" if route_id in seen else "is reserved"
+            raise ManifestError(f"{key}.id {route_id!r} {reason}; route ids must be unique safe segments")
+        description = item.get("description")
+        if not isinstance(description, str) or not description or len(description) > MAX_PUBLIC_ROUTE_DESCRIPTION_LENGTH:
+            raise ManifestError(
+                f"{key}.description must be non-empty plain text of at most "
+                f"{MAX_PUBLIC_ROUTE_DESCRIPTION_LENGTH} characters"
+            )
+        if any(ord(character) < 32 or ord(character) == 127 for character in description):
+            raise ManifestError(f"{key}.description must not contain control characters")
+        seen.add(route_id)
+        routes.append(PublicRoute(route_id=route_id, description=description))
+    return tuple(routes)
 
 
 def _is_int(value) -> bool:

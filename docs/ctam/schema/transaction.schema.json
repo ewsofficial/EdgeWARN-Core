@@ -27,6 +27,8 @@
         "stormcell_operations": { "type": "integer", "minimum": 0 },
         "history_operations": { "type": "integer", "minimum": 0 },
         "alerts": { "type": "integer", "minimum": 0 },
+        "routes": { "type": "integer", "minimum": 0 },
+        "route_bytes": { "type": "integer", "minimum": 0 },
         "cells_touched": {
           "description": "Distinct cell IDs the transaction addresses.",
           "type": "array",

@@ -9,7 +9,14 @@ from EdgeWARN.ctam.runner import ExternalModuleRunner
 
 def _manifest(tmp_path: Path, module_id: str, program: str, *, timeout=1):
     folder = tmp_path / module_id; folder.mkdir(); (folder / "main.py").write_text(program)
-    return ModuleManifest(module_id, "Runner" + module_id, "1.0.0", "1", True, False, "stormcells", ("{python}", "main.py"), timeout, (), (ModuleRequirement(Selector("stormcells.current", "stormcells", None, None, "current"), True, None, None),), (ModuleWrite("stormcells.current", "/features/*/modules/Runner" + module_id),), folder, folder / "module.toml")
+    return ModuleManifest(
+        module_id=module_id, name="Runner" + module_id, version="1.0.0", api_version="1",
+        enabled=True, required=False, scope="stormcells", entrypoint=("{python}", "main.py"),
+        timeout_seconds=timeout, after=(),
+        requires=(ModuleRequirement(Selector("stormcells.current", "stormcells", None, None, "current"), True, None, None),),
+        writes=(ModuleWrite("stormcells.current", "/features/*/modules/Runner" + module_id),),
+        directory=folder, manifest_path=folder / "module.toml",
+    )
 
 
 def _catalog():

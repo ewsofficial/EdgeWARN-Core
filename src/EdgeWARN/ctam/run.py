@@ -10,12 +10,26 @@ Provides a single entry point for CTAM processing on storm cell data:
 """
 
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from collections import Counter
 from EdgeWARN.alerts import AlertManager
 from . import discovery, readiness
 from common.ingest.manifest import CycleInputManifest
+from .manifest import ModuleManifest
+from .runner import ModuleRunResult
+
+
+@dataclass(frozen=True)
+class CTAMRunResult:
+    """Cycle output retained by the integration publication boundary."""
+
+    cells: List[Dict[str, Any]]
+    manifests: tuple[ModuleManifest, ...]
+    module_results: tuple[ModuleRunResult, ...]
+    committed_routes: Dict[str, Dict[str, Any]]
+    cycle_id: str | None = None
 
 
 
@@ -68,15 +82,16 @@ def _run_phase1_discovery_dry_run(
 
 def _run_external_modules(cells, timestamp, json_path, input_manifest, *, disabled=False):
     """Execute only already-discovered manifests; legacy built-ins stay separate."""
-    if not timestamp or disabled:
-        return cells
+    if not timestamp:
+        return cells, (), (), {}
+    manifests = {}
     try:
         from .runner import ExternalModuleRunner
         catalog = readiness.build_catalog(cells=cells, timestamp=timestamp, stormcell_path=json_path, input_manifest=input_manifest)
         discovered = discovery.discover_modules()
         manifests = {item.module_id: item.manifest for item in discovered.runnable if item.manifest is not None}
-        if not manifests:
-            return cells
+        if not manifests or disabled:
+            return cells, tuple(manifests.values()), (), {}
         runner = ExternalModuleRunner(catalog=catalog, cells=cells, manifests=manifests)
         results = runner.run()
         result_states = {result.module_id: result.state for result in results}
@@ -94,10 +109,15 @@ def _run_external_modules(cells, timestamp, json_path, input_manifest, *, disabl
                 raise RuntimeError(f"required external CTAM module {result.module_id!r} {result.state}: {result.reason}")
         # Only sealed transactions have made it into the runner's working set.
         by_id = runner.transactions.cells
-        return [by_id.get(str(cell.get("id")), cell) for cell in cells]
+        return (
+            [by_id.get(str(cell.get("id")), cell) for cell in cells],
+            tuple(manifests.values()),
+            tuple(results),
+            runner.transactions.committed_routes(),
+        )
     except Exception as exc:
         print(f"[CTAM] External module execution failed: {exc}")
-        return cells
+        return cells, tuple(manifests.values()), (), {}
 
 
 def _run_builtin_stormprob(cells):
@@ -129,14 +149,14 @@ def _run_builtin_stormprob(cells):
     return success_count, error_count, alert_count
 
 
-def run_ctam(
+def run_ctam_result(
     cells: List[Dict[str, Any]],
     timestamp: Optional[str] = None,
     *,
     json_path: Optional[str] = None,
     input_manifest: Optional[CycleInputManifest] = None,
     disable_ctam_modules: bool = False,
-) -> List[Dict[str, Any]]:
+) -> CTAMRunResult:
     """
     Run CTAM on the provided storm cells.
 
@@ -234,7 +254,7 @@ def run_ctam(
     print(f"[CTAM] Pipeline complete: {cell_success_count} built-in success, {cell_error_count} built-in error(s), {builtin_alert_count} alert(s) in {total_elapsed:.3f}s")
     
     # Generate timestamp snapshot of active alerts if provided
-    cells = _run_external_modules(
+    cells, manifests, module_results, committed_routes = _run_external_modules(
         cells,
         timestamp,
         json_path,
@@ -248,4 +268,22 @@ def run_ctam(
         except Exception as e:
             print(f"[CTAM] Failed to create alert snapshot for {timestamp}: {e}")
 
-    return cells
+    return CTAMRunResult(cells, manifests, module_results, committed_routes, timestamp)
+
+
+def run_ctam(
+    cells: List[Dict[str, Any]],
+    timestamp: Optional[str] = None,
+    *,
+    json_path: Optional[str] = None,
+    input_manifest: Optional[CycleInputManifest] = None,
+    disable_ctam_modules: bool = False,
+) -> List[Dict[str, Any]]:
+    """Compatibility wrapper returning only the updated storm cells."""
+    return run_ctam_result(
+        cells,
+        timestamp,
+        json_path=json_path,
+        input_manifest=input_manifest,
+        disable_ctam_modules=disable_ctam_modules,
+    ).cells

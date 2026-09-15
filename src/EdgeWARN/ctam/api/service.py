@@ -90,7 +90,7 @@ class CTAMReadService:
             "ctam_ready": self.ctam_ready,
             "module_state": "running",
             "requirements_satisfied": evaluation["satisfied"],
-            "allowed_operations": (["read_files", "read_stormcells", "read_history", "patch_stormcells", "patch_history", "stage_alerts", "commit"] if self.transactions else ["read_files", "read_stormcells", "read_history"]),
+            "allowed_operations": (["read_files", "read_stormcells", "read_history", "patch_stormcells", "patch_history", "stage_alerts", "register_routes", "commit"] if self.transactions else ["read_files", "read_stormcells", "read_history"]),
             "historical": self.catalog.historical,
             "cell_count": self.catalog.cell_count,
             "deadline": self.deadline.astimezone(timezone.utc).isoformat() if self.deadline else None,
@@ -165,6 +165,10 @@ class CTAMReadService:
     def stage_alert(self, module_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         if self.transactions is None: raise APIError("unavailable", "mutations are not enabled for this cycle", 409)
         return self.transactions.stage_alert(module_id, payload)
+
+    def stage_route(self, module_id: str, route_id: str, payload: Any) -> dict[str, Any]:
+        if self.transactions is None: raise APIError("unavailable", "mutations are not enabled for this cycle", 409)
+        return self.transactions.stage_route(module_id, route_id, payload)
 
     def history(self, module_id: str, cell_id: str, *, limit: int = DEFAULT_HISTORY_WINDOW, since: str | None = None) -> dict[str, Any]:
         if limit < 1:

@@ -11,7 +11,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from EdgeWARN.ctam.api import CTAMReadService, LoopbackCTAMServer
-from EdgeWARN.ctam.manifest import ModuleManifest, ModuleRequirement, ModuleWrite, Selector
+from EdgeWARN.ctam.manifest import ModuleManifest, ModuleRequirement, ModuleWrite, PublicRoute, Selector
 from EdgeWARN.ctam.readiness import CatalogFile, CTAMCycleCatalog, READY
 from EdgeWARN.ctam.sdk import CTAMAPIError, CTAMClient
 from EdgeWARN.ctam.transaction import CTAMTransactionService
@@ -29,11 +29,11 @@ def api(tmp_path: Path):
             CatalogFile("cell_history:7", "cell_history", None, None, "history", "2026-08-05T12:00:00+00:00", True, True, READY, None, history.stat().st_size, "application/json", history),
         ),
     )
-    manifest = ModuleManifest("reader", "Reader", "1.0.0", "1", True, False, "stormcells", (), 10, (), (
+    manifest = ModuleManifest(module_id="reader", name="Reader", version="1.0.0", api_version="1", enabled=True, required=False, scope="stormcells", entrypoint=(), timeout_seconds=10, after=(), requires=(
         ModuleRequirement(Selector("input:MRMS:VIL_00.50:current", "input", "mrms", "VIL_00.50", "current"), True, None, None),
         ModuleRequirement(Selector("stormcells.current", "stormcells", None, None, "current"), True, None, None),
         ModuleRequirement(Selector("cells.history", "cell_history", None, None, "history"), False, None, None),
-    ), (ModuleWrite("stormcells.current", "/features/*/modules/Reader"),), tmp_path, tmp_path / "module.toml")
+    ), writes=(ModuleWrite("stormcells.current", "/features/*/modules/Reader"),), directory=tmp_path, manifest_path=tmp_path / "module.toml", public_routes=(PublicRoute("summary", "Latest summary"),))
     cells = [{"id": 7, "properties": {"morphology": "cluster"}}]
     service = CTAMReadService(catalog=catalog, cells=cells, manifests={"reader": manifest}, transactions=CTAMTransactionService(cells=cells, manifests={"reader": manifest}))
     with LoopbackCTAMServer(service, tokens={"reader": "test-token"}) as server:
@@ -123,3 +123,19 @@ def test_alerts_are_staged_with_the_module_transaction(api):
     client = CTAMClient(server.url, "test-token")
     assert client.stage_alert({"id": "reader-7", "source": "Reader", "cell_id": 7, "geometry": [[1, 2]]})["staged_alerts"] == 1
     assert client.transaction()["staged"]["alerts"] == 1
+
+
+def test_sdk_put_stages_declared_route_and_rejects_encoded_separators(api):
+    server, _ = api
+    client = CTAMClient(server.url, "test-token")
+    assert "register_routes" in client.cycle()["allowed_operations"]
+    assert client.register_route("summary", {"risk": "elevated"}) == {"route_id": "summary", "bytes": 19}
+    assert client.transaction()["staged"]["routes"] == 1
+    with pytest.raises(CTAMAPIError) as excinfo:
+        client.register_route("not-declared", {})
+    assert excinfo.value.status == 403
+
+    request = Request(server.url + "/routes/a%252Fb", data=b"{}", method="PUT", headers={"Authorization": "Bearer test-token", "Content-Type": "application/json"})
+    with pytest.raises(HTTPError) as excinfo:
+        urlopen(request)
+    assert excinfo.value.code == 400

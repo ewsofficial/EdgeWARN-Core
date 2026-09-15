@@ -68,6 +68,26 @@ exists to remove.
 | `after` | string array | `[]` | Module ids that must run first; `stormprob` is always legal and precedes external modules. Self-dependency rejected here; cycles are detected by discovery. |
 | `[[requires]]` | table list | `[]` | Declared inputs; see below. |
 | `[[writes]]` | table list | — one or more required | Declared output locations; see below. |
+| `[[public_routes]]` | table list | `[]` | Optional public JSON routes. Each requires a unique `id` and `description`; at most 16 are allowed. |
+
+## Public routes
+
+A module may declare host-served, read-only JSON resources without supplying
+HTTP code or filesystem paths:
+
+```toml
+[[public_routes]]
+id = "forecast-summary"
+description = "Latest module forecast summary"
+```
+
+The host derives `/api/v3/modules/<module-id>/<route-id>`. Route ids are 1–128
+characters, start with a letter or digit, and use only letters, digits, `.`,
+`_`, and `-`. Descriptions are required plain text, at most 256 characters, and
+may not contain control characters. Duplicate ids or more than 16 declarations
+make only that module invalid. Modules stage finite JSON through
+`CTAMClient.register_route()` and the representation becomes eligible for
+publication only when the module transaction commits.
 
 ## Requirement selectors
 
