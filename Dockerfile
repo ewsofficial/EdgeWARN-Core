@@ -65,10 +65,18 @@ COPY --chmod=0755 docker/edgewarn-entrypoint.sh /usr/local/bin/edgewarn-entrypoi
 
 ENV PATH="/opt/conda/envs/EdgeWARN/bin:${PATH}" \
     EDGEWARN_BASE_DIR="/var/lib/edgewarn" \
+    EDGEWARN_CONFIG_DIR="/etc/edgewarn/config" \
     EDGEWARN_BUNDLED_NWS_ZONES_DIR="/opt/edgewarn/nws-zones" \
     EDGEWARN_SYNC_NWS_ZONES="${EDGEWARN_SYNC_NWS_ZONES}" \
     PYTHONUNBUFFERED=1 \
     EDGEWARN_LOG_DIR="/var/log/edgewarn"
+
+# Verify bundled configuration and asset lookup without any host mounts.
+RUN python -c "from common.config.loader import validate_all_configs; validate_all_configs()" \
+    && if [ "$EDGEWARN_SYNC_NWS_ZONES" = "true" ]; then \
+        python -c \
+            "from common.ingest.nws.geomapper import ensure_zone_assets; ensure_zone_assets()"; \
+    fi
 
 WORKDIR /opt/edgewarn
 VOLUME ["/var/lib/edgewarn", "/var/log/edgewarn"]

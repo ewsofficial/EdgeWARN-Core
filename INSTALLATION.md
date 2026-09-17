@@ -277,17 +277,46 @@ Child-specific failures are logged with the worker name; the supervisor returns
 
 ## Containers
 
-Build the image and start the default all-service topology:
+The default image contains the installed Python services, dependencies,
+configuration, models, and NWS zone snapshot. Once the image has been published
+to a registry, a recipient only needs Docker to download and start it:
+
+```bash
+# Replace this example with the published image reference.
+IMAGE=your-registry/edgewarn-core:3.0.0
+docker run -d --name edgewarn --restart unless-stopped "$IMAGE"
+```
+
+Docker downloads the image if it is not present locally. No repository checkout,
+Conda installation, configuration files, or host asset directories are required.
+The container starts the EdgeWARN, EWMRS, and NEXRAD processing services with
+the bundled defaults. Live weather ingestion still requires network access.
+The Node.js REST API is a separate deployment and is not started by this image.
+
+For persistent data and logs that can be reused when replacing the container,
+use Docker-managed named volumes (Docker creates them automatically):
+
+```bash
+docker run -d --name edgewarn --restart unless-stopped \
+  -v edgewarn-runtime:/var/lib/edgewarn \
+  -v edgewarn-logs:/var/log/edgewarn \
+  "$IMAGE"
+```
+
+Host mounts below are optional overrides for operators building or customizing
+the image.
+
+Build the image and start the default all-service topology. NWS zone assets
+are downloaded during the build and bundled in the image; no zone asset
+mount or separate initialization step is required:
 
 ```bash
 docker build -t edgewarn-core:3.0.0 .
 export EDGEWARN_HOST_BASE_DIR=/srv/edgewarn/runtime
-export EDGEWARN_NWS_ASSETS_DIR=/srv/edgewarn/nws-zones
 export EDGEWARN_CTAM_MODULES_DIR=/srv/edgewarn/ctam_modules
 docker run --rm --name edgewarn \
   -v "$EDGEWARN_HOST_BASE_DIR:/var/lib/edgewarn" \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
-  -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
   -v "$EDGEWARN_CTAM_MODULES_DIR:/opt/edgewarn/ctam_modules:ro" \
   -e EDGEWARN_CTAM_MODULE_DIR=/opt/edgewarn/ctam_modules \
   edgewarn-core:3.0.0
@@ -321,19 +350,16 @@ docker run --rm \
   --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
-  -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
   edgewarn-core:3.0.0 run core --config-path /etc/edgewarn/config
 docker run --rm \
   --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
-  -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
   edgewarn-core:3.0.0 run ewmrs --config-path /etc/edgewarn/config
 docker run --rm \
   --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
-  -v "$EDGEWARN_NWS_ASSETS_DIR:/etc/edgewarn/assets/nws_zones:ro" \
   edgewarn-core:3.0.0 run nexrad --config-path /etc/edgewarn/config
 ```
 
@@ -395,8 +421,9 @@ Historical-processing note:
 
 `edgewarn sync-nws-zones` refreshes `assets/nws_zones` from the NWS zone and UGC APIs in both source and installed deployments. The repository script remains a compatibility wrapper.
 
-The `assets/nws_zones/` directory is **not** part of the repository. It must
-be synchronized before starting a pipeline that ingests NWS alerts. If it is
+The `assets/nws_zones/` directory is **not** part of the repository. Native
+installations must synchronize it before starting a pipeline that ingests
+NWS alerts; Docker images bundle a snapshot by default. If it is
 missing, the geomapper raises an error that directs the operator to this
 script. A full initial sync is roughly 8,600 zone codes at ~20 requests/second,
 so allow about seven minutes the first time.
@@ -410,19 +437,18 @@ For a native installation:
 edgewarn sync-nws-zones --apply
 ```
 
-For Compose, initialize the host-mounted asset directory before starting the
-default topology:
+For Compose, optionally initialize or refresh the host-mounted asset directory
+to override the image's bundled snapshot:
 
 ```bash
 docker compose --profile admin run --rm edgewarn-sync-nws-zones
 docker compose up edgewarn
 ```
 
-Alternatively, enable the build-time sync switch to bundle a fresh snapshot in
-the image:
+Normal Docker and Compose builds bundle the snapshot automatically:
 
 ```bash
-EDGEWARN_SYNC_NWS_ZONES=true docker compose build edgewarn
+docker compose build edgewarn
 docker compose up edgewarn
 ```
 
@@ -430,8 +456,15 @@ With BuildKit (the default builder used by current Docker Compose), the zone
 download stage runs independently and in parallel with the runtime Conda
 environment solve. The normal host-mounted zone directory still takes
 precedence when it contains synchronized assets; the bundled snapshot is used
-as a fallback when that mount is empty. The switch defaults to `false` so
-ordinary builds do not contact the NWS zone APIs.
+as a fallback when that mount is empty. The switch defaults to `true`, so
+the first build requires access to the NWS zone APIs. Docker can reuse the
+cached download layer on subsequent builds; use `docker compose build
+--no-cache edgewarn` to force a fresh snapshot. The build also verifies that
+the installed application can find the bundled assets.
+
+To skip bundling, use `docker build --build-arg EDGEWARN_SYNC_NWS_ZONES=false -t edgewarn-core:3.0.0 .`
+or set `EDGEWARN_SYNC_NWS_ZONES=false` for the Compose build. In that case,
+synchronize and mount the host asset directory before running EWMRS.
 
 Set `EDGEWARN_NWS_ASSETS_DIR` to relocate the host asset directory; it defaults
 to `./assets/nws_zones` and is mounted read-only into the runtime container.
