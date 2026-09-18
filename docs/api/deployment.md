@@ -29,7 +29,7 @@ supervisor. Direct service commands remain independently operable, but the
   primary runs usefully alone; the EWMRS record consumer waits for primary
   records, while accessory ingest/render loops continue independently; NEXRAD
   is fully independent.
-- Stopping EWMRS affects aggregate EWMRS availability. METAR compatibility
+- Stopping EWMRS affects aggregate EWMRS availability. METAR v3
   routes are currently ungated, so route-specific METAR/NWS degradation is not
   exposed by the API.
 - Recommended stop order: launcher/API clients last, services first. Each

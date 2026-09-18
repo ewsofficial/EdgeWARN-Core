@@ -44,10 +44,6 @@ ROUTE_SERVICE_REQUIREMENTS: dict[str, str] = {
     "/api/v3/models/rap": "ewmrs",
     "/api/v3/analyses/wpc": "ewmrs",
     "/api/v3/radar-sites": "nexrad",
-    "/renders": "ewmrs",
-    "/wpc": "ewmrs",
-    "/rap": "ewmrs",
-    "/nexrad": "nexrad",
 }
 
 #: Heartbeat states reported by :func:`classify_heartbeat_state`.

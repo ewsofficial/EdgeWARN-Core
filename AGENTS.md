@@ -238,8 +238,8 @@ At runtime, the code expects a base directory that typically looks like this:
 
 ### API Development
 - The unified API exposes `/api/v3`, `/api/v3/openapi.json`, `/health/live`, and `/health/ready`
-- Legacy `/api/v2`, `/renders/*`, `/wpc/*`, `/colormaps`, `/healthz`, `/rap/*`, and `/nexrad/*` paths remain compatibility adapters during migration
-- Legacy v1-style `/features` and `/data` routes return HTTP 410
+- Only `/api/v3` data endpoints are served; legacy `/api/v2`, `/renders/*`, `/wpc/*`, `/colormaps`, `/health`, `/healthz`, `/rap/*`, and `/nexrad/*` endpoints are removed and return HTTP 404
+- Legacy `/api/v1`, `/features`, and `/data` handlers are removed and return HTTP 404
 - Document public API changes in `docs/api/api_endpoints.md` and related docs
 
 ### Configuration Management

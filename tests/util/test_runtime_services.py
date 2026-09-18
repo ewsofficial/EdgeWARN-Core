@@ -64,9 +64,9 @@ class TestRegistry:
         assert required_service_for_route("/api/v3/cells") == "edgewarn"
         assert required_service_for_route("/api/v3/cells/ABC123") == "edgewarn"
         assert required_service_for_route("/api/v3/radar-sites/KOAX") == "nexrad"
-        assert required_service_for_route("/renders/latest") == "ewmrs"
-        # A longer unrelated prefix must not be shadowed by a shorter one.
-        assert required_service_for_route("/nexrad/sites") == "nexrad"
+        assert required_service_for_route("/renders/latest") is None
+        # Removed legacy families no longer declare a service dependency.
+        assert required_service_for_route("/nexrad/sites") is None
 
     def test_unknown_routes_have_no_requirement(self):
         assert required_service_for_route("/health/live") is None

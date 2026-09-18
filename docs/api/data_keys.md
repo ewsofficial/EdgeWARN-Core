@@ -1,7 +1,6 @@
 # EdgeWARN API Data Keys
 
-This document describes legacy backing-file shapes served by compatibility
-routes in `src/api/`. The primary v3 API wraps most JSON resources in `data` and
+This document describes backing-file shapes used by the v3 API. The v3 API wraps most JSON resources in `data` and
 `meta`, transforms METAR responses, and serves WPC detail as native GeoJSON;
 those v3 contracts are documented in `docs/api/unified_v3.md` and OpenAPI.
 
@@ -11,14 +10,14 @@ When a route serves a file directly, the response shape is usually the same as t
 
 ### `cells/cell_index.json`
 
-Used by `GET /api/v2/features/cells` without an `id` query.
+Used by `GET /api/v3/cells`.
 
 - `cellIds` (`number[]`): Sorted list of known cell IDs.
 - `lastUpdated` (`string`): ISO 8601 timestamp for when the index was last written.
 
 ### `cells/{id}.json`
 
-Used by `GET /api/v2/features/cells?id={id}`.
+Used by `GET /api/v3/cells/:cellId` and the backing cell history lookup.
 
 This file is a history array served as-is. Each array item is a detection or
 tracking snapshot; the exact fields depend on the pipeline. Common keys include:
@@ -40,14 +39,14 @@ tracking snapshot; the exact fields depend on the pipeline. Common keys include:
 
 ### `stormcells/stormcell_index.json`
 
-Used by `GET /api/v2/features/timestamps` without a `timestamp` query.
+Used by `GET /api/v3/storm-snapshots`.
 
 - `timestamps` (`string[]`): Sorted list of available snapshot timestamps in `YYYYMMDD-HHMMSS` format.
 - `lastUpdated` (`string`): ISO 8601 timestamp for when the index was last written.
 
 ### `stormcells/stormcells_{timestamp}.json`
 
-Used by `GET /api/v2/features/timestamps?timestamp={YYYYMMDD-HHMMSS}`.
+Used by `GET /api/v3/storm-snapshots/:timestamp`.
 
 This file is served as-is. The current producer writes a wrapper with
 `source`, `product`, `version`, `latest_timestamp`, and `features`; the storm
@@ -58,7 +57,7 @@ cell records are the items in `features[]`. Do not assume a top-level
 
 ### `Alerts/official/ids/{safe_alert_id}.json`
 
-Used by `GET /api/v2/features/alerts/official?id={id}`.
+Used by `GET /api/v3/alerts/:alertId?source=official`.
 
 The stored file is a registry entry. The API normally returns the nested `feature` object when it exists.
 
@@ -78,7 +77,7 @@ Common keys inside `feature`:
 
 ### `Alerts/official/timestamps/{timestamp}.json`
 
-Backs `GET /api/v2/features/alerts/official?timestamp={YYYYMMDD-HHMMSS}`.
+Backs `GET /api/v3/alert-snapshots/:timestamp?source=official`.
 
 The on-disk file is a wrapper object, but the API response returns only the `alerts` array from that object. If the timestamp file is absent, the API returns `[]`.
 
@@ -99,7 +98,7 @@ Each item in `alerts` contains:
 
 ### `Alerts/EdgeWARN/ids/{safe_alert_id}.json`
 
-Used by `GET /api/v2/features/alerts/edgewarn?id={id}`.
+Used by `GET /api/v3/alerts/:alertId?source=edgewarn`.
 
 - `alert_type` (`string`): Alert category such as `severe_weather` or `flash_flood`.
 - `source` (`string`): Producing CTAM module.
@@ -113,7 +112,7 @@ Used by `GET /api/v2/features/alerts/edgewarn?id={id}`.
 
 ### `Alerts/EdgeWARN/timestamps/{timestamp}.json`
 
-Backs `GET /api/v2/features/alerts/edgewarn?timestamp={YYYYMMDD-HHMMSS}`.
+Backs `GET /api/v3/alert-snapshots/:timestamp?source=edgewarn`.
 
 The on-disk file is a wrapper object, but the API response returns only the `alerts` array from that object. If the timestamp file is absent, the API returns `[]`.
 
@@ -130,7 +129,7 @@ Each item in `alerts` contains:
 
 ### `METAR/METAR_{YYYYMMDD-HH}z.json`
 
-Used by `GET /api/v2/data/metar?timestamp={YYYYMMDD-HHMMSS}`.
+Used by `GET /api/v3/observations/metar/:timestamp`.
 
 The producer writes an array of parsed observation objects. Common fields are
 `observation_time`, `station`, `coordinates`, `wind`, `visibility`,

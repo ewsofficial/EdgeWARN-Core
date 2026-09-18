@@ -22,8 +22,3 @@ function assertCatalog(entries) {
 
 export const productCatalog = assertCatalog(catalog);
 export const productById = new Map(productCatalog.map((product) => [product.id, product]));
-export const productByLegacyId = new Map(productCatalog.map((product) => [product.storageDirectory, product]));
-
-export function getProductByLegacyId(legacyId) {
-  return productByLegacyId.get(legacyId) || null;
-}

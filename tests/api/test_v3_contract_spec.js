@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { productCatalog, productById, productByLegacyId } from '../../src/api/config/productCatalog.js';
+import { productCatalog, productById } from '../../src/api/config/productCatalog.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -31,13 +31,11 @@ describe('unified API contract specification', () => {
     }
   });
 
-  it('has a collision-free canonical product catalog with legacy parity', () => {
+  it('has a collision-free canonical product catalog', () => {
     expect(productCatalog).toHaveLength(32);
     expect(productById.size).toBe(productCatalog.length);
-    expect(productByLegacyId.size).toBe(productCatalog.length);
     expect(productById.get('MRMS_MergedReflectivityQC').storageDirectory).toBe('MRMS_MergedReflectivityQC');
     expect(productById.get('GOES_ABI_C13_BrightnessTemp').legacyFilePrefix).toBe('GOES_ABI_C13_BrightnessTemp');
-    expect(productByLegacyId.get('MRMS_QPE').id).toBe('MRMS_QPE');
     expect(productById.get('goes-rgb-true-color')).toBeUndefined();
     expect(productCatalog.every((product) => product.representation === 'binary_chunks')).toBe(true);
   });

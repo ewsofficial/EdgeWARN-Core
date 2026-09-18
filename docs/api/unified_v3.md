@@ -11,7 +11,7 @@ is available through the `X-Request-Id` response header rather than the body,
 so cacheable JSON responses keep a stable body and support conditional `GET`
 (`ETag`/`If-None-Match` → `304`).
 Standard v3 application errors use `application/problem+json`; rate-limit,
-timeout, and legacy compatibility responses may use ordinary JSON envelopes.
+and timeout responses may use ordinary JSON envelopes.
 
 ## Runtime configuration
 
@@ -77,12 +77,12 @@ HEAD.
 const listing = await (await fetch(chunkListUrl)).json();
 const response = await fetch(chunkUrl);
 const bytes = new Uint16Array(await response.arrayBuffer());
-if (bytes.byteLength !== 350 * 350 * 2) throw new Error('invalid float16 scalar chunk');
+if (bytes.byteLength !== 700 * 700 * 2) throw new Error('invalid float16 scalar chunk');
 // Interpret as float16 (or upload as half-float); grid y=0 is the bottom row.
 ```
 
-One float16 component is two bytes, so a `350 x 350` single-channel chunk is
-`245000` bytes and `bytes.length` is `122500`. Compare `byteLength`, not
+One float16 component is two bytes, so a `700 x 700` single-channel chunk is
+`980000` bytes and `bytes.length` is `490000`. Compare `byteLength`, not
 element count, against `width * height * channels * 2`.
 
 These float16 value chunks are distinct from RAP `data.u16` scalar arrays and NEXRAD
@@ -90,9 +90,10 @@ These float16 value chunks are distinct from RAP `data.u16` scalar arrays and NE
 
 ## Migration
 
-The prior `/api/v2`, `/renders`, `/nexrad`, `/rap`, and `/wpc`,
-`/health`, and `/healthz` paths are compatibility adapters on the same
-process. They retain legacy bodies/representations and include `Deprecation:
-true` plus a link to this API contract. New clients should use v3; no data
-route redirects are issued. The obsolete PNG-producing `/renders/download`
-and `/renders/tile` routes return `410 Gone` with the successor chunk resource.
+All legacy endpoints have been removed: `/api/v2`, `/renders/*`, `/nexrad`,
+`/nexrad/*`, `/rap/*`, `/wpc/*`, `/colormaps`, `/health`, and `/healthz`.
+The former `/api/v1`, `/features`, `/data`, and PNG retirement handlers are
+also removed. These paths now return `404 Not Found`, without redirects or
+deprecation headers. Clients must use the v3 resources documented above.
+The operational `/health/live` and `/health/ready` endpoints, root discovery,
+and `/robots.txt` remain available.

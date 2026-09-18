@@ -16,10 +16,6 @@ export const ROUTE_SERVICE_REQUIREMENTS = {
   '/api/v3/models/rap': 'ewmrs',
   '/api/v3/analyses/wpc': 'ewmrs',
   '/api/v3/radar-sites': 'nexrad',
-  '/renders': 'ewmrs',
-  '/wpc': 'ewmrs',
-  '/rap': 'ewmrs',
-  '/nexrad': 'nexrad',
 };
 
 const SERVICE_STATES = ['active', 'stale', 'disabled', 'degraded', 'unsupported-schema'];

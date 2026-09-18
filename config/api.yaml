@@ -66,7 +66,7 @@ query:
   limit_pattern: '^(?:[1-9][0-9]{0,2}|1000)$'
 
 render_defaults:
-  grid: {rows: 10, cols: 20, tile_size: 350}
+  grid: {rows: 5, cols: 10, tile_size: 700}
 
   # Hard safety ceiling for artifact metadata; keep aligned with renderer capabilities.
   grid_maxima: {rows: 100, cols: 100, tile_size: 4096}

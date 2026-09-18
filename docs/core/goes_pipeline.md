@@ -92,11 +92,11 @@ Since the decomposition, `goes_render_loop()` is a poll-based EWMRS-owned loop: 
 GOES products are reprojected from the native ABI fixed grid into a CONUS-focused `EPSG:3857` target grid.
 
 - output raster shape: `3500 x 7000`
-- tile grid written by the renderer: `10 x 20`
-- tile size: `350` pixels
-- tile grid capacity per completed product: `200`
+- tile grid written by the renderer: `5 x 10`
+- tile size: `700` pixels
+- tile grid capacity per completed product: `50`
 
-The renderers persist the tile grid into each product `index.json` and each timestamp folder's `index.json`. The EWMRS API falls back to the current `10 x 20` / `350px` grid for product metadata, but chunk requests still require a valid product-level index.
+The renderers persist the tile grid into each product `index.json` and each timestamp folder's `index.json`. The EWMRS API falls back to the current `5 x 10` / `700px` grid for product metadata, but chunk requests still require a valid product-level index.
 
 ### Single-channel render path
 
@@ -150,9 +150,9 @@ Current product-level `index.json` format for rendered products is:
     "media_type": "application/octet-stream"
   },
   "tile_grid": {
-    "rows": 10,
-    "cols": 20,
-    "tile_size": 350
+    "rows": 5,
+    "cols": 10,
+    "tile_size": 700
   }
 }
 ```
@@ -178,11 +178,11 @@ Current timestamp-level `index.json` format is:
     "grid_origin": "bottom_left"
   },
   "tile_grid": {
-    "rows": 10,
-    "cols": 20,
-    "tile_size": 350
+    "rows": 5,
+    "cols": 10,
+    "tile_size": 700
   },
-  "chunks": [[0, 0], [1, 3], [2, 6]]
+  "chunks": [[0, 0], [1, 3], [2, 4]]
 }
 ```
 

@@ -113,7 +113,7 @@ Current API surfaces:
 
 - v3: `/api/v3` and `/api/v3/openapi.json`
 - Health: `/health/live`, `/health/ready`
-- Legacy EdgeWARN and EWMRS paths remain compatibility adapters during migration
+- Legacy EdgeWARN and EWMRS endpoints are removed and return 404; use `/api/v3`
 
 CLI and environment overrides:
 

@@ -98,12 +98,12 @@ describe('service registry scanner', () => {
   it('maps route families to exactly one required service by longest prefix', () => {
     expect(requiredServiceForRoute('/api/v3/radar-sites')).toBe('nexrad');
     expect(requiredServiceForRoute('/api/v3/radar-sites/KTLX/scans/20240101-120000/elevations/0.5/products/DBZH')).toBe('nexrad');
-    expect(requiredServiceForRoute('/nexrad/KTLX')).toBe('nexrad');
+    expect(requiredServiceForRoute('/nexrad/KTLX')).toBeNull();
     expect(requiredServiceForRoute('/api/v3/cells')).toBe('edgewarn');
     expect(requiredServiceForRoute('/api/v3/render-products')).toBe('ewmrs');
     expect(requiredServiceForRoute('/api/v3/models/rap/layers')).toBe('ewmrs');
     expect(requiredServiceForRoute('/api/v3/analyses/wpc/surface')).toBe('ewmrs');
-    expect(requiredServiceForRoute('/renders/get-items')).toBe('ewmrs');
+    expect(requiredServiceForRoute('/renders/get-items')).toBeNull();
     expect(requiredServiceForRoute('/health/ready')).toBeNull();
   });
 });
@@ -139,14 +139,11 @@ describe('SERVICE_NOT_ENABLED gating for the ewmrs route family', () => {
     return app;
   }
 
-  it('returns the legacy envelope on /renders and problem+json on v3 render routes when ewmrs is disabled', async () => {
+  it('returns problem+json on v3 render routes when ewmrs is disabled', async () => {
     const app = await createAppWithBaseDir();
     const v3 = await request(app).get('/api/v3/render-products').expect(503).expect('Content-Type', /application\/problem\+json/);
     expect(v3.body).toMatchObject({ code: 'SERVICE_NOT_ENABLED', service: 'ewmrs', state: 'disabled' });
 
-    const legacy = await request(app).get('/renders/get-items').expect(503);
-    expect(legacy.body.success).toBe(false);
-    expect(legacy.body.error).toMatchObject({ code: 'SERVICE_NOT_ENABLED', service: 'ewmrs', state: 'disabled', last_seen: null });
   });
 
   it('serves render routes normally when ewmrs heartbeats as active', async () => {
@@ -222,20 +219,18 @@ describe('SERVICE_NOT_ENABLED gating for the nexrad route family', () => {
     await request(app).get('/api/v3/radar-sites/KTLX/availability').expect(503);
   });
 
-  it('distinguishes stale from disabled with last_seen evidence', async () => {
+  it('distinguishes stale from disabled with lastSeen evidence', async () => {
     const app = await createAppWithBaseDir();
     const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     await writeHeartbeat(baseDir, 'nexrad', freshHeartbeat({ updated_at: staleTime }));
     resetServiceStateCache();
 
-    const legacy = await request(app).get('/nexrad').expect(503);
-    expect(legacy.body.success).toBe(false);
-    expect(legacy.body.error).toEqual({
+    const response = await request(app).get('/api/v3/radar-sites').expect(503);
+    expect(response.body).toMatchObject({
       code: 'SERVICE_NOT_ENABLED',
-      message: 'Required service is not active',
       service: 'nexrad',
       state: 'stale',
-      last_seen: staleTime,
+      lastSeen: staleTime,
     });
   });
 
