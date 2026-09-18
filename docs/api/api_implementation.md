@@ -1,9 +1,8 @@
 # EdgeWARN Unified API Technical Implementation
 
 The live Express implementation is `src/api/`, started with `npm run api` (or
-`npm run debug:api`). It serves `/api/v3` as its primary contract and retains
-the `/api/v2`, `/renders`, `/nexrad`, `/rap`, `/wpc`, `/health`,
-and `/healthz` paths as compatibility adapters in the same process.
+`npm run debug:api`). It serves `/api/v3` as its only data API contract.
+Legacy endpoints have been removed and return `404 Not Found`.
 
 There is no `src/EdgeWARN/api` or `src/EWMRS/api` tree; both were removed in
 commit `a3d6cbb`. Route-level contracts live in `docs/api/api_endpoints.md` and
@@ -38,8 +37,7 @@ src/api/
 │   ├── serviceRegistry.js       # heartbeat classification and route map
 │   └── validation.js           # identifier validators and pagination
 └── routes/
-    ├── v3/index.js
-    └── compatibility/index.js
+    └── v3/index.js
 ```
 
 ## Startup
@@ -85,7 +83,6 @@ then the routes:
 - `GET /health/ready` — `200` or `503` after stat-ing the `data`, `gui`, and
   `wpc` roots
 - the `/api/v3` router
-- the compatibility router
 - `notFound`, then the error handler
 
 ### Access log
@@ -185,8 +182,7 @@ the `ArtifactError` code — `NOT_FOUND` is `404`, `INVALID_ARTIFACT`,
 responses is replaced with a fixed string so internal paths and parser messages
 are not disclosed.
 
-Compatibility gates, retired PNG routes, legacy validation, rate limiting, and
-request timeout responses deliberately use ordinary JSON bodies rather than
+Rate limiting and request timeout responses use ordinary JSON bodies rather than
 problem+json.
 
 ## Environment Variables
@@ -215,11 +211,11 @@ bypass per-client rate limiting.
 
 - `npm run api` — default port `5000`
 - `npm run debug:api` — `--debug-server`, port `3001`
-- EdgeWARN and EWMRS compatibility routes are served by that same process
+- EdgeWARN and EWMRS products are served through v3 in that same process
 
 See also:
 
 - `docs/api/unified_v3.md` (v3 contract and the binary chunk format)
-- `docs/api/api_endpoints.md` (v2 compatibility routes)
-- `docs/api/ewmrs_api_endpoints.md` (EWMRS compatibility routes)
+- `docs/api/api_endpoints.md` (supported endpoints)
+- `docs/api/ewmrs_api_endpoints.md` (EWMRS endpoint migration)
 - `docs/core/configuration.md` (which catalog owns which setting)

@@ -11,7 +11,7 @@ is available through the `X-Request-Id` response header rather than the body,
 so cacheable JSON responses keep a stable body and support conditional `GET`
 (`ETag`/`If-None-Match` → `304`).
 Standard v3 application errors use `application/problem+json`; rate-limit,
-timeout, and legacy compatibility responses may use ordinary JSON envelopes.
+and timeout responses may use ordinary JSON envelopes.
 
 ## Runtime configuration
 
@@ -90,9 +90,10 @@ These float16 value chunks are distinct from RAP `data.u16` scalar arrays and NE
 
 ## Migration
 
-The prior `/api/v2`, `/renders`, `/nexrad`, `/rap`, and `/wpc`,
-`/health`, and `/healthz` paths are compatibility adapters on the same
-process. They retain legacy bodies/representations and include `Deprecation:
-true` plus a link to this API contract. New clients should use v3; no data
-route redirects are issued. The obsolete PNG-producing `/renders/download`
-and `/renders/tile` routes return `410 Gone` with the successor chunk resource.
+All legacy endpoints have been removed: `/api/v2`, `/renders/*`, `/nexrad`,
+`/nexrad/*`, `/rap/*`, `/wpc/*`, `/colormaps`, `/health`, and `/healthz`.
+The former `/api/v1`, `/features`, `/data`, and PNG retirement handlers are
+also removed. These paths now return `404 Not Found`, without redirects or
+deprecation headers. Clients must use the v3 resources documented above.
+The operational `/health/live` and `/health/ready` endpoints, root discovery,
+and `/robots.txt` remain available.

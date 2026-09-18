@@ -10,7 +10,7 @@ It ingests operational weather datasets, processes storm-cell products, renders 
 - EdgeWARN storm-cell detection, optional tracking/lineage, integration, CTAM analytics, and alert generation
 - EWMRS raster rendering, tiling, and WPC surface-analysis serving
 - Historical reprocessing via `src/process_historical.py`
-- One versioned file-backed API at `/api/v3`, with legacy EdgeWARN and EWMRS paths retained as temporary compatibility adapters
+- One versioned file-backed API at `/api/v3`; legacy EdgeWARN and EWMRS endpoints are removed
 
 ## Requirements
 

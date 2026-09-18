@@ -40,7 +40,6 @@ describe('unified API app', () => {
     const root = await request(app).get('/').expect(200);
     expect(root.body.links.api).toBe('/api/v3');
     expect(root.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains');
-    await request(app).get('/api/v2').expect(200).expect((response) => expect(response.body.version).toBe(root.body.version));
     await request(app).get('/robots.txt').expect(200).expect('Content-Type', /text\/plain/);
     const live = await request(app).get('/health/live').expect(200);
     expect(live.body.config).toMatchObject({
@@ -59,11 +58,6 @@ describe('unified API app', () => {
     await request(app).get('/api/v3/cells?cursor=4&cursor=5').expect(400);
     await request(app).get('/api/v3/cells?unexpected=yes').expect(400);
     await request(app).post('/api/v3/cells').expect(405).expect('Allow', 'GET, HEAD');
-    const legacyCells = await request(app).get('/api/v2/features/cells').expect(200);
-    expect(legacyCells.body).toEqual(['4']);
-    expect(legacyCells.headers.deprecation).toBe('true');
-    await request(app).get('/api/v1').expect(410);
-    await request(app).get('/api/v1/features').expect(410);
     const missing = await request(app).get('/nope').expect(404);
     expect(missing.headers['content-type']).toContain('application/problem+json');
     const discovery = await request(app).get('/api/v3').expect(200);
@@ -145,9 +139,6 @@ describe('unified API app', () => {
     expect(renderProduct.body.data.representation).toBe('binary_chunks');
     await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/image').expect(404);
     await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/tiles').expect(404);
-    const retiredDownload = await request(app).get('/renders/download?product=MRMS_MergedReflectivityQC&timestamp=20260317-200000').expect(410);
-    expect(retiredDownload.body.code).toBe('RENDER_PNG_REMOVED');
-    await request(app).get('/renders/tile?product=MRMS_MergedReflectivityQC&timestamp=20260317-200000').expect(410);
     const chunk = await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/chunks/0/0').expect(200).expect('Content-Type', /application\/octet-stream/);
     expect(chunk.headers['cache-control']).toContain('immutable');
     expect(chunk.headers['x-data-type']).toBe('float16');
@@ -191,8 +182,6 @@ describe('unified API app', () => {
     const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0', NODE_ENV: 'production' }, argv: [] });
     const root = await request(app).get('/').expect(200);
     expect(root.body.version).toBe('2.x');
-    const v2 = await request(app).get('/api/v2').expect(200);
-    expect(v2.body.version).toBe('2.x');
   });
 
   it('allows configured CORS origins and rejects other origins independently', async () => {
@@ -220,17 +209,34 @@ describe('unified API app', () => {
     await Promise.all(['data', 'gui', 'wpc'].map((directory) => fs.mkdir(path.join(baseDir, directory))));
     const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '1', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
     await request(app).get('/').expect(200);
-    await request(app).get('/health').expect(429);
+    await request(app).get('/health/live').expect(429);
   });
 
-  it('preserves distinct legacy health response shapes', async () => {
+  it('returns 404 for every removed legacy route, including former 410 handlers', async () => {
     baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-health-'));
     await Promise.all(['data', 'gui', 'wpc'].map((directory) => fs.mkdir(path.join(baseDir, directory))));
     const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
-    const edgewarn = await request(app).get('/health').expect(200);
-    expect(edgewarn.body).toMatchObject({ status: 'OK' });
-    expect(edgewarn.body.timestamp).toEqual(expect.any(String));
-    await request(app).get('/healthz').expect(200).expect({ ok: true });
+    const paths = [
+      '/api/v2', '/api/v2/features/cells', '/api/v2/features/cells?id=4',
+      '/api/v2/features/timestamps', '/api/v2/features/timestamps?timestamp=20260317-200000',
+      '/api/v2/features/alerts/official', '/api/v2/features/alerts/edgewarn?id=4',
+      '/api/v2/data/metar', '/api/v2/data/metar?timestamp=20260317-200000',
+      '/renders/get-items', '/renders/fetch?product=MRMS_MergedReflectivityQC',
+      '/renders/download', '/renders/tile', '/renders/tile-info',
+      '/nexrad', '/nexrad/KTLH', '/nexrad/KTLH/20260317-200000/0.5?product=DBZH',
+      '/rap/layers', '/rap/fetch', '/rap/metadata', '/rap/data',
+      '/wpc/fetch?type=sfc', '/wpc/download?type=sfc', '/colormaps',
+      '/health', '/healthz', '/features', '/features/cells', '/data', '/data/metar',
+      '/api/v1', '/api/v1/features',
+    ];
+    for (const endpoint of paths) {
+      for (const method of ['get', 'head', 'post', 'put', 'patch', 'delete']) {
+        const response = await request(app)[method](endpoint).expect(404);
+        expect(response.headers['content-type']).toContain('application/problem+json');
+        expect(response.headers.deprecation).toBeUndefined();
+        expect(response.headers.location).toBeUndefined();
+      }
+    }
   });
 
   it('logs a template route without request query data', async () => {

@@ -16,7 +16,6 @@ import { createAncillaryServices } from './services/ancillary.js';
 import { createServiceRegistry } from './services/serviceRegistry.js';
 import { createModulesService } from './services/modules.js';
 import { createV3Router } from './routes/v3/index.js';
-import { createCompatibilityRouter } from './routes/compatibility/index.js';
 
 export async function createApp(options = {}) {
   const apiDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -67,7 +66,6 @@ export async function createApp(options = {}) {
     degradedChildren: entry.heartbeat?.degradedChildren ?? [],
   }]));
   app.use('/api/v3', createV3Router({ analysis, renders, ancillary, modules, openApi, apiConfig: config.api, serviceRegistry }));
-  app.use(createCompatibilityRouter({ analysis, renders, ancillary, packageVersion: exposedVersion, serviceRegistry }));
   app.use(notFound); app.use(errorHandler);
   return { app, config };
 }

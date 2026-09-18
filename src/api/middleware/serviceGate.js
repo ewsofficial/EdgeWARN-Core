@@ -35,20 +35,3 @@ export function problemJsonResponder(apiConfig) {
     });
   };
 }
-
-export function legacyEnvelopeResponder() {
-  // The documented compatibility envelope from
-  // plans/realtime-runner-decomposition-plan.md.
-  return (req, res, error) => {
-    res.status(503).json({
-      success: false,
-      error: {
-        code: error.code,
-        message: error.message,
-        service: error.service,
-        state: error.state,
-        last_seen: error.lastSeen,
-      },
-    });
-  };
-}
