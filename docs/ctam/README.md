@@ -1,14 +1,18 @@
-# CTAM internal API
+# CTAM overview
 
 CTAM runs a reserved built-in StormProb adapter followed by independently
 installed external modules. External modules are discovered only from
-`ctam_modules/<module-id>/module.toml`; importing `EdgeWARN.ctam` does not
-register or execute any module.
+`<configured-root>/<module-id>/module.toml`; the default root is
+`ctam_modules/` and it can be overridden with `--ctam-module-dir`,
+`EDGEWARN_CTAM_MODULE_DIR`, or `run.ctam_module_dir`. Importing
+`EdgeWARN.ctam` does not register or execute any module.
 
 StormProb is bundled because its published motion is consumed by later tracking
-cycles. It runs through the same host-owned cycle boundary as external modules.
-The `stormprob` module ID and `StormProb` output key are reserved and cannot be
-installed externally.
+cycles. It shares the cycle and catalog with external modules, but uses a
+distinct in-process host boundary rather than the external loopback transaction
+boundary. The `stormprob` module ID and the `StormProb` and `_grid_outputs`
+output keys are reserved, case-insensitively, and cannot be installed
+externally.
 
 The former in-process `AnalysisModule`, registry, and grid-module conventions
 are retired. A grid analysis must use the cycle-scoped external API rather than

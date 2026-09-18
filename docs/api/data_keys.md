@@ -1,7 +1,9 @@
 # EdgeWARN API Data Keys
 
-This document describes the JSON file shapes served by the unified API in
-`src/api/`, including its legacy compatibility routes.
+This document describes legacy backing-file shapes served by compatibility
+routes in `src/api/`. The primary v3 API wraps most JSON resources in `data` and
+`meta`, transforms METAR responses, and serves WPC detail as native GeoJSON;
+those v3 contracts are documented in `docs/api/unified_v3.md` and OpenAPI.
 
 When a route serves a file directly, the response shape is usually the same as the file shape. Some files are passed through as-is, so producer-specific keys may appear in addition to the fields listed here.
 
@@ -18,7 +20,8 @@ Used by `GET /api/v2/features/cells` without an `id` query.
 
 Used by `GET /api/v2/features/cells?id={id}`.
 
-This file is served as-is, so the exact shape depends on the detection/tracking pipeline. Common keys include:
+This file is a history array served as-is. Each array item is a detection or
+tracking snapshot; the exact fields depend on the pipeline. Common keys include:
 
 - `id` (`number|string`): Cell identifier.
 - `timestamp` (`string`, optional): Scan timestamp for the record.
@@ -32,9 +35,6 @@ This file is served as-is, so the exact shape depends on the detection/tracking 
 - `merged_to` (`number`, optional): Child ID this dissipated cell merged into.
 - `parent_ids` (`number[]`, optional): Parent IDs associated with merge/split lineage.
 - `split_from` (`number|null`, optional): Parent ID for a split child.
-- `history` (`object[]`, optional): Historical snapshots retained for the cell.
-- `first_seen` (`string`, optional): First observed timestamp for the cell.
-- `last_seen` (`string`, optional): Most recent observed timestamp for the cell.
 
 ## Stormcell Snapshots
 
@@ -49,12 +49,10 @@ Used by `GET /api/v2/features/timestamps` without a `timestamp` query.
 
 Used by `GET /api/v2/features/timestamps?timestamp={YYYYMMDD-HHMMSS}`.
 
-This file is served as-is. The exact payload can vary by producer, but commonly includes:
-
-- `timestamp` (`string`, optional): Snapshot timestamp.
-- `cells` (`object[]`, optional): Array of storm cell records.
-
-Each item in `cells` typically uses the same per-cell keys described in `cells/{id}.json`.
+This file is served as-is. The current producer writes a wrapper with
+`source`, `product`, `version`, `latest_timestamp`, and `features`; the storm
+cell records are the items in `features[]`. Do not assume a top-level
+`timestamp` or `cells` member.
 
 ## Official NWS Alerts
 
@@ -64,7 +62,8 @@ Used by `GET /api/v2/features/alerts/official?id={id}`.
 
 The stored file is a registry entry. The API normally returns the nested `feature` object when it exists.
 
-- `id` (`string`): Alert ID, usually the NWS `urn:oid` or another slash-free identifier accepted by the API validator.
+- `id` (`string`): Source alert ID, typically the full NWS alert URL. The
+  extracted `urn_oid` is used separately for registry keys and safe filenames.
 - `first_seen` (`string`): ISO 8601 timestamp for when the alert was first observed.
 - `last_seen` (`string`): ISO 8601 timestamp for when the alert was last observed.
 - `expires` (`string|null`): ISO 8601 expiration timestamp when available.
@@ -133,10 +132,9 @@ Each item in `alerts` contains:
 
 Used by `GET /api/v2/data/metar?timestamp={YYYYMMDD-HHMMSS}`.
 
-This file is served inside an API wrapper and is otherwise passed through unchanged. The METAR producer may include different keys over time. Common examples from tests are:
-
-- `stations` (`string[]`, optional): Station identifiers represented in the file.
-- `observations` (`object[]`, optional): Raw observation entries.
+The producer writes an array of parsed observation objects. Common fields are
+`observation_time`, `station`, `coordinates`, `wind`, `visibility`,
+`temperature`, `dewpoint`, `pressure`, `clouds`, `weather`, and `remarks`.
 
 ### API wrapper for METAR responses
 
@@ -144,4 +142,5 @@ The API wraps the underlying METAR file as:
 
 - `type` (`string`): Always `metar`.
 - `timestamp` (`string`): Requested timestamp in `YYYYMMDD-HHMMSS` format.
-- `data` (`object|array`): Raw contents of the corresponding `METAR_{YYYYMMDD-HH}z.json` file.
+- `data` (`object[]`): Raw observation array from the corresponding
+  `METAR_{YYYYMMDD-HH}z.json` file.

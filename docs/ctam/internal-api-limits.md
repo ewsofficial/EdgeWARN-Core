@@ -1,22 +1,23 @@
 # CTAM Internal API Limits
 
-Default bounds for the `/internal/ctam/v1` internal API described in
-`plans/modular-ctam-internal-api-plan.md`. This document is a Phase 0
-deliverable: it fixes the numbers that Phase 1 manifest validation and Phase 2
-and Phase 3 request handling are implemented and tested against.
+Target bounds for the `/internal/ctam/v1` internal API described in
+`plans/modular-ctam-internal-api-plan.md`. These values are not all enforced by
+the current runtime; rows below distinguish implemented behavior from planned
+limits so operators do not mistake the plan for a security boundary.
 
 Every value below is either derived from a value that already exists in this
 repository, or is labelled as a proposed default with its reasoning. Citations
 name the file and line that supplies the grounding value. Where a limit has no
 precedent it says so.
 
-Nothing here changes runtime behavior. No `src/` file is modified by this
-document.
+This document changes no runtime behavior. Verify implementation before relying
+on any proposed bound.
 
 ## Enforcement points
 
-Limits are enforced in two different code paths and Phase 1 and Phase 3 own
-different halves of the table.
+The plan assigns limits to these code paths, but enforcement is currently
+partial. In particular, CTAM runtime code does not yet implement the complete
+stage, patch, stream, capture, or publication limit set below.
 
 | Enforcement point | Phase | What it checks |
 | --- | --- | --- |
@@ -38,15 +39,15 @@ and then fails. The plan's per-module state set is `discovered`, `invalid`,
 | Minimum manifest `timeout_seconds` | 1 | seconds | Discovery | Manifest rejected, module `invalid`. |
 | Maximum manifest `timeout_seconds` | 30 | seconds | Discovery | Manifest rejected, module `invalid`. |
 | Default `timeout_seconds` when omitted | 10 | seconds | Discovery | Not applicable. |
-| CTAM stage wall-clock ceiling | 30 | seconds | Runner | Remaining unstarted modules become `skipped_missing_requirements` with a deadline reason; a module already running is terminated as `timed_out`. |
-| Terminate-to-kill escalation | 5 then 1 | seconds | Runner | Child is killed and marked `timed_out`. |
-| Maximum request body size | 1048576 | bytes (1 MiB) | Runtime | Request-too-large error. Nothing is staged. |
-| Maximum payload per patch operation value | 16384 | bytes (16 KiB) | Runtime | Invalid-patch error. Nothing is staged. |
-| Maximum operations per PATCH request | 64 | operations | Runtime | Invalid-patch error. Nothing is staged. |
-| Maximum staged operations per module transaction | 1000 | operations | Runtime | Invalid-patch error on the operation that would exceed it; already-staged operations survive until the module commits or abandons. |
-| Maximum total staged payload per module transaction | 4194304 | bytes (4 MiB) | Runtime | Invalid-patch error, as above. |
-| Maximum patch value depth below the operation path | 8 | levels | Runtime | Invalid-patch error. |
-| Maximum leaf values per patch operation value | 256 | values | Runtime | Invalid-patch error. |
+| CTAM stage wall-clock ceiling | 30 | seconds | Runner | Proposed; no stage deadline is currently enforced. |
+| Terminate-to-kill escalation | 5 then 1 | seconds | Runner | Current runner waits 2 seconds after terminate and does not bound the kill join; the 5+1 policy is proposed. |
+| Maximum request body size | 1048576 | bytes (1 MiB) | Runtime | Declared-size check exists; bounded reads for chunked/malformed framing are not complete. |
+| Maximum payload per patch operation value | 16384 | bytes (16 KiB) | Runtime | Proposed; current value check allows 1 MiB. |
+| Maximum operations per PATCH request | 64 | operations | Runtime | Proposed; current code does not enforce it atomically. |
+| Maximum staged operations per module transaction | 1000 | operations | Runtime | Proposed; current code does not enforce the aggregate count. |
+| Maximum total staged payload per module transaction | 4194304 | bytes (4 MiB) | Runtime | Proposed; current code does not enforce the aggregate size. |
+| Maximum patch value depth below the operation path | 8 | levels | Runtime | Proposed; current code does not enforce depth. |
+| Maximum leaf values per patch operation value | 256 | values | Runtime | Proposed; current code does not enforce leaf count. |
 | Maximum module ID length | 128 | characters | Discovery | Manifest rejected, module `invalid`. |
 | Maximum public routes per module | 16 | routes | Discovery | Manifest rejected, module `invalid`. |
 | Maximum public route ID length | 128 | characters | Discovery | Manifest rejected, module `invalid`. |
@@ -54,12 +55,12 @@ and then fails. The plan's per-module state set is `discovered`, `invalid`,
 | Maximum public route payload | 1048576 | bytes (1 MiB) | Runtime | Request-too-large error. Nothing is staged. |
 | Maximum aggregate public route payload per module | 4194304 | bytes (4 MiB) | Runtime | Request-too-large error. The prior staged routes survive. |
 | Maximum public route JSON depth | 8 | levels | Runtime | Invalid-patch error. Nothing is staged. |
-| Maximum `properties` key and string value length | 256 | characters | Runtime | Invalid-patch error. |
+| Maximum `properties` key and string value length | 256 | characters | Runtime | Proposed; current code does not enforce this bound. |
 | Default history read window | 5 | entries | Runtime | Not applicable. |
 | Maximum history read window | 120 | entries | Runtime | The requested `limit` is clamped down to 120, not rejected. |
-| Maximum streamed file size | 268435456 | bytes (256 MiB) | Runtime | Catalog descriptor reports `readiness` as unavailable with a size reason, and `GET /files/{file_id}/content` returns an unavailable-file error. |
+| Maximum streamed file size | 268435456 | bytes (256 MiB) | Runtime | Catalog marks oversized files unavailable; content requests currently return `request_too_large`. |
 | Range and stream chunk size | 1048576 | bytes (1 MiB) | Runtime | Not applicable. |
-| Maximum captured stdout or stderr per module | 1048576 | bytes (1 MiB) per stream | Runner | Capture is truncated with a marker; the module is not failed for output volume alone. |
+| Maximum captured stdout or stderr per module | 1048576 | bytes (1 MiB) per stream | Runner | Proposed target; current capture limit is 65536 bytes and truncation occurs after `communicate()`. |
 
 The plan's error-code set is authentication failure, unsupported version,
 unavailable file, unmet requirement, forbidden path, stale revision, conflict,
@@ -83,17 +84,14 @@ inter-scan delta. 120 seconds is therefore the hard outer ceiling on everything
 CTAM does.
 
 CTAM does not get the whole cycle. It is stage 6 of 9 inside integration
-(`docs/core/integration.md:52-62`), and integration as a whole is asserted to
-finish in under 30 seconds at `benchmarks/test_performance.py:182`. The
-current CTAM stage is asserted at under 2 seconds
-(`benchmarks/test_performance.py:402`) and StormProb alone at under 1
-second (`benchmarks/test_performance.py:423`).
+(`docs/core/integration.md:52-62`). The older performance benchmark's CTAM
+fixture reads `data.get("cells", [])`, while current snapshots use `features`,
+so that benchmark skips rather than enforcing a CTAM budget. The standalone
+Phase 7 benchmark measures selected calls locally and is not part of default CI.
 
-The CTAM stage ceiling is set to 30 seconds. CTAM runs inside integration, so it
-cannot be permitted to exceed the budget of the stage that contains it, and 30
-seconds still leaves 90 seconds of the cadence for the other eight integration
-stages plus detection and ingest. With StormProb's existing 2 seconds reserved,
-28 seconds remain for external modules.
+The CTAM stage ceiling is a proposed 30-second target. CTAM runs inside
+integration, so a future runner should enforce a stage deadline in addition to
+per-module timeouts.
 
 Read the 2-second figure with care. The former in-package registry did not
 provide a stable module API, so StormProb is now the only bundled built-in and
@@ -143,24 +141,21 @@ deployment, but it is why the runner enforces a stage deadline as well as a
 per-module timeout. Two modules at 30 seconds each are accepted by manifest
 validation and the second is skipped at runtime with a deadline reason.
 
-Termination follows the existing supervisor escalation exactly:
-`process.terminate()`, join for `stop_join_timeout_seconds: 5`, then
-`process.kill()` and join for `stop_kill_join_timeout_seconds: 1`
-(`config/runtime.yaml:59-60`, implemented at
-`src/util/runtime/processes.py:23-30`).
+The CTAM runner currently calls `process.terminate()`, waits 2 seconds, and
+then calls `process.kill()` without a bounded join
+(`src/EdgeWARN/ctam/runner.py:61-65`). The 5-second then 1-second escalation in
+the supervisor is a separate process-management path and is not currently used
+by CTAM.
 
 ### Request body size
 
-1 MiB is `decompress_chunk_size_bytes: 1048576` from `config/ingest.yaml:22`,
-the repository's existing 1 MiB I/O unit. It is not a body-size precedent, and
-there is no body-size precedent to cite: `config/api.yaml:14-19` records that
-the live Node service mounts no JSON body parser at all, so `json_body_limit`
-was deleted rather than moved. 1 MiB is 1000 times the largest measured module
-payload in the Phase 0 fixtures, so it is generous rather than tight.
+1 MiB is a proposed body-size target based on the repository's existing I/O
+unit. The current server checks declared `Content-Length`, but does not robustly
+bound chunked, missing, malformed, or negative-length bodies while reading.
 
 ### Patch size, count, depth, and field count
 
-These are derived from the size ceiling that the public API already applies to
+These proposed values are derived from the size ceiling that the public API already applies to
 the files CTAM publishes. `src/api/services/analysis.js:17,24` read
 `data/cells/<cell-id>.json` and `data/stormcells/stormcells_<ts>.json` through
 `readJson`, which opens them with `kind: 'json'`
@@ -186,7 +181,7 @@ the largest measured module payload: the golden StormProb success output at
 `tests/core/test_stormprob_phase5.py` is 1004 bytes when
 serialized compactly with the baseline harness's `@tuple` wrappers removed.
 
-The remaining three numbers follow arithmetically:
+The remaining numbers are design targets that follow arithmetically:
 
 - 64 operations per request, because 1048576 / 16384 = 64 exactly, so the body
   limit and the per-operation limit cannot contradict each other.
@@ -207,7 +202,7 @@ reaches `properties.wind_field.u1000`, two levels below `properties`, built by
 `_set_nested` at `src/EdgeWARN/process/integrate/integrate_rap.py:169-180`. 8 is
 twice the deepest real producer.
 
-Field count is set to 256 leaf values per operation value. The StormProb payload
+Field count is proposed at 256 leaf values per operation value. The StormProb payload
 has 9 top-level keys and 51 leaf values. The floor the limit must clear is the
 existing `properties` container, which `config/integration.yaml` already fills
 with 25 `stats_datasets` keys (`config/integration.yaml:35-61`), 40
@@ -284,13 +279,10 @@ loopback stream of a local file.
 
 ### Captured output volume
 
-**Proposed, no precedent.** Nothing in the repository currently caps captured
-subprocess output; the Python tree spawns `multiprocessing.Process` children
-whose output goes to inherited handles or an explicit log queue rather than to a
-captured pipe. 1 MiB per stream reuses the 1 MiB unit from
-`config/ingest.yaml:22`. Truncating rather than failing is chosen so that a
-noisy but correct module still commits, which matches the Phase 4 acceptance
-requirement that a noisy fixture cannot block later modules.
+**Proposed, no precedent.** The current CTAM runner sets
+`MAX_CAPTURE_BYTES = 65536` and truncates after the child output has already
+been captured. A future bounded streaming capture should implement the 1 MiB
+target if that memory guarantee is required.
 
 ## Deviations from the plan text
 
@@ -302,7 +294,7 @@ repository. Each needs a decision before the phase that depends on it.
    stage budget of 2 seconds and equal to the whole-integration budget of 30
    seconds. It is accepted here as the maximum, but it cannot be the example
    value in the manifest reference Phase 1 writes
-   (`docs/ctam/module-manifest.md`, which does not exist yet) without also
+    (`docs/ctam/module-manifest.md`) without also
    documenting that one such module consumes the entire external budget. The
    example should use the 10-second default.
 
@@ -317,6 +309,6 @@ repository. Each needs a decision before the phase that depends on it.
    and cell-history files at 8388608 bytes, enforced at
    `src/api/repositories/artifactRepository.js:79`. Every patch-size limit in
    this document is derived from it. Phase 3's publication coordinator should
-   validate the serialized snapshot against that ceiling before atomic
-   replacement, otherwise a valid transaction can publish a file the API refuses
-   to read.
+    validate the serialized snapshot against that ceiling before atomic
+    replacement. The current publication coordinator does not yet perform this
+    check, so a valid transaction can publish a file the API refuses to read.

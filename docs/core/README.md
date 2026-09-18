@@ -35,14 +35,16 @@ src/
 │   ├── api_integration/             # API index management for generated files
 │   ├── ingest/                      # Compatibility re-exports of shared ingest code
 │   ├── schedule/                    # Update-checking and scheduling helpers
-│   └── ui/                          # Reserved path; currently only contains repo metadata
+│   └── ui/                          # Reserved placeholder; currently only AGENTS.md
 └── EWMRS/
     ├── pipeline.py                  # Render pipeline orchestration
     ├── pipeline_config.py           # Accessors for config/ewmrs_pipeline.yaml
-    ├── render/                      # Layer rendering and tile generation
+    ├── render/                      # Layer rendering, tiles, float16 chunks, metadata
     ├── rap/                         # RAP Uint16 conversion pipeline + catalog accessors
-    └── render/                      # Float16 chunk serialization and grid metadata
 ```
+
+The tree is abbreviated. Other load-bearing packages include `NEXRAD/`,
+`edgewarn_cli/`, `util/runtime/`, and the `EdgeWARN/stormprob/` package.
 
 ## High-Level Flow
 
@@ -59,16 +61,24 @@ graph TD
 
 ## Runtime Base Directory
 
-Generated products are written under the configured base directory. For the Python pipelines and the EWMRS API, the default is `~/EdgeWARN_input` on Linux/macOS and `C:\EdgeWARN_input` on Windows.
+Generated products are written under the configured base directory. For the
+Python pipelines and the unified Node.js API, the default is
+`~/EdgeWARN_input` on Linux/macOS and `C:\EdgeWARN_input` on Windows.
 
-`filesystem.yaml` is the sole authority for platform defaults. The selected
-base directory is CLI, then `EDGEWARN_BASE_DIR`, then legacy `BASE_DIR`, then
-YAML; `--config-dir` and `EDGEWARN_CONFIG_DIR` select the complete catalog tree.
+For the primary services and unified API, `filesystem.yaml` supplies platform
+defaults. The selected base directory is CLI, then `EDGEWARN_BASE_DIR`, then
+legacy `BASE_DIR`, then YAML; `--config-dir` and `EDGEWARN_CONFIG_DIR` select
+the complete catalog tree. The standalone NEXRAD ingest entry points resolve
+`nexrad.cli.base_dir` from their NEXRAD catalog without this environment layer.
 
 The active runtime layout is:
 
 ```text
 <BASE_DIR>/
+├── state/realtime/
+│   ├── mrms-ready/                 # durable primary-to-EWMRS handoff records
+│   ├── rap-ready/                  # durable RAP handoff records
+│   └── services/                   # service heartbeats
 ├── data/
 │   ├── stormcells/                  # detection snapshots and stormcell_index.json
 │   ├── cells/                       # per-cell history/API files and cell_index.json
@@ -92,10 +102,19 @@ The active runtime layout is:
 - EWMRS GOES inputs ready
 - EdgeWARN integration inputs ready (adds scan-time GLM when enabled)
 
-The GOES EWMRS stage renders the full configured GOES-East ABI set after local ABI readiness is met.
-Current outputs include the single-channel GUI products `GOES_ABI_C01` through `GOES_ABI_C16` built from staged `ABI-L1b-RadC` channels. RGB composites are a client-side derivation and are not rendered server-side.
+The GOES EWMRS stage renders the full configured GOES ABI set after local ABI
+readiness is met. Current outputs use full product IDs:
+`GOES_ABI_C01_Reflectance` through `GOES_ABI_C06_Reflectance` and
+`GOES_ABI_C07_BrightnessTemp` through `GOES_ABI_C16_BrightnessTemp`, built from
+staged `ABI-L1b-RadC` channels in the configured `noaa-goes19` bucket. RGB
+composites are a client-side derivation and are not rendered server-side.
 
-The GOES render path renders each single-channel layer through the shared EWMRS pipeline, then writes the same tiled GUI layout and product-level plus timestamp-level `index.json` contract used by the rest of EWMRS. If a required channel is missing or exceeds the allowed timestamp offset, only the affected layer is skipped.
+The GOES render path renders each single-channel layer through the shared EWMRS
+pipeline, then writes the same tiled GUI layout and product-level plus
+timestamp-level `index.json` contract used by the rest of EWMRS. Readiness
+requires a complete aligned set within the configured offset, so a missing
+channel suppresses the GOES render pass; failures inside an eligible layer are
+isolated to that layer.
 
 ## Scheduling Modes
 
@@ -105,18 +124,20 @@ The GOES render path renders each single-channel layer through the shared EWMRS 
 
 Current CLI coverage:
 
-- `run_edgewarn.py`: `--lat_limits`, `--lon_limits`, `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-ctam`, `--ctam-module-dir`, `--list-ctam-modules`, `--check-ctam-modules`, `--disable-tracking`, `--disable-polygon-expansion`, `--disable-goes`, `--mrms-core-only`, `--refl-threshold`, `--min-seed-percentage`, `--drop-offset`
-- `run_ewmrs.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-metar`, `--disable-nws`, `--disable-wpc`, `--disable-goes`
-- `run_nexrad.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`
-- `run_all.py`: `--services`, every routed flag above (unset flags are not forwarded), plus `--disable-ewmrs` / `--disable-nexrad` to omit services
-- `process_historical.py`: `--start`, `--end`, `--lat`, `--lon`, `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-ctam`, `--ctam-module-dir`, `--list-ctam-modules`, `--check-ctam-modules`, `--disable-tracking`, `--disable-polygon-expansion`, `--refl-threshold`, `--min-seed-percentage`, `--drop-offset`
+- `run_edgewarn.py`: `--lat_limits`, `--lon_limits`, `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-ctam`, `--disable-ctam-modules`, `--ctam-module-dir`, `--list-ctam-modules`, `--check-ctam-modules`, `--disable-tracking`, `--disable-polygon-expansion`, `--disable-goes`, `--disable-ewmrs`, `--disable-metar`, `--disable-nws`, `--disable-wpc`, `--disable-nexrad`, `--mrms-core-only`, `--refl-threshold`, `--min-seed-percentage`, `--drop-offset`
+- `run_ewmrs.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--mrms-core-only`, `--disable-metar`, `--disable-nws`, `--disable-wpc`, `--disable-goes`
+- `run_nexrad.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--mrms-core-only`
+- `run_all.py`: `--services`, the explicitly routed processing flags (`lat/lon`, profile, CTAM/tracking/polygon/GOES/accessory controls, thresholds, and drop offset), plus `--disable-ewmrs` / `--disable-nexrad`; CTAM diagnostic flags are not forwarded
+- `process_historical.py`: `--start`, `--end`, `--lat`, `--lon`, `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-ctam`, `--disable-ctam-modules`, `--ctam-module-dir`, `--list-ctam-modules`, `--check-ctam-modules`, `--disable-tracking`, `--disable-polygon-expansion`, `--refl-threshold`, `--min-seed-percentage`, `--drop-offset`
 - `common/ingest/nws/zone_sync.py`: `--assets-dir`, `--zone-types`, `--timeout-seconds`, `--max-retries`, `--max-workers`, `--pause-seconds`, `--progress` / `--no-progress`, `--apply`, `--report-path`, `--config-dir`
 - `common/ingest/nexrad/main.py`: `--site`, `--volume-id`, `--base-dir`, `--max-candidate-volumes-per-site`, `--config-dir`
 - `common/ingest/nexrad/pipeline/` (via `python -m`): `--site` (repeatable), `--base-dir`, `--scan-interval-seconds`, `--completion-interval-seconds`, `--max-candidate-volumes-per-site`, `--config-dir`
 
-The `--profile`, `--disable-*`, and `--progress` switches use
-`argparse.BooleanOptionalAction`, so each also accepts its `--no-` form and
-falls back to the YAML catalogs when omitted rather than to a literal default.
+Most `--profile`, `--disable-*`, and `--progress` switches use
+`argparse.BooleanOptionalAction`, so they accept a `--no-` form and, when
+defined with a `None` default, fall back to YAML. The CTAM module diagnostic
+flags are `store_true`; `--disable-ctam-modules` defaults to `False` and does
+not use a YAML fallback.
 
 ## Additional References
 

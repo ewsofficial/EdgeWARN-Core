@@ -4,12 +4,14 @@ The public service is started with `npm run api` and serves both EdgeWARN and
 EWMRS products from one configured base directory. Its default port is `5000`.
 
 `GET /api/v3/openapi.json` is the authoritative machine-readable contract.
-All v3 JSON collections use `{ "data": [], "meta": { "nextCursor" } }`;
-single JSON resources use `{ "data": {}, "meta": {} }`. Per-request correlation
+Most v3 JSON collections use `{ "data": [], "meta": { "nextCursor" } }`;
+single JSON resources use `{ "data": {}, "meta": {} }`. Native WPC GeoJSON
+detail and the raw OpenAPI document are exceptions. Per-request correlation
 is available through the `X-Request-Id` response header rather than the body,
 so cacheable JSON responses keep a stable body and support conditional `GET`
 (`ETag`/`If-None-Match` → `304`).
-Errors use `application/problem+json`.
+Standard v3 application errors use `application/problem+json`; rate-limit,
+timeout, and legacy compatibility responses may use ordinary JSON envelopes.
 
 ## Runtime configuration
 
@@ -17,7 +19,8 @@ Errors use `application/problem+json`.
 - Compatibility aliases: `--base_dir <path>` and `BASE_DIR`. Precedence is CLI,
   then `EDGEWARN_BASE_DIR`, then `BASE_DIR`, then `filesystem.yaml`.
 - `PORT` sets the service port; `npm run debug:api` uses debug port `3001`
-- `ALLOWED_ORIGINS` is a comma-separated exact browser-origin allowlist.
+- `ALLOWED_ORIGINS` is a comma-separated browser-origin allowlist. The default
+  is `*`, and requests without an `Origin` header proceed without CORS headers.
   Credentials are not enabled for this read-only API.
 - `TRUST_PROXY_IPS` configures trusted reverse proxies. Production rejects the
   ambiguous `TRUST_PROXY=true` form. Only set this when a stripping reverse
@@ -39,11 +42,13 @@ Errors use `application/problem+json`.
 - Radar: `/api/v3/radar-sites`
 - RAP: `/api/v3/models/rap/layers`
 - WPC: `/api/v3/analyses/wpc/surface`
+- CTAM modules: `/api/v3/modules`, `/api/v3/modules/{moduleId}`, and
+  `/api/v3/modules/{moduleId}/{routeId}`
 - Infrastructure: `/health/live`, `/health/ready`
 
 Canonical render IDs equal the render layer name / file prefix, such as `MRMS_MergedReflectivityQC`, `MRMS_QPE`,
-and `GOES_ABI_C13_BrightnessTemp`. The product catalog preserves the mapping to runtime
-folders and legacy aliases. The id charset (`[A-Za-z0-9_.-]+`) is frozen so 3.1.0
+and `GOES_ABI_C13_BrightnessTemp`. The product catalog maps IDs to runtime
+folders; legacy prefixes are not separate lookup aliases. The id charset (`[A-Za-z0-9_.-]+`) is frozen so 3.1.0
 dynamic ingest/render products only add catalog entries.
 
 ## EWMRS binary chunks

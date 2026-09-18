@@ -1,16 +1,17 @@
 # EdgeWARN-Core 3.0.0 Release Readiness
 
-**Assessment date:** 2026-09-15
-**Reviewed state:** `version-test/3.0.0` at `72e7ca19`, plus the render-contract
-remediation in the current working tree
-**Decision:** **Go for 3.0.0 within the reviewed scope.**
+**Assessment date:** 2026-09-17
+**Reviewed state:** Working tree at the time of this assessment. Re-run the
+release checks against the exact tag candidate before publishing.
+**Decision:** **Conditional go for 3.0.0 within the verified scope.**
 
 ## Executive summary
 
 The codebase has strong release-candidate maturity. The Python and Node
-versions are synchronized at 3.0.0, the repository contains substantial unit,
-integration, process, API-contract, packaging, and container coverage, and the
-reported test suite, container smoke test, and API runtime are healthy.
+versions are synchronized at 3.0.0, and the repository contains substantial
+unit, integration, process, API-contract, packaging, and container coverage.
+The tracked API tests pass when collected explicitly; the default `npm test`
+must be run with Jest discovery excluding auxiliary `.kilo/` worktrees.
 
 The previously identified StormProb delivery and npm dependency issues have
 since been addressed in the reviewed branch: the wheel/Docker build now carry
@@ -58,11 +59,11 @@ This blocker is closed.
 
 ## Important non-blocking cleanup
 
-- Documentation alternates between `EdgeWARN-dev` and the actual `EdgeWARN`
-  environment ([`README.md`](../README.md#L30),
-  [`deployment.md`](api/deployment.md#L70)).
-- The README calls `run.py` a deprecated alias, while the implementation and
-  installation guide say it is retired and exits with status 2
+- Documentation previously alternated between `EdgeWARN-dev` and the actual
+  `EdgeWARN` environment; deployment guidance now uses `EdgeWARN`, but other
+  repository-level references should still be standardized.
+- Some repository-level documentation calls `run.py` a deprecated alias, while
+  the implementation and installation guide say it is retired and exits with status 2
   ([`README.md`](../README.md#L115), [`INSTALLATION.md`](../INSTALLATION.md#L189)).
 - The changelog still describes `run.py` as a deprecated alias even though the
   command is retired ([`CHANGELOG.md`](../CHANGELOG.md#L3)).
@@ -103,8 +104,9 @@ This blocker is closed.
 
 ## Final status
 
-**Release status: ready within the reviewed scope.** Ignoring the requested
-items 2, 5, and 6, the implementation is mature enough for stable 3.0.0. The
+**Release status: conditionally ready within the reviewed scope.** The
+implementation is mature enough for stable 3.0.0 after the exact-artifact test,
+audit, and container checks are rerun. The
 previous packaging, dependency-lock, and render-contract blockers are
 addressed. The remaining sequence items are pre-tag verification and
 non-blocking cleanup rather than known functional release blockers.

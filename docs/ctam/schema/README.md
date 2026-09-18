@@ -1,17 +1,16 @@
 # CTAM internal API v1 schemas
 
 Contract schemas for `/internal/ctam/v1`, checked in by Phase 0 of
-`plans/modular-ctam-internal-api-plan.md`. Phase 0 does not change runtime
-behavior: nothing here is loaded by `src/` yet. These files exist so the later
-phases are implemented against a fixed contract instead of inventing one as they
-go, and so the OpenAPI examples in `docs/ctam/openapi/` have something to
-validate against.
+`plans/modular-ctam-internal-api-plan.md`. The schemas remain checked-in
+contract artifacts rather than runtime-loaded configuration, but CTAM runtime
+code now implements and mirrors their v1 contract. They provide a fixed target
+for the OpenAPI examples and contract tests.
 
 ## Files
 
 | File | Covers | Where it appears |
 | --- | --- | --- |
-| `response-envelope.schema.json` | The common wrapper and the structured error list | Every response |
+| `response-envelope.schema.json` | The common JSON wrapper and structured error list | Every JSON response; binary file content is raw bytes |
 | `file-descriptor.schema.json` | Catalog descriptors | `GET /files`, `GET /files/{file_id}` |
 | `cycle-state.schema.json` | Cycle state and host readiness | `GET /cycle` |
 | `requirements-evaluation.schema.json` | Per-module requirement outcomes | `GET /requirements`, `POST /requirements/check` |
@@ -33,14 +32,17 @@ with which route.
 
 ## The supported keyword set is restricted, on purpose
 
-These schemas are validated by the repository's own walker in
-`src/common/config/loader.py`, not by the `jsonschema` package. That choice is
+The CTAM contract schemas are validated by contract tests using the repository's
+own walker in `src/common/config/loader.py`, not by the `jsonschema` package.
+Configuration schemas are also validated at startup. That choice is
 argued at `src/common/config/loader.py:18-31`: config must validate identically
 from Python and from `src/config/loader.js`, so the repo implements one small
 walker in each language rather than depending on a validator that exists in only
-one of them. `_check_supported_keywords` (line 298) turns any keyword the walker
-does not implement into a startup error, so an author reaching for `oneOf` gets a
-failure instead of a constraint that silently enforces nothing.
+one of them. `_check_supported_keywords` turns unsupported keywords into a
+validation error in the applicable validation path, so an author reaching for
+`oneOf` gets a failure instead of a constraint that silently enforces nothing.
+Editing a CTAM contract schema does not by itself cause a service-startup
+failure.
 
 The permitted keywords are exactly `$schema`, `title`, `description`, `type`,
 `properties`, `required`, `additionalProperties`, `items`, `minItems`,
@@ -84,7 +86,8 @@ The walker matches with `re.search` (`src/common/config/loader.py:410`), not
 therefore accepts a value with a trailing newline: `re.search` of
 `^/(modules|properties)(/[^/]+)+$` against `"/modules/Foo\n"` succeeds.
 
-Every pattern in this directory ends in `\Z` for that reason. This differs from
+Identity and format patterns in this directory end in `\Z` for that reason;
+intentional non-empty-string checks use the unanchored `\S` pattern. This differs from
 the config schemas in `config/schema/`, which use `$` and have the same gap;
 that is recorded in `plans/modular-ctam-phase0-findings.md` rather than changed
 here, because Phase 0 does not modify existing behavior.
@@ -106,8 +109,9 @@ cannot express them:
   meaning. It becomes a write to `/id` only if the host passes the pointer
   through a filesystem path normalizer, which it must not do.
 - **Size, depth, and field count.** No keyword bounds a document's byte size or
-  nesting depth. See `docs/ctam/internal-api-limits.md` for the values and
-  enforce them while reading the request body, before parsing.
+  nesting depth. The values are specified in `docs/ctam/internal-api-limits.md`,
+  but current host code does not enforce all of them; treat that document as a
+  target until runtime enforcement is added.
 - **Non-standard JSON literals.** Python's `json.loads` accepts `NaN`,
   `Infinity`, and `-Infinity` unless `parse_constant` rejects them. A patch value
   containing one would pass these schemas.

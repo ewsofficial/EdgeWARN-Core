@@ -10,17 +10,15 @@ That file is not in this repository and the path above is not reachable from a
 normal checkout, so this page is a point-in-time snapshot that cannot be
 regenerated or checked during ordinary development. Treat it as a reference for
 what RAP *carried on that cycle*, not as a contract. `config/integration.yaml`
-`products` is the authoritative statement of what EdgeWARN actually extracts.
+`rap_products.products` is the authoritative statement of what EdgeWARN
+actually extracts.
 
-> **Known gap.** The listing below is incomplete: the V-component wind series is
-> absent throughout — `v` on `isobaricInhPa`, `10v`, and the `vstm`/`vvcsh`
-> entries — while the matching U-component series are all present. RAP does
-> carry those fields, and the extraction pipeline depends on them:
-> `config/integration.yaml:137` extracts `v` across the same 37 isobaric levels
-> as `u`, and the comment at `:133` counts `74` `wind_field.*` values, which is
-> `37` U plus `37` V. Extraction would raise rather than silently skip them.
-> The counts below are therefore understated by an unverified amount. Do not
-> conclude from this page that a field is missing from RAP.
+> **Known gap.** The listing below is a point-in-time inventory and is not the
+> extraction contract. The current configured catalog contains pressure-level
+> `u`/`v`, 10 m `u`/`v`, temperature, dewpoint, and freezing-height products;
+> it does not depend on `vstm`/`vvcsh`. Missing GRIB messages are skipped by the
+> loader and produce partial integration output. The counts below must not be
+> used to infer the current configured field set.
 
 ## Counts
 

@@ -26,6 +26,7 @@ src/api/
 │   ├── security.js             # helmet, compression, request timeout
 │   ├── cors.js
 │   ├── rateLimit.js
+│   ├── serviceGate.js
 │   └── errors.js               # notFound + problem+json handler
 ├── repositories/
 │   └── artifactRepository.js   # rooted, symlink-refusing file reads
@@ -33,6 +34,8 @@ src/api/
 │   ├── analysis.js             # cells, storm snapshots, alerts, METAR
 │   ├── renders.js              # products, snapshots, and float16 chunks
 │   ├── ancillary.js            # NEXRAD, RAP, and WPC
+│   ├── modules.js               # public CTAM module routes
+│   ├── serviceRegistry.js       # heartbeat classification and route map
 │   └── validation.js           # identifier validators and pagination
 └── routes/
     ├── v3/index.js
@@ -53,11 +56,12 @@ On successful listen the process logs the effective configuration: the config
 root, each loaded catalog with its schema version, the list of active override
 *layers*, the enabled product counts, and the port and base directory. It
 reports which layer won for each override rather than the value, matching
-`report_effective_config` in `src/run.py`, so a diagnostic never discloses a
+`report_effective_config` in `src/util/runtime/primary_service.py`, so a diagnostic never discloses a
 configured secret. Configuration is read once; changes require a restart.
 
 There is no `dotenv` load, no `cluster` fork, and no JSON body parser — the
-service answers `GET` and `HEAD` only. Runtime directories are not created at
+service serves read-only routes plus CORS `OPTIONS` preflight. Runtime
+directories are not created at
 startup; `/health/ready` reports missing ones instead.
 
 ## Request Lifecycle
@@ -96,8 +100,8 @@ logs `unmatched`.
 
 `validateAllConfigs()` runs before anything else, so an invalid catalog tree
 fails startup rather than a later request. `api.yaml`, `filesystem.yaml`, and
-`wpc.yaml` are then loaded through the shared `src/config/loader.js`, the same
-loader the Python side uses.
+`wpc.yaml` are then loaded through the Node loader `src/config/loader.js`, which
+mirrors but is separate from Python's `src/common/config/loader.py`.
 
 Config-tree selection: `--config-dir`, then `EDGEWARN_CONFIG_DIR`, then
 discovery from the installed source tree.
@@ -112,11 +116,11 @@ Base-directory resolution:
 A leading `~` is expanded, and the result is resolved to an absolute path.
 Supplying the same flag twice with different values throws rather than silently
 picking one. Derived roots are `<BASE_DIR>/data`, `<BASE_DIR>/gui`, and
-`<BASE_DIR>/wpc`; the `static` root is `src/EWMRS`, which is where
+`<BASE_DIR>/wpc`; the API has no static `src/EWMRS` root.
 
-Integer environment overrides are validated, not coerced: `PORT`,
-`REQUEST_TIMEOUT_MS`, `RATE_LIMIT_MAX_SEC`, and `RATE_LIMIT_MAX_MIN` must be
-non-negative integer strings, and a malformed value throws at startup.
+Integer environment overrides are validated, not coerced: `PORT` and
+`REQUEST_TIMEOUT_MS` must be positive integer strings; rate-limit maxima may be
+zero to disable a window. A malformed value throws at startup.
 
 ## Artifact Repository
 
@@ -138,7 +142,8 @@ rules rather than leaving them to individual routes:
 
 Parsed JSON is memoized in an LRU cache bounded by both `max_entries` and
 `max_size_bytes`, keyed by root and path, and only reused when the stored ETag
-still matches — so a rewritten artifact is never served from cache.
+still matches. ETags use size, mtime, and inode, so an in-place same-size rewrite
+within timestamp/inode identity granularity can retain the same cache identity.
 
 ## Validation and Pagination (`services/validation.js`)
 
@@ -165,22 +170,24 @@ final page.
   `immutable` for binary assets.
 - Binary and image responses carry an `ETag`, honor `If-None-Match` with a `304`,
   and support `HEAD`.
-- Any path that matches an OpenAPI template but arrives with another method gets
-  `405` and an `Allow: GET, HEAD` header. The route table is derived from the
-  spec, so it cannot drift from it.
+- Paths under `/api/v3` that match an OpenAPI template but arrive with another
+  method get `405` and an `Allow: GET, HEAD` header. The route handlers are
+  manually wired and the method guard is scoped to the v3 router.
 
 ## Error Handling
 
-One handler answers `application/problem+json` with `Cache-Control: no-store`
-and a `requestId` member, and logs an `api_error` JSON line. Status comes from
-the `ArtifactError` code — `NOT_FOUND` is `404`, `INVALID_ARTIFACT` and
-`IN_PROGRESS` are `503`, and everything else is `400`. Detail text for `5xx`
+The shared handler answers `application/problem+json` with `Cache-Control:
+no-store` and a `requestId` member, and logs an `api_error` JSON line. Route
+service gates and 404 handling are separate paths. Status comes from
+the `ArtifactError` code — `NOT_FOUND` is `404`, `INVALID_ARTIFACT`,
+`IN_PROGRESS`, and `MODULE_ROUTE_UNAVAILABLE` are `503`, and everything else is
+`400`. Detail text for `5xx`
 responses is replaced with a fixed string so internal paths and parser messages
 are not disclosed.
 
-Two responses deliberately do not use problem+json: the rate limiter's
-`{ "error": "Too many requests, please try again later" }` and the request
-timeout's `{ "error": "Request timed out" }` at `503`.
+Compatibility gates, retired PNG routes, legacy validation, rate limiting, and
+request timeout responses deliberately use ordinary JSON bodies rather than
+problem+json.
 
 ## Environment Variables
 
@@ -189,7 +196,8 @@ timeout's `{ "error": "Request timed out" }` at `503`.
 - `PORT`
 - `REQUEST_TIMEOUT_MS`
 - `RATE_LIMIT_MAX_SEC`, `RATE_LIMIT_MAX_MIN` — `0` disables that window
-- `ALLOWED_ORIGINS` — comma-separated exact origins; CORS is deny-all when unset
+- `ALLOWED_ORIGINS` — comma-separated origins; the default is `*`, and requests
+  without an `Origin` header proceed without CORS headers
 - `TRUST_PROXY_IPS` — comma-separated allowlist, or a hop count of `0` to `8`
 - `TRUST_PROXY` — accepted, but the bare `true` form throws under
   `NODE_ENV=production` and counts as one hop otherwise

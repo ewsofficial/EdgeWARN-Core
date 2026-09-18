@@ -4,19 +4,20 @@ An external CTAM module is a directory of code plus one declarative `module.toml
 manifest. The manifest is the only thing Phase 1 reads from an installed module:
 it is parsed and validated at discovery time, before any module code is imported
 or launched, so a broken or hostile module cannot influence its own admission.
-Discovery records an invalid manifest as a disabled module with an actionable
-reason; it never guesses.
+Discovery records an invalid manifest as `invalid` with an actionable reason;
+it never guesses.
 
 This reference describes what `src/EdgeWARN/ctam/manifest.py` accepts today. The
-schema is a Phase 0 artifact frozen in `docs/ctam/schema/status-record.schema.json`
+the schema artifacts are checked in and mirrored by the current runtime contract;
 `api_version`, and the identifiers match the OpenAPI document under
 `docs/ctam/openapi/`.
 
 ## The module root
 
-External modules live below one configurable root, anchored at the repository
-root. The directory is operator-owned and gitignored; installing or updating a
-module never modifies the EdgeWARN-Core worktree.
+External modules live below one configurable root. Relative roots resolve
+against the parent of the selected config directory; absolute roots are used as
+provided. The directory is operator-owned and gitignored; installing or updating
+a module never modifies the EdgeWARN-Core worktree.
 
 Where the root comes from, highest precedence first:
 
@@ -25,10 +26,8 @@ Where the root comes from, highest precedence first:
 3. `run.ctam_module_dir` in `config/runtime.yaml` (`config/runtime.yaml:109`,
    default `ctam_modules`)
 
-A relative value resolves against the repository root, not the working
-directory, because supervisor children are spawned with no argv and no
-predictable CWD; a bare `ctam_modules` must name one fixed tree or the parent
-and its children would scan different ones. A root that is a regular file is a
+A relative value resolves against the selected installation/config root rather
+than the working directory. A root that is a regular file is a
 misconfiguration and raises; a missing root is an empty external module set,
 which is a supported StormProb-only installation.
 
@@ -61,7 +60,7 @@ exists to remove.
 | `version` | string | — required | Three-part `X.Y.Z` (`manifest.py:43`). |
 | `api_version` | string | — required | Digits only; must be `"1"` (`manifest.py:45`). |
 | `enabled` | bool | `true` | `false` means `skipped_disabled` at discovery. |
-| `required` | bool | `false` | `true` means a failure affects the CTAM stage outcome; it never permits partial publication. |
+| `required` | bool | `false` | `true` marks a failure in the CTAM status record; the current integration caller isolates the exception and continues publication. |
 | `scope` | string | `"stormcells"` | `stormcells` or `cycle`. |
 | `entrypoint` | string array | — required | Argument vector, never a shell string. Only `{python}` is expanded. Absolute paths, shell metacharacters, and paths escaping the module directory are rejected at discovery (`manifest.py:494`). |
 | `timeout_seconds` | int | `10` | Bounded 1–30 seconds (`limits.py:46`). |

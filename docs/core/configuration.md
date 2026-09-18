@@ -4,13 +4,16 @@ EdgeWARN loads a complete, schema-validated `config/` tree before either root
 process starts work. Copy the entire tree when deploying; individual YAML files
 are not standalone configuration units.
 
-Discovery is `--config-dir`, then `EDGEWARN_CONFIG_DIR`, then the repository's
-`config/` directory. Runtime base directories are independently resolved as
+For the direct Python services, discovery is `--config-dir`, then
+`EDGEWARN_CONFIG_DIR`, then the selected installation/repository config
+directory. The package command uses `--config-path` and can fall back to its
+installed shared config directory. Runtime base directories are independently resolved as
 `--base-dir` / `--base_dir`, then `EDGEWARN_BASE_DIR`, then legacy `BASE_DIR`,
 then `filesystem.yaml`. All catalog edits require a process restart.
 
 The CTAM external-module discovery root (`run.ctam_module_dir` in
-`runtime.yaml`, default `ctam_modules`, resolved against the repository root) is
+`runtime.yaml`, default `ctam_modules`, resolved against the parent of the
+selected config directory) is
 independently overridable as `--ctam-module-dir`, then
 `EDGEWARN_CTAM_MODULE_DIR`, then the YAML value. See
 `docs/ctam/module-manifest.md`.
@@ -44,13 +47,14 @@ npm run validate-config
 PYTHONPATH=src python -m common.config.validate
 ```
 
-The GUI renderer writes float16 chunk artifacts and JSON indexes under
-`<BASE_DIR>/gui`. The retired PNG compatibility routes return `410 Gone`;
-clients consume the v3 float16 chunk resources.
+The MRMS/GOES GUI renderer writes float16 chunk artifacts and JSON indexes under
+`<BASE_DIR>/gui`. RAP uses Uint16 products and NEXRAD uses gzip-compressed polar
+artifacts. The retired PNG compatibility routes return `410 Gone`; clients
+consume the v3 render resources.
 
 ## Package command
 
-Install the command into the active `EdgeWARN-dev` environment without asking
+Install the command into the active `EdgeWARN` environment without asking
 pip to resolve runtime dependencies:
 
 ```bash

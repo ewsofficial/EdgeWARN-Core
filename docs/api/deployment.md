@@ -8,8 +8,8 @@ the unified Node API. Source of truth for the design:
 ## Services and ownership (single-writer requirements)
 
 Exactly one writer may exist per artifact family at any time. Never run two
-owners concurrently; roll back by stopping the new owner and re-enabling the
-old one.
+owners concurrently. Roll back to a versioned previous deployment or service
+unit; `src/run.py` is retired and is not a previous owner.
 
 | Service | Command | Owns |
 | --- | --- | --- |
@@ -18,17 +18,20 @@ old one.
 | NEXRAD (`nexrad`) | `python src/run_nexrad.py` | Level-II ingest, NEXRAD rendering, manifests/indexes/retention/cleanup |
 | Unified API | `npm run api` | HTTP serving only; reads heartbeats, never writes service state |
 
-An optional supervisor (`python src/run_all.py`) starts a subset of the three
-services with inherited logging; it is not part of the readiness protocol.
-The direct commands are the production path.
+The package command `edgewarn run` is the deployment-facing supervisor and can
+start supported service topologies. `python src/run_all.py` is an optional
+supervisor. Direct service commands remain independently operable, but the
+`ewmrs` topology intentionally starts the primary before its accessory service.
 
 ## Dependencies and start order
 
-- The services share only the configured base directory and config tree;
-  there is no required start order. The primary runs usefully alone; EWMRS
-  idles until the primary commits records; NEXRAD is fully independent.
-- Stopping EWMRS degrades METAR/NWS as primary integration inputs visibly
-  without blocking MRMS detection; stopping NEXRAD never touches either.
+- The services share only the configured base directory and config tree. The
+  primary runs usefully alone; the EWMRS record consumer waits for primary
+  records, while accessory ingest/render loops continue independently; NEXRAD
+  is fully independent.
+- Stopping EWMRS affects aggregate EWMRS availability. METAR compatibility
+  routes are currently ungated, so route-specific METAR/NWS degradation is not
+  exposed by the API.
 - Recommended stop order: launcher/API clients last, services first. Each
   service handles SIGINT/SIGTERM and cleans up only its own children.
 
@@ -51,8 +54,8 @@ a second instance of any service fails fast.
 EWMRS consumes `mrms-ready`/`rap-ready` records in timestamp order with
 per-phase checkpoints under `state/realtime/consumers/`. After a crash it
 resumes unacknowledged records idempotently. If it falls more than
-`cycle.max_backlog_cycles` behind, the excess oldest cycles are marked
-unrecoverable explicitly (never rendered under older timestamps) and
+`cycle.max_backlog_cycles` behind, the excess oldest cycles are abandoned in
+logs and the checkpoint is advanced (never rendered under older timestamps);
 processing resumes at the oldest still-valid record.
 
 ## systemd examples
@@ -72,7 +75,7 @@ Type=simple
 User=edgewarn
 Environment=EDGEWARN_BASE_DIR=/home/edgewarn/EdgeWARN_input
 WorkingDirectory=/opt/EdgeWARN-Core/src
-ExecStart=/opt/miniconda3/envs/EdgeWARN-dev/bin/python run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
+ExecStart=/opt/miniconda3/envs/EdgeWARN/bin/python run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
 Restart=on-failure
 RestartSec=10s
 KillSignal=SIGINT
@@ -92,11 +95,11 @@ Type=simple
 User=edgewarn
 Environment=EDGEWARN_BASE_DIR=/home/edgewarn/EdgeWARN_input
 WorkingDirectory=/opt/EdgeWARN-Core/src
-ExecStart=/opt/miniconda3/envs/EdgeWARN-dev/bin/python run_ewmrs.py
+ExecStart=/opt/miniconda3/envs/EdgeWARN/bin/python run_ewmrs.py
 Restart=on-failure
 RestartSec=10s
 KillSignal=SIGINT
-TimeoutStopSec=30
+TimeoutStopSec=40
 
 [Install]
 WantedBy=multi-user.target
@@ -112,24 +115,28 @@ Type=simple
 User=edgewarn
 Environment=EDGEWARN_BASE_DIR=/home/edgewarn/EdgeWARN_input
 WorkingDirectory=/opt/EdgeWARN-Core/src
-ExecStart=/opt/miniconda3/envs/EdgeWARN-dev/bin/python run_nexrad.py
+ExecStart=/opt/miniconda3/envs/EdgeWARN/bin/python run_nexrad.py
 Restart=on-failure
 RestartSec=10s
 KillSignal=SIGINT
-TimeoutStopSec=30
+TimeoutStopSec=40
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Container deployments should follow the same shape: one container per direct
-service, a shared mounted base directory, no cross-container
-`multiprocessing` objects.
+Container deployments may use the package supervisor in one container, as the
+repository `Dockerfile` and `compose.yaml` do, or separate direct-service
+containers. In either case, share the mounted base directory and do not pass
+cross-container `multiprocessing` objects. The unified Node API is a separate
+process/container running `npm run api`; configure its `PORT`,
+`EDGEWARN_BASE_DIR`, `EDGEWARN_CONFIG_DIR`, and health checks explicitly.
 
 ## Rollback
 
 1. Stop the new service unit (`systemctl stop edgewarn-ewmrs`).
-2. Re-enable the previous owner for that artifact family.
+2. Start the versioned previous service unit or deployment for that artifact
+   family.
 3. Keep cycle records, consumer checkpoints, and heartbeats in place — they
    are recovery evidence, not cache.
 

@@ -6,6 +6,7 @@ Post-detection enrichment is implemented under `src/EdgeWARN/process/integrate`.
 
 ```text
 src/EdgeWARN/process/integrate/
+├── __init__.py
 ├── main.py
 ├── pipeline.py
 ├── config.py
@@ -33,6 +34,7 @@ main(
     json_path=None,
     remove_old_cells=None,
     disable_ctam=False,
+    disable_ctam_modules=False,
     mrms_core_only=False,
     input_manifest=None,
 )
@@ -40,8 +42,9 @@ main(
 
 `json_path` defaults to `None` in the signature but is required at runtime — `main()` raises `ValueError` if it is not supplied. When `mrms_core_only=True`, GLM and RAP integration steps are skipped.
 
-`remove_old_cells=None` defers to `api_index.yaml`, which sets it per mode
-(`realtime: true`, `historical: false`); passing a boolean overrides that.
+`remove_old_cells=None` uses the realtime default (`True`). Historical callers
+pass the historical setting explicitly (`False`); passing a boolean overrides
+the default.
 `input_manifest` accepts the `CycleInputManifest` the tandem coordinator builds,
 so integration reads the exact files the cycle staged.
 
@@ -56,22 +59,29 @@ Major stages:
 3. GLM integration (`GLM_FLASH_COUNT`, `GLM_TOTAL_ENERGY`) — skipped when `mrms_core_only=True`
 4. RAP integration (wind/environment fields) — skipped when `mrms_core_only=True`
 5. Optional AzShear support integration (currently feature-flagged)
-6. CTAM execution unless `disable_ctam=True`
-7. Save integrated stormcell JSON
-8. Update cell history
-9. Update API cell indexes and cleanup inactive cell files
+6. Attach StormProb inputs and commit pending observation state
+7. CTAM execution unless `disable_ctam=True`; `disable_ctam_modules=True` keeps
+   built-in StormProb and skips external modules
+8. Publish the cleaned projection, cell history, public CTAM routes, StormProb
+   forecasts, and input manifest through the publication coordinator
+9. Update `stormcell_index.json` and `cell_index.json`, then clean inactive
+   cell files when `remove_old_cells` is true
 
 ## CTAM Handoff
 
-When enabled, integration calls `EdgeWARN.ctam.run.run_ctam(cells, timestamp=...)` and persists module outputs under each cell's `modules` structure (plus grid outputs when applicable).
+When enabled, integration calls `EdgeWARN.ctam.run.run_ctam_result(...)` with a
+cycle-normalized timestamp plus `json_path`, `input_manifest`, and the external
+module disable flag. Module outputs are persisted under each cell's `modules`
+structure; committed public routes are published separately.
 
 ## API and History Side Effects
 
-After save, integration updates:
+The publication coordinator updates:
 
 - per-cell history files
-- API cell index (`cell_index.json`)
-- stale cell cleanup policy (default: remove inactive cells older than 2 hours)
+- API indexes (`stormcell_index.json` and `cell_index.json`)
+- stale cell cleanup policy (inactive cells older than 120 minutes, only when
+  `remove_old_cells` is true)
 
 These side effects are required for stable API behavior.
 

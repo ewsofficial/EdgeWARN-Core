@@ -1,196 +1,254 @@
 # Ingestion Architecture
 
-EdgeWARN-Core uses shared ingest modules in `src/common/ingest` so EdgeWARN and EWMRS can consume the same staged data products.
+EdgeWARN-Core uses a filesystem-first ingest model. Remote products are
+selected and staged under the configured runtime base directory, then
+consumed by the service that owns the corresponding processing or rendering
+work. Shared implementations live under `src/common/`; `src/EdgeWARN/ingest/`
+is a compatibility re-export layer.
 
-## Module Layout
+## Service ownership
 
 ```text
-src/common/ingest/
-├── mrms/                  # MRMS + GOES discovery/download and staging
-├── nws/                   # NWS active alert ingest + registry/snapshots
-├── synoptic/              # RAP ingest
-├── nexrad/                # NEXRAD Level II ingest, parser, and pipeline
-├── metar.py               # METAR ingest and parsing
-├── wpc/                   # WPC surface analysis ingest and GeoJSON conversion
-└── aws_async_compat.py    # AWS async/sync compatibility shim used by ingest helpers
+run_edgewarn.py
+  MRMS detection + integration ──┐
+  raw RAP ────────────────────────┼─> exact cycle manifest
+  scan-time GLM (when enabled) ──┘       │
+                                         ├─ mrms-ready ─> run_ewmrs.py
+                                         └─ rap-ready  ─> run_ewmrs.py
+
+run_ewmrs.py
+  committed-record consumer, MRMS rendering, RAP Uint16 conversion
+  GOES ABI ingest + rendering, METAR, NWS alerts, WPC surface analysis
+
+run_nexrad.py
+  NEXRAD Level-II discovery/download/parse/staging + polar rendering
 ```
 
-## Staged Shared Ingest
+The primary service does not import or start EWMRS, NEXRAD, METAR, NWS, WPC,
+or the GOES ABI loops. EWMRS does not download MRMS or RAP and does not render
+NEXRAD. NEXRAD is an independent service rather than an EWMRS child.
 
-`src/common/pipeline/coordinator.py` (`run_staged_ingest_cycle`) drives staged readiness for the primary cycle:
+## Shared staged MRMS/RAP cycle
 
-1. Detection inputs ready (MRMS detection subset) — released to the EdgeWARN worker immediately
-2. Render MRMS inputs ready (detection + MRMS integration subset) — committed as a durable `mrms-ready` record for the EWMRS service
-3. Raw RAP validated — committed as a durable `rap-ready` record
-4. Base EdgeWARN integration inputs ready (both MRMS groups + raw RAP)
-5. EdgeWARN integration inputs ready (base inputs + scan-time GLM when enabled)
+`src/common/pipeline/coordinator.py:run_staged_ingest_cycle` is used by the
+realtime primary and historical EdgeWARN processing. It starts MRMS detection,
+MRMS integration, and (when requested) RAP ingestion concurrently. Each
+ingest path is async-first and has a synchronous fallback where supported.
 
-Since the decomposition, cross-service handoff is durable: `run_edgewarn.py`
-publishes the immutable phase records under
-`<BASE_DIR>/state/realtime/cycles/<cycle-id>/`, and `run_ewmrs.py` consumes
-them in order, rendering from each record's exact pinned paths with per-phase
-consumer checkpoints. GOES ABI ingest and rendering run entirely inside the
-EWMRS service as a poll-based loop over locally staged ABI files; NEXRAD runs
-entirely as its own service. The RAP Uint16Array conversion is an
-EWMRS-owned artifact executed by the consumer after it accepts a rap-ready
-record.
+The coordinator returns a `CycleState` containing an immutable
+`CycleInputManifest`. A manifest records the requested UTC cycle, the exact
+local path for every selected input, product/family/source identity, encoded
+analysis time, validation status, and whether an input is current or previous
+history. Alignment is checked from product timestamps; filesystem modification
+time is not used as the observation timestamp.
 
-## MRMS + GOES
+Readiness transitions are emitted in dependency order:
 
-`src/common/ingest/mrms/main.py` provides async-first ingestion with sync fallback paths.
+1. Detection MRMS inputs: the configured detection subset is complete and
+   timestamp-valid, so the EdgeWARN detection worker may run.
+2. EWMRS MRMS inputs: detection and integration MRMS batches are both complete.
+3. Base EdgeWARN integration inputs: MRMS inputs plus a valid raw RAP input,
+   unless RAP is disabled (for example, `mrms-core-only`).
+4. EdgeWARN integration inputs: base inputs plus scan-time GLM when GOES/GLM is
+   enabled. GOES ABI availability is not part of this primary barrier.
 
-Key entry points:
+Production realtime mode calls the coordinator with `include_goes=False`.
+Scan-time GLM is downloaded separately by the primary and added to the
+integration manifest only after its own timestamp/alignment validation.
+`include_goes` remains available to coordinator callers and tests, but it is
+not the production ABI-render path.
 
-- `download_all_files_async(dt, max_entries=None, remove_old_files=None)`
-- `download_detection_files_async(dt, ...)`
-- `download_integration_files_async(dt, ...)`
-- `download_ewmrs_files_async(dt, ...)`
-- `download_all_files(dt, ...)` (async wrapper with sync fallback)
+The primary publishes successful phases through
+`src/util/runtime/handoff.py`. Publication is atomic and idempotent:
 
-`max_entries` and `remove_old_files` default to `None` on every entry point so
-the catalogs stay the single owner. They resolve to
-`runtime.yaml` `cycle.ingest_max_entries` and `ingest.yaml`
-`mrms.remove_old_files` respectively; a caller-supplied value still wins.
+```text
+<BASE_DIR>/state/realtime/cycles/<cycle-id>/mrms-ready.json
+<BASE_DIR>/state/realtime/cycles/<cycle-id>/rap-ready.json
+```
 
-Notes:
+The record contains the canonical UTC cycle ID, producer/run metadata, the
+manifest's exact pinned paths, tolerances, and warnings. A phase is not
+published when its required inputs are unavailable. Publication failure is
+logged as a handoff problem and does not rewrite an existing incompatible
+record or make the primary cycle falsely successful.
 
-- Detection and integration modifiers are staged separately
-- GOES ingestion can run as part of the full ingest cycle or as a decoupled background loop in realtime mode
-- GOES ABI staging uses `ABI-L1b-RadC` channel files from `noaa-goes19`; GLM staging remains a separate modifier path
-- GOES RGB composites are not staged or rendered server-side; they are derived client-side from the staged ABI channel set
-- Cleanup is constrained to configured runtime directories
+`run_ewmrs.py` runs `util.runtime.ewmrs_consumer.EwmrsRecordConsumer` as a
+supervised child. It drains `mrms-ready` and `rap-ready` in cycle order, strictly
+re-reads and validates each record at the consumption boundary, and renders or
+converts from the recorded paths rather than selecting a newer local file.
+There is a separate durable checkpoint for each phase under
+`<BASE_DIR>/state/realtime/consumers/`. A checkpoint advances only after
+successful artifact publication; render failures remain retryable. Malformed,
+missing, misaligned, or irrecoverably incomplete records are logged and marked
+unrecoverable so they cannot block the backlog indefinitely. Backlogs beyond
+`cycle.max_backlog_cycles` are also explicitly abandoned.
 
-See `docs/core/goes_pipeline.md` for the end-to-end GOES readiness and render flow.
-
-## NWS Alerts
-
-`src/common/ingest/nws/main.py` downloads active alerts from `https://api.weather.gov/alerts/active`, applies GeoMapper processing, and updates the alert registry.
-
-Before starting a pipeline that ingests NWS alerts, synchronize the required
-zone assets with `edgewarn sync-nws-zones --apply`. The pipeline fails with a
-clear preflight error if no zone assets are available. The command wraps the NWS
-asset maintenance utility and supports:
-
-- `--assets-dir`
-- `--zone-types`
-- `--timeout-seconds`
-- `--max-retries`
-- `--max-workers`
-- `--pause-seconds`
-- `--progress` / `--no-progress`
-- `--apply` (without it, the command performs a dry run)
-- `--report-path`
-- `--config-path`
-
-Key behavior:
-
-- Blocklist filtering for non-target event types
-- Deduplicated alert tracking with `first_seen`, `last_seen`, and `expires`
-- Timestamp snapshot generation for API serving
-- TTL cleanup for stale registry and snapshot files
-
-Primary entry points:
-
-- `download_alerts(dt)`
-- `download_alerts_async(dt)`
-
-## RAP / Synoptic
-
-`src/common/ingest/synoptic/main.py` stages RAP files for integration.
-When the EWMRS service consumes a committed rap-ready record, it runs the RAP Uint16Array conversion pipeline for configured layers.
-
-Entry points:
-
-- `download_rap_async(dt)`
-- `download_rap(dt)`
-
-RAP selection is local-first and searches backward from the requested UTC
-analysis hour. Candidates must be no older than the configured analysis-age
-limit, which defaults to 180 minutes and can be overridden with
-`EDGEWARN_RAP_MAX_AGE_MINUTES`. The limit is measured from the requested scan
-timestamp to the analysis timestamp encoded in the RAP filename; filesystem
-modification time is not used as a freshness signal.
-
-Definitive S3 404 responses advance to the next eligible analysis without
-repeating the same key through the synchronous client. Transport or
-authentication failures may receive one synchronous source fallback. A selected
-file is logged with its analysis timestamp, age, source, and local path. If the
-window is exhausted, the RAP readiness error records the configured limit and
-the result for every checked S3 key.
-
-RAP cache cleanup uses the same encoded analysis timestamps and staleness
-policy. It retains at most the newest three eligible analyses under
-`<BASE_DIR>/data/RAP`.
-
-RAP Uint16Array conversion is configured by the `rap_uint16` section of
-`config/ewmrs_pipeline.yaml`, read through the accessors in
-`src/EWMRS/rap/config.py`. It writes one raw little-endian `data.u16` file per
-configured data layer:
+RAP Uint16 conversion is EWMRS-owned derived processing. For each accepted
+`rap-ready` record, configured layers are written as:
 
 ```text
 <BASE_DIR>/gui/RAP/<outdir>/<YYYYMMDD-HHMM00>/data.u16
 <BASE_DIR>/gui/RAP/<outdir>/<YYYYMMDD-HHMM00>/metadata.json
 ```
 
-The path segment is the layer's `outdir`, which is deliberately distinct from
-its `name`: the layer named `RAP_Temperature_2m` writes to `Temperature_2m`.
-`outdir` is relative to `<BASE_DIR>/gui/RAP`.
+`data.u16` contains the full `Ni * Nj` little-endian grid. Metadata identifies
+the layer, source file, timestamp, shape/grid, dtype, byte order, scale,
+missing-value sentinel, units, matched GRIB keys, and optional layer metadata.
+`outdir` is the configured output directory and may differ from the layer
+name; `colormap_key` is internal renderer metadata, not an API layer name.
 
-Each `data.u16` contains the full `Ni * Nj` grid from one matched RAP GRIB
-message. Each `metadata.json` records the layer name, timestamp, source file,
-array shape, grid, dtype, byte order, scale, missing-value sentinel, units, and
-the matched GRIB keys needed to reconstruct and render values from a browser
-`Uint16Array`. `colormap_key` and `description` are written only when the layer
-declares them, so consumers must treat both as optional.
+Historical processing uses the same shared staged coordinator with EWMRS and
+GOES disabled. `src/process_historical.py` selects the best available MRMS
+cycle minute by minute, runs detection from the returned manifest, and runs
+integration only when its manifest inputs are available.
 
-RAP `colormap_key` values are internal renderer metadata and are not exposed by the API.
-They are *not* layer names: several layers share one key, so `RAP_Temperature_2m`
-resolves to `RAP_Temperature_LL` and both 10 m wind components resolve to
-`RAP_Wind_LL`. Colormap definitions follow NOAA/SPC/GEMPAK lineage where
-practical machine-readable standards are available and use documented project
-fallbacks for remaining variables.
+## MRMS
+
+`src/common/ingest/mrms/` provides the MRMS catalog, timestamp selection,
+async/synchronous S3 and HTTPS download paths, decompression/parsing, atomic
+staging, and cleanup. Important entry points are:
+
+- `download_detection_files_async(dt, ...)`
+- `download_integration_files_async(dt, ...)`
+- `download_all_files_async(dt, ...)`
+- `download_detection_files(dt, ...)` and `download_integration_files(dt, ...)`
+  for synchronous fallback paths
+
+Detection and integration modifiers are deliberately separate. A structured
+`DownloadBatchResult` reports attempted, downloaded, and failed products;
+readiness requires every requested product to be present and successful.
+`max_entries` and `remove_old_files` default to the runtime/catalog settings,
+so configuration remains the source of truth unless a caller explicitly
+overrides them. Cleanup is restricted to configured runtime directories.
+
+ProbSevere is a distinct MRMS-family product with its own bucket-path and JSON
+handling. Its product identity must be preserved in manifests and downstream
+processing.
+
+## GOES ABI and scan-time GLM
+
+GOES ABI is an EWMRS-owned background pipeline. The supervised GOES ingest loop
+polls `noaa-goes19` for `ABI-L1b-RadC` channel files, preferring async download
+with sync fallback. It stages channels locally; the poll-based render loop
+selects a complete configured ABI set (currently C01-C16) near the target
+time and renders each distinct input selection once. A scan-window filename is
+valid across its encoded start/end interval, and readiness requires every
+configured channel.
+
+GOES ABI source files are staged in configured per-channel runtime directories.
+Single-channel GUI products are written under `<BASE_DIR>/gui` as tiled
+float16/gzip chunks with schema-version-2 product and timestamp indexes. RGB
+composites are derived client-side; they are not staged or rendered server-side.
+See `docs/core/goes_pipeline.md` for the render and API representation.
+
+GLM uses the same NOAA GOES-19 source family (`GLM-L2-LCFA`) but has different
+ownership and readiness semantics: the realtime primary downloads scan-time
+GLM when enabled and gates EdgeWARN integration on a valid pinned GLM input.
+It is not part of the EWMRS ABI render loop.
+
+## RAP / Synoptic
+
+`src/common/ingest/synoptic/` stages RAP files for EdgeWARN integration. The
+selection is local-first and walks backward through eligible UTC analysis hours
+from the requested scan. The default maximum analysis age is 180 minutes and
+can be overridden with `EDGEWARN_RAP_MAX_AGE_MINUTES`. Freshness is determined
+from the analysis timestamp encoded in the RAP filename, not filesystem mtime.
+
+Definitive S3 404s advance to the next eligible analysis without retrying the
+same key through the synchronous client; transport/authentication failures may
+use one synchronous source fallback. When the search window is exhausted, the
+readiness error includes the configured limit and checked-key results. RAP
+cleanup uses the same encoded-time policy and retains at most the newest three
+eligible analyses under `<BASE_DIR>/data/RAP`.
 
 ## METAR
 
-`src/common/ingest/metar.py` ingests hourly METAR cycle files, parses reports, enriches station coordinates from the station cache, filters to CONUS bounds, and writes hourly JSON snapshots.
+`src/common/ingest/metar.py` ingests hourly Aviation Weather METAR cycle files,
+using a cached station database for coordinates. It parses reports, enriches
+station locations, filters to configured CONUS bounds, writes hourly snapshots,
+and cleans old snapshots:
 
-Entry points:
+```text
+<BASE_DIR>/data/METAR/METAR_YYYYMMDD-HHz.json
+```
 
-- `ingest_metars()`
-- `ingest_metars_async()`
+The EWMRS service runs the async entry point on the configured hourly boundary;
+sync and async paths share the same parsing/output behavior.
 
-Output file pattern:
+## NWS alerts
 
-- `METAR_YYYYMMDD-HHz.json`
+`src/common/ingest/nws/` downloads the active-alert feed from the configured
+National Weather Service URL, filters blocklisted event types, maps UGC zones
+to geometry, and updates a deduplicated registry. It reconciles the registry
+against the current active ID set and applies expiration/TTL cleanup while
+writing timestamp snapshots for API serving.
+
+NWS zone assets are an operator-managed prerequisite. Run
+`edgewarn sync-nws-zones --apply` before enabling NWS on a new runtime; EWMRS
+fails preflight if enabled NWS ingest has no usable zone assets. The loop polls
+the active feed on its configured interval. Its registry and timestamp
+snapshots are stored under `<BASE_DIR>/data/Alerts/official/` (raw downloads,
+when retained, are under `<BASE_DIR>/data/NWS_Raw/`).
 
 ## NEXRAD Level II
 
-`src/common/ingest/nexrad` manages realtime Level II discovery, chunked S3 download, parsing, and staged output under `<BASE_DIR>/data/NEXRAD_Level2`.
+`src/common/ingest/nexrad/` owns independent realtime Level-II processing:
+volume discovery, station filtering, chunked S3 download, VCP probing,
+stream/boundary handling, parsing, worker-pool execution, staged writes, and
+retention. `run_nexrad.py` supervises both the ingest and render loops; it does
+not depend on the MRMS/RAP phase records.
 
-Current components include:
-
-- `main.py` / `service.py`: realtime ingest entry points
-- `coordinator.py`: volume coordination
-- `s3_chunks.py`, `s3_async.py`, `worker_pool.py`, `worker.py`: download and worker execution
-- `parser.py`, `models.py`, `writer.py`: Level II parsing and staged artifact writing
-- `pipeline/`: station filtering, volume discovery, pending-volume models, and a standalone `__main__.py`
-
-EWMRS polls staged NEXRAD outputs and writes gzip-compressed polar intermediate fields to:
+Staged Level-II data and manifests live under:
 
 ```text
-<BASE_DIR>/gui/NEXRAD/<SITE>/<ELEVATION>/<SITE>_<PRODUCT>_<ELEVATION>_<YYYYMMDD-HHMMSS>.bin.gz
+<BASE_DIR>/data/NEXRAD_Level2/<SITE>/...
+<BASE_DIR>/data/NEXRAD_Level2/manifests/...
 ```
 
-Those files are served through the EWMRS `/nexrad` routes documented in `docs/api/ewmrs_api_endpoints.md`.
+The NEXRAD renderer polls those local staged outputs and writes gzip-compressed
+polar intermediates under:
 
-## WPC Surface Analysis
+```text
+<BASE_DIR>/gui/NEXRAD/<SITE>/<ELEVATION>/
+  <SITE>_<PRODUCT>_<ELEVATION>_<YYYYMMDD-HHMMSS>.bin.gz
+```
 
-`src/common/ingest/wpc/main.py` fetches coded surface analysis, parses it, converts it to GeoJSON, and writes:
+Discovery, chunk-listing, downloads, full scans, and worker liveness are
+bounded and observable; stale worker heartbeats cause restart handling. The
+resulting files are served by the EWMRS/NEXRAD API adapters documented in
+`docs/api/ewmrs_api_endpoints.md`.
 
-- `latest.geojson`
-- timestamped `wpc_sfc_YYYYMMDD-HH0000.geojson` artifacts
+## WPC surface analysis
 
-Entry points:
+`src/common/ingest/wpc/` downloads the latest valid coded surface analysis,
+using fixed WPC analysis hours and a previous-analysis fallback. It parses the
+coded product, converts fronts/troughs and pressure centers to GeoJSON, writes
+the latest artifact, writes timestamped copies for the current and previous
+analysis, and removes old timestamped files:
 
-- `fetch_surface_analysis(dt=None, save_timestamped=False)`
-- `run_wpc_ingest()`
+```text
+<BASE_DIR>/wpc/surface_analysis/latest.geojson
+<BASE_DIR>/wpc/surface_analysis/wpc_sfc_YYYYMMDD-HH0000.geojson
+```
+
+TLS certificate verification is required for WPC downloads. The EWMRS WPC
+loop runs on the configured analysis boundary and exposes these artifacts
+through the WPC API routes.
+
+## Runtime layout
+
+All generated data is rooted at the resolved `<BASE_DIR>`:
+
+```text
+<BASE_DIR>/
+├── data/      # MRMS, RAP, METAR, NWS alerts, NEXRAD, and other staged data
+├── gui/       # MRMS/GOES/RAP/NEXRAD render artifacts and indexes
+├── state/     # realtime cycle records, consumer checkpoints, service state
+└── wpc/       # WPC surface-analysis GeoJSON
+```
+
+The primary CLI accepts `--base_dir`/`--base-dir`; the API and accessory
+services resolve their supported base-directory flags/environment settings
+through their service parsers. Do not introduce repository-local output paths:
+the runtime filesystem is the source of truth for staged inputs, durable
+handoff, rendered artifacts, and API visibility.

@@ -10,24 +10,25 @@ These legacy EWMRS routes are compatibility adapters mounted by the unified
 - Response format: JSON for metadata/list routes, gzip-compressed float16 for
   render chunks, raw binary for RAP Uint16 arrays
 
-There is no separate EWMRS process, port, or configuration surface. These routes
-share the unified service's runtime settings, documented in
+The Node API has no separate EWMRS port or configuration surface, but the Python
+EWMRS producer remains a separate `run_ewmrs.py` service. These routes share the
+unified API's runtime settings, documented in
 `docs/api/api_implementation.md`:
 
 - Default port `5000`; debug port `3001` via `--debug-server`
 - Base directory: `--base-dir` (or `--base_dir`), then `EDGEWARN_BASE_DIR`, then
   `BASE_DIR`, then `config/filesystem.yaml`
-- Rate limits are the unified ones — `40` requests per second and `2000` per
+- Rate limits are the unified ones — `100` requests per second and `6000` per
   minute from `config/api.yaml`, overridable with `RATE_LIMIT_MAX_SEC` and
   `RATE_LIMIT_MAX_MIN`, where `0` disables a window. There are no
   `--ewmrs-rate-limit-*` flags and no `EWMRS_`-prefixed environment variables.
 
-Every route below sets `Deprecation: true` and
-`Link: </api/v3/openapi.json>; rel="deprecation"`. None of them sets
-`Cache-Control`; the tuned cache lifetimes apply to `/api/v3` only. Error
-responses use the shared `application/problem+json` handler with the status
-mapping in `docs/api/api_endpoints.md`, except where a route builds its own body
-as noted.
+Legacy adapter routes below generally set `Deprecation: true` and
+`Link: </api/v3/openapi.json>; rel="deprecation"`; `GET /` and v3 routes do not.
+Successful compatibility responses generally do not set tuned cache headers;
+handled errors use `Cache-Control: no-store`. Error responses use the shared
+problem handler where applicable, while legacy gates and retired/custom routes
+may return ordinary JSON bodies.
 
 ## Root Endpoints
 
@@ -63,12 +64,11 @@ Response:
 
 Currently mapped products include MRMS layers and GOES products.
 
-- `CompRefQC`, `EchoTop18`, `EchoTop30`, `RALA`, `Ref0C`, `RefM5C`, `RefM15C`
+- `MRMS_MergedReflectivityQC`, `MRMS_EchoTop18`, `MRMS_EchoTop30`, `MRMS_RALA`, `MRMS_Reflectivity0C`, `MRMS_ReflectivityM5C`, `MRMS_ReflectivityM15C`
 - `PrecipRate`, `QPE_01H`, `VIL`, `VILDensity`, `VII`, `MESH`, `NLDN`
 - `AzShearLow`, `AzShearMid`
-- `GOES_ABI_C01`, `GOES_ABI_C02`, `GOES_ABI_C03`, `GOES_ABI_C04`, `GOES_ABI_C05`, `GOES_ABI_C06`
-- `GOES_ABI_C07`, `GOES_ABI_C08`, `GOES_ABI_C09`, `GOES_ABI_C10`, `GOES_ABI_C11`, `GOES_ABI_C12`
-- `GOES_ABI_C13`, `GOES_ABI_C14`, `GOES_ABI_C15`, `GOES_ABI_C16`
+- `GOES_ABI_C01_Reflectance` through `GOES_ABI_C06_Reflectance`
+- `GOES_ABI_C07_BrightnessTemp` through `GOES_ABI_C16_BrightnessTemp`
 
 ### GET /renders/fetch?product={product}
 
@@ -181,7 +181,8 @@ Runtime layout:
 <BASE_DIR>/gui/NEXRAD/<SITE>/<ELEVATION>/<SITE>_<PRODUCT>_<ELEVATION>_<YYYYMMDD-HHMMSS>.bin.gz
 ```
 
-EWMRS populates these files by polling local ingest outputs under
+The standalone NEXRAD service populates these files by polling local ingest
+outputs under
 `<BASE_DIR>/data/NEXRAD_Level2` every `config/ewmrs_pipeline.yaml`
 `nexrad_gui.poll_interval_seconds` (`30`), considering only artifacts newer than
 `nexrad_gui.retention_minutes` (`120`). If a same-timestamp GUI file already
@@ -270,7 +271,8 @@ Returns available RAP layer folders under `<BASE_DIR>/gui/RAP` that contain an `
 Responses:
 
 - `200`: `string[]`
-- `500`: read/server failure
+- `400`: invalid or unavailable directory
+- `503`: malformed or in-progress `index.json`
 
 Example:
 
@@ -443,7 +445,8 @@ Responses:
 
 - `200`: `string[]`; returns `[]` when the WPC output directory does not exist
 - `400`: missing or unsupported `type`
-- `500`: directory read failure
+- `400`: invalid or unavailable directory
+- `503`: malformed or in-progress GeoJSON/index content
 
 Example:
 
@@ -466,7 +469,8 @@ Responses:
 - `200`: GeoJSON object
 - `400`: missing/unsupported `type`, missing timestamp, malformed timestamp, or resolved path escaping the WPC root
 - `404`: requested timestamp file not found
-- `500`: read/parse failure
+- `400`: invalid or unavailable directory
+- `503`: malformed or in-progress GeoJSON content
 
 ## GOES Product Notes
 
@@ -476,22 +480,22 @@ GOES products available through the render routes are the GUI folder names below
 
 | Product | Backing render |
 | --- | --- |
-| `GOES_ABI_C01` | `GOES_ABI_C01_Reflectance` |
-| `GOES_ABI_C02` | `GOES_ABI_C02_Reflectance` |
-| `GOES_ABI_C03` | `GOES_ABI_C03_Reflectance` |
-| `GOES_ABI_C04` | `GOES_ABI_C04_Reflectance` |
-| `GOES_ABI_C05` | `GOES_ABI_C05_Reflectance` |
-| `GOES_ABI_C06` | `GOES_ABI_C06_Reflectance` |
-| `GOES_ABI_C07` | `GOES_ABI_C07_BrightnessTemp` |
-| `GOES_ABI_C08` | `GOES_ABI_C08_BrightnessTemp` |
-| `GOES_ABI_C09` | `GOES_ABI_C09_BrightnessTemp` |
-| `GOES_ABI_C10` | `GOES_ABI_C10_BrightnessTemp` |
-| `GOES_ABI_C11` | `GOES_ABI_C11_BrightnessTemp` |
-| `GOES_ABI_C12` | `GOES_ABI_C12_BrightnessTemp` |
-| `GOES_ABI_C13` | `GOES_ABI_C13_BrightnessTemp` |
-| `GOES_ABI_C14` | `GOES_ABI_C14_BrightnessTemp` |
-| `GOES_ABI_C15` | `GOES_ABI_C15_BrightnessTemp` |
-| `GOES_ABI_C16` | `GOES_ABI_C16_BrightnessTemp` |
+| `GOES_ABI_C01_Reflectance` | `GOES_ABI_C01_Reflectance` |
+| `GOES_ABI_C02_Reflectance` | `GOES_ABI_C02_Reflectance` |
+| `GOES_ABI_C03_Reflectance` | `GOES_ABI_C03_Reflectance` |
+| `GOES_ABI_C04_Reflectance` | `GOES_ABI_C04_Reflectance` |
+| `GOES_ABI_C05_Reflectance` | `GOES_ABI_C05_Reflectance` |
+| `GOES_ABI_C06_Reflectance` | `GOES_ABI_C06_Reflectance` |
+| `GOES_ABI_C07_BrightnessTemp` | `GOES_ABI_C07_BrightnessTemp` |
+| `GOES_ABI_C08_BrightnessTemp` | `GOES_ABI_C08_BrightnessTemp` |
+| `GOES_ABI_C09_BrightnessTemp` | `GOES_ABI_C09_BrightnessTemp` |
+| `GOES_ABI_C10_BrightnessTemp` | `GOES_ABI_C10_BrightnessTemp` |
+| `GOES_ABI_C11_BrightnessTemp` | `GOES_ABI_C11_BrightnessTemp` |
+| `GOES_ABI_C12_BrightnessTemp` | `GOES_ABI_C12_BrightnessTemp` |
+| `GOES_ABI_C13_BrightnessTemp` | `GOES_ABI_C13_BrightnessTemp` |
+| `GOES_ABI_C14_BrightnessTemp` | `GOES_ABI_C14_BrightnessTemp` |
+| `GOES_ABI_C15_BrightnessTemp` | `GOES_ABI_C15_BrightnessTemp` |
+| `GOES_ABI_C16_BrightnessTemp` | `GOES_ABI_C16_BrightnessTemp` |
 
 Behavior notes:
 

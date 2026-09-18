@@ -1,12 +1,16 @@
 # StormProb database (input schema v1)
 
 The EdgeWARN publication process writes `<BASE_DIR>/data/stormprob/stormprob.sqlite3`.
-It uses SQLite WAL, foreign keys, a five-second busy timeout, and one `BEGIN
-IMMEDIATE` transaction per cycle. Inference and other readers use read-only
+It uses SQLite WAL, foreign keys, a five-second busy timeout, and transactional
+cycle writes. The pre-CTAM pending-observation commit and the later forecast/
+projection publication are currently separate transaction boundaries; they are
+not one atomic transaction. Inference and other readers use read-only
 connections. The database is the source of model features; generated
 `stormcells_*.json` and `cells/<id>.json` are compatibility projections for the
 API and existing external CTAM file scopes. Those projections omit the private
-`stormprob` input record. Do not delete old JSON during this rollout.
+`stormprob` input record. Do not delete old JSON during this rollout unless the
+migration/retention policy explicitly permits it; realtime cleanup can remove
+inactive files.
 
 `cycles` stores the normalized UTC analysis time, selected source manifest,
 publication state, and a recovery projection. `cell_observations` stores stable
@@ -15,11 +19,11 @@ readiness, and a legacy-shaped projection. `feature_values` stores a 135-value
 ordered float32 vector, the `stormprob-input/v1` schema and order checksum, raw
 named values, units, source analysis times, and quality flags. `radial_profiles`
 stores 64 float32 kilometer radii and polygon log area. `forecasts` has one row
-per cell, analysis time, lead (15/30/45/60 minutes), and model version. Until
-the models are deployed, the four `stormprob-pending/v1` rows explicitly report
-`not-computed/model-not-deployed` or `skipped/input-not-ready`; they are not
-predictions. A later real-model row can be inserted in the same cycle
-transaction via `commit_cycle(..., forecasts=...)`.
+per cell, analysis time, lead (15/30/45/60 minutes), and model version. The
+packaged `stormprob/v1` model is deployed. Pending companion rows can still
+explicitly report `not-computed/model-not-deployed` or
+`skipped/input-not-ready`; they are not predictions. Forecast rows can be
+inserted through `commit_cycle(..., forecasts=...)` after inference.
 
 Centroids and detection polygons are `[latitude, longitude]` in the source
 domain. Operational forecast polygons use GeoJSON `[longitude, latitude]` and
@@ -62,8 +66,8 @@ counts, identities, parseable timestamps, and SHA-256 hashes. Each source file
 commits atomically; identical reruns skip it, and changed source bytes fail
 closed. Legacy source files are retained. Fields absent from legacy JSON stay
 missing with the Phase 1 sentinel/quality policy. A pre-import SQLite backup is
-written under `data/stormprob/backups/`; the seven newest managed backups are
-retained. The importer runs SQLite integrity and foreign-key checks after
+written under `data/stormprob/backups/` when an existing database is present;
+managed backup retention is applied by the backup path. The importer runs SQLite integrity and foreign-key checks after
 completion. To roll back the runtime, restore the previous JSON/API projection
 and stop reading the new database; leave the StormProb database and model
 assets intact for investigation.
@@ -72,7 +76,8 @@ Successful realtime publication also makes one online SQLite backup per UTC
 day under the same managed backup directory and retains the seven newest. A
 backup failure is logged without changing the already committed cycle.
 
-On runtime startup, recovery first completes prepared CTAM JSON journals. A
+At the start of a valid detection cycle, recovery first completes prepared CTAM
+JSON journals; this is not a general service-startup recovery gate. A
 journal produced by the database-enabled pipeline records its committed cycle
 dependency, so recovery refuses to expose JSON if that cycle is missing from
 SQLite. It then recreates missing public snapshots and cell histories from

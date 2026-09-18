@@ -9,15 +9,18 @@ For backing file schemas, see `docs/api/data_keys.md`.
 ## API Overview
 
 - Base URL: `/api/v2`
-- Response format: JSON
+- Response format: JSON for metadata/resources; binary for RAP/NEXRAD/render
+  payload routes
 - Version behavior:
   - `2.x` when `NODE_ENV=production` (`api.yaml`
     `server.production_version_label`)
   - the `package.json` version otherwise, currently `3.0.0`
 
-Every route in this document is a compatibility adapter. Each response carries
-`Deprecation: true` and `Link: </api/v3/openapi.json>; rel="deprecation"`, and
-none of them sets `Cache-Control` — the tuned cache lifetimes in
+The v2 and legacy routes are compatibility adapters. Adapter responses generally
+carry `Deprecation: true` and `Link: </api/v3/openapi.json>; rel="deprecation"`;
+the unified root, health routes, and v3 routes do not. Successful compatibility
+responses do not use the v3 cache policy, while shared error responses set
+`Cache-Control: no-store`; the tuned cache lifetimes in
 `api.yaml` `cache_control_max_age` apply to `/api/v3` only. The v3 router's
 query-parameter allowlist is likewise not applied here.
 
@@ -34,11 +37,12 @@ the error code, not chosen per route:
 | `INVALID_ARTIFACT` | `503` | artifact over its size limit, or failing a format invariant |
 | `IN_PROGRESS` | `503` | artifact unparseable, typically a partially written JSON file |
 | `INVALID_PATH` | `400` | rejected identifier, timestamp, traversal attempt, or symlink |
+| `MODULE_ROUTE_UNAVAILABLE` | `503` | declared CTAM route is unavailable |
 
 A malformed on-disk JSON file therefore surfaces as `503`, not `500`; `500` is
-reserved for an unexpected non-`ArtifactError` throw. The one place a
-compatibility route builds its own body is the mutually-exclusive-parameter
-rejection on the alert routes, described below.
+reserved for an unexpected non-`ArtifactError` throw. Compatibility routes also
+build custom bodies for retired PNG routes, unknown render products, invalid WPC
+types, legacy service gates, and the mutually-exclusive alert parameters.
 
 ## Root Endpoints
 
@@ -226,12 +230,16 @@ Gone`. They are retained only to give old clients an explicit migration error.
 
 GOES products exposed through those routes include:
 
-- scalar ABI folders `GOES_ABI_C01` through `GOES_ABI_C16`
+- full scalar ABI folders `GOES_ABI_C01_Reflectance` through
+  `GOES_ABI_C06_Reflectance` and `GOES_ABI_C07_BrightnessTemp` through
+  `GOES_ABI_C16_BrightnessTemp`
 
 Behavior notes:
 
 - ABI single-channel products are generated from staged `ABI-L1b-RadC` channels on the GOES CONUS `EPSG:3857` tile grid.
-- Missing or time-misaligned channels skip only the affected layer; other GOES products continue rendering.
+- Readiness requires a complete aligned ABI set; a missing or time-misaligned
+  channel suppresses the GOES render pass. Failures inside an eligible layer
+  are isolated.
 - Current GOES and MRMS renders publish only schema-version-2 float16 chunks.
 
 See `docs/api/ewmrs_api_endpoints.md` for the full EWMRS route contracts and `docs/core/goes_pipeline.md` for the ingest-to-render flow.
@@ -310,15 +318,15 @@ classified as one of:
 | `degraded` | active but reporting degraded children; degraded services still serve requests |
 | `unsupported-schema` | file exists but fails schema validation |
 
-Route families declare exactly one required service. Enforced families:
+Gated route families declare a required service. Enforced families:
 
 | Required service | Route families |
 | --- | --- |
-| `edgewarn` | `/api/v3/cells*`, `/api/v3/storm-snapshots*`, `/api/v3/alert-snapshots*`, `/api/v3/alerts*`, and legacy `/api/v2/features/*` adapters |
+| `edgewarn` | `/api/v3/cells*`, `/api/v3/storm-snapshots*`, `/api/v3/alert-snapshots*`, `/api/v3/alerts*`, `/api/v3/modules*`, and legacy `/api/v2/features/*` adapters |
 | `ewmrs` | `/api/v3/render-products*`, `/api/v3/models/rap/*`, `/api/v3/analyses/wpc/*`, and the legacy `/renders/*`, `/rap/*`, `/wpc/*` adapters |
 | `nexrad` | `/api/v3/radar-sites*` and the legacy `/nexrad/*` adapters |
 
-When the required service is not active, requests receive
+When the required service is neither active nor degraded, requests receive
 `503` instead of silently serving stale artifacts.
 
 Gated legacy responses retain the `Deprecation: true` and `Link: </api/v3/openapi.json>; rel="deprecation"` headers.
@@ -377,18 +385,15 @@ All return `410 Gone` with migration guidance to `/api/v2`.
 - Helmet security headers and compression are enabled. Compression skips the
   media types matched by `api.yaml` `security.compression_skip_media`, which is
   `image/*`.
-- CORS is deny-all by default in **every** environment, production or not.
-  `ALLOWED_ORIGINS` (or `api.yaml` `security.allowed_origins`) is an exact
-  allowlist of bare `scheme://host[:port]` origins; an origin absent from it and
-  a request with no `Origin` header are both refused, and `*` is rejected
-  outright. There is no permissive non-production branch — that behavior
-  belonged to the removed `src/EdgeWARN/api/server.js`.
+- CORS defaults to `*` in `api.yaml`; configured origins can narrow it. A
+  request without an `Origin` header proceeds without CORS headers, while
+  browser origins are checked against the configured list.
 - Credentialed cross-origin requests are not supported: `security.cors.credentials`
   is schema-pinned to `false`, and the allowed methods and headers can be
   narrowed by YAML but not widened.
 - Global rate limiting uses two windows, both from `api.yaml` `rate_limits`:
-  - `40` requests per second
-  - `2000` requests per minute
+   - `100` requests per second
+   - `6000` requests per minute
 - Overrides are environment variables, not CLI flags:
   - `RATE_LIMIT_MAX_SEC`
   - `RATE_LIMIT_MAX_MIN`
