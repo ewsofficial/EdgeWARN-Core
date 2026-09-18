@@ -16,7 +16,7 @@ const REPOSITORY_CACHE = { max_entries: 256, max_size_bytes: 32 * 1024 * 1024 };
 const REPOSITORY_LIST_LIMIT = 1000;
 
 const RENDER_DEFAULTS = {
-  grid: { rows: 10, cols: 20, tile_size: 350 },
+  grid: { rows: 5, cols: 10, tile_size: 700 },
   grid_maxima: { rows: 100, cols: 100, tile_size: 4096 },
 };
 

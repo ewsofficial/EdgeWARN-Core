@@ -77,12 +77,12 @@ HEAD.
 const listing = await (await fetch(chunkListUrl)).json();
 const response = await fetch(chunkUrl);
 const bytes = new Uint16Array(await response.arrayBuffer());
-if (bytes.byteLength !== 350 * 350 * 2) throw new Error('invalid float16 scalar chunk');
+if (bytes.byteLength !== 700 * 700 * 2) throw new Error('invalid float16 scalar chunk');
 // Interpret as float16 (or upload as half-float); grid y=0 is the bottom row.
 ```
 
-One float16 component is two bytes, so a `350 x 350` single-channel chunk is
-`245000` bytes and `bytes.length` is `122500`. Compare `byteLength`, not
+One float16 component is two bytes, so a `700 x 700` single-channel chunk is
+`980000` bytes and `bytes.length` is `490000`. Compare `byteLength`, not
 element count, against `width * height * channels * 2`.
 
 These float16 value chunks are distinct from RAP `data.u16` scalar arrays and NEXRAD

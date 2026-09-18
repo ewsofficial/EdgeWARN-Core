@@ -4,7 +4,7 @@ schema_version: 1
 
 tiles:
   # Default tile edge length. Keep synchronized with API render defaults.
-  tile_size: 350
+  tile_size: 700
 
 # On-disk/client wire contract; change only with coordinated producer and client updates.
 chunk_format:
