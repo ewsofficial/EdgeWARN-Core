@@ -14,7 +14,7 @@ The current package version defined in `package.json` is **3.0.0**.
 
 ## Technology Stack
 - **API Services**: Node.js with Express.js and ES modules
-- **Core Processing**: Python 3.13 in the `EdgeWARN-dev` Conda environment
+- **Core Processing**: Python 3.13 in the `EdgeWARN` Conda environment
 - **Scientific/Data Libraries**: NumPy, SciPy, xarray, rasterio/rioxarray, shapely, scikit-image, cfgrib
 - **Storage Model**: Local runtime filesystem (`data/`, `gui/`, `wpc/`) backed by AWS S3, HTTPS, and NOAA feeds for ingestion
 - **Testing**: Jest + Supertest for Node APIs, pytest for Python modules/integration
@@ -37,7 +37,7 @@ The current package version defined in `package.json` is **3.0.0**.
 2. **Create and activate the Conda environment**
    ```bash
    conda env create -f environment.yml
-   conda activate EdgeWARN-dev
+   conda activate EdgeWARN
    ```
 
 3. **Install Node.js dependencies**
@@ -130,7 +130,7 @@ Supported historical flags include:
 - `--drop-offset`
 
 ### Testing
-Always activate the `EdgeWARN-dev` environment before running Python tests.
+Always activate the `EdgeWARN` environment before running Python tests.
 
 #### Node.js Tests
 ```bash
@@ -218,7 +218,7 @@ At runtime, the code expects a base directory that typically looks like this:
 ## Development Guidelines
 
 ### Python Development
-- Use Python 3.13 with the `EdgeWARN-dev` Conda environment
+- Use Python 3.13 with the `EdgeWARN` Conda environment
 - Keep imports and module paths compatible with `pythonpath = src`
 - Follow existing logging patterns based on `IOManager`, `TimestampedOutput`, and queue-backed workers
 - Add or update pytest coverage for new processing behavior, especially in `tests/core/`, `tests/integration/`, or `tests/unit/`
