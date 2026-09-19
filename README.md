@@ -1,4 +1,4 @@
-# EdgeWARN Core
+# EdgeWARN-Core
 
 **Live weather data. Operational analysis. Ready for the map.**
 
