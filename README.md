@@ -1,210 +1,109 @@
 # EdgeWARN Core
 
-EdgeWARN Core is the mixed Python and Node.js backend for the EdgeWARN analysis pipeline and the EWMRS rendering service.
+**Live weather data. Operational analysis. Ready for the map.**
 
-It ingests operational weather datasets, processes storm-cell products, renders GUI layers, and serves generated artifacts through REST APIs.
+EdgeWARN Core powers the [EdgeWARN weather platform](https://edgewarn.ashk3000.com/). Its Python pipelines ingest operational weather data, analyze storm cells, and render radar and forecast layers. A separate Node.js service exposes generated products through a unified REST API.
 
-## What This Repository Provides
+## Quick start — Docker
 
-- Three independently operable real-time services (primary EdgeWARN analysis, EWMRS/accessories, NEXRAD) coordinated through durable runtime records, plus an optional all-services supervisor
-- EdgeWARN storm-cell detection, optional tracking/lineage, integration, CTAM analytics, and alert generation
-- EWMRS raster rendering, tiling, and WPC surface-analysis serving
-- Historical reprocessing via `src/process_historical.py`
-- One versioned file-backed API at `/api/v3`; legacy EdgeWARN and EWMRS endpoints are removed
-
-## Requirements
-
-- Conda or Miniconda
-- Node.js/npm
-- git
-
-## Installation
-
-1. Clone the repository:
+Pull the prebuilt processing image:
 
 ```bash
-git clone https://www.github.com/ewsofficial/EdgeWARN-Core
+docker pull ewsofficial/edgewarn:latest
+```
+
+Start Core analysis, EWMRS, and NEXRAD with persistent data and logs:
+
+```bash
+docker run -d --name edgewarn --restart unless-stopped \
+  -v edgewarn-runtime:/var/lib/edgewarn \
+  -v edgewarn-logs:/var/log/edgewarn \
+  ewsofficial/edgewarn:latest
+```
+
+The image bundles Python dependencies, configuration, models, and an NWS zone snapshot. Live ingestion requires network access. **The Node.js API is a separate deployment and is not started by this image.** For custom configuration, Compose, and specialized service modes, see [INSTALLATION.md](INSTALLATION.md#containers).
+
+## Inside the pipeline
+
+| Component | Role |
+| --- | --- |
+| Core | MRMS/RAP ingest; storm-cell detection, optional tracking/lineage, CTAM analytics, and alert generation. |
+| EWMRS | Weather raster rendering and tiling; GOES ABI, METAR/NWS, and WPC products. |
+| NEXRAD | Level-II ingest and radar rendering. |
+| API v3 | Versioned, file-backed access to generated products at `/api/v3`. Legacy API routes have been removed. |
+
+The three Python services coordinate through durable runtime records. EWMRS requires the primary Core producer; NEXRAD starts both ingest and rendering. Historical reprocessing is also supported.
+
+## Develop from source
+
+Requires Conda or Miniconda, Node.js/npm, and Git. Docker users can skip this section.
+
+```bash
+git clone https://github.com/ewsofficial/EdgeWARN-Core.git
 cd EdgeWARN-Core
-```
-
-2. Create and activate the Conda environment:
-
-```bash
+git switch version-test/3.0.0
 conda env create -f environment.yml
-conda activate EdgeWARN-dev
-```
-
-3. Install Node dependencies:
-
-```bash
-npm install
-```
-
-4. Register the Python package command in the active Conda environment:
-
-```bash
+conda activate EdgeWARN
 python -m pip install --no-deps -e .
+npm install
 edgewarn --version
 ```
 
-`environment.yml` is the runtime dependency authority; `--no-deps` prevents
-pip from creating a second dependency set.
+The branch command selects v3.0.0 while the default branch tracks an earlier release. `environment.yml` is the runtime dependency authority; `--no-deps` avoids duplicate pip resolution.
 
-Detailed setup and runtime notes are in `INSTALLATION.md`.
+### Processing
 
-## Running Services
+```bash
+edgewarn run                  # All three services
+edgewarn run core             # Core only
+edgewarn run ewmrs            # Core producer + EWMRS
+edgewarn run nexrad           # NEXRAD ingest + rendering
+edgewarn run core --config-path /etc/edgewarn/config
+```
 
-From repository root:
+Use repeatable `--args WORKER JSON_ARGV` flags to forward a JSON array of strings to just one worker. The supported workers are `core`, `ewmrs`, and `nexrad`. See [INSTALLATION.md](INSTALLATION.md#running-real-time-services) for examples, direct source entry points, and options.
+
+### Unified API
+
+Run from the repository root:
 
 ```bash
 npm run api
-npm run debug:api
+# Debug mode: npm run debug:api
 ```
 
-## Running Python Pipelines
+The API defaults to port `5000` (`3001` for debug). Its schema is available at `/api/v3/openapi.json`; health checks are at `/health/live` and `/health/ready`. See [the API v3 contract](docs/api/unified_v3.md).
 
-The installed command validates the complete configuration tree before it
-starts a process. It is the preferred service entry point:
-
-```bash
-edgewarn run                                      # all three services
-edgewarn run core                                 # primary analysis only
-edgewarn run ewmrs                                # primary producer + EWMRS
-edgewarn run nexrad                               # NEXRAD ingest + rendering
-edgewarn run core --config-path /etc/edgewarn/config
-edgewarn run ewmrs \
-  --args core '["--lat_limits", "20", "55"]' \
-  --args ewmrs '["--disable-wpc"]'
-```
-
-`--args WORKER JSON_ARGV` is repeatable. `WORKER` is `core`, `ewmrs`, or
-`nexrad`, and `JSON_ARGV` must be an array of strings; arguments are sent only
-to that worker without shell parsing. The `ewmrs` mode always includes its
-primary EdgeWARN producer dependency. The `nexrad` mode starts both Level-II
-ingest and NEXRAD rendering.
-
-Configuration can be edited as a validated YAML scalar or through a terminal
-UI:
+### Configuration
 
 ```bash
 edgewarn configure ewmrs_pipeline.workers.budget_mb.goes 2048
-edgewarn configure --config-path /etc/edgewarn/config \
-  runtime.run.disable_nexrad true
-edgewarn configure --config-path /etc/edgewarn/config  # TTY only
+edgewarn configure --config-path /etc/edgewarn/config
+npm run validate-config
 ```
 
-The TUI first selects a file and then displays its editable leaves. `Enter`
-opens a value, `Ctrl+S` validates and saves it, `Esc` goes back, and `q` quits
-when no editor is open. Exit status `0` means success or clean signal shutdown,
-`1` means a worker or write/rollback failure, and `2` means invalid command,
-configuration, YAML, or schema input.
+The interactive configuration editor requires a terminal. Select a file and leaf value, use `Ctrl+S` to validate and save, `Esc` to go back, and `q` to quit. A complete alternate configuration tree can be selected with `--config-dir` or `EDGEWARN_CONFIG_DIR`.
 
-The source launchers remain available for development and troubleshooting.
+### Historical reprocessing
 
-Three independently operable real-time services run from `src/`:
-
-```bash
-# Primary EdgeWARN service (latency-sensitive analysis cycle):
-python run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
-# EWMRS/accessory service (renders, GOES ABI, METAR/NWS/WPC):
-python run_ewmrs.py
-# NEXRAD service (Level-II ingest + rendering):
-python run_nexrad.py
-```
-
-`run_edgewarn.py` owns MRMS selection/ingest and the detection, integration,
-CTAM, alert, and cycle-state work, publishing durable `mrms-ready`/
-`rap-ready` records that `run_ewmrs.py` consumes. `run.py` remains as a
-deprecated thin alias for `run_edgewarn.py`, and an optional
-`python run_all.py` supervisor can start all three services in one command.
-
-Key primary flags include `--disable-ctam`, `--disable-tracking`,
-`--disable-polygon-expansion`, `--disable-goes`, `--mrms-core-only`,
-`--refl-threshold`, `--min-seed-percentage`, and `--drop-offset`. The EWMRS
-service accepts `--disable-metar`, `--disable-nws`, `--disable-wpc`, and
-`--disable-goes`.
-
-Historical processing:
+From `src/`:
 
 ```bash
 python process_historical.py --start 2024-01-01T00:00:00 --end 2024-01-01T01:00:00 --lat 20 55 --lon -130 -60
 ```
 
-Historical runs support `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-ctam`, `--disable-tracking`, `--disable-polygon-expansion`, `--refl-threshold`, `--min-seed-percentage`, and `--drop-offset`.
+Storm-cell artifacts are saved to `<BASE_DIR>/data/stormcells/` with timestamped filenames.
 
-All entry points also accept `--config-dir` to select the catalog tree. The
-`--disable-*` and `--profile` switches take their defaults from `runtime.yaml`
-when omitted, and each accepts a `--no-` form to re-enable. The primary
-service normalizes `--lon_limits` into the `0-360` domain internally.
+## Runtime storage
 
-Historical runs persist the final stormcell artifacts to `<BASE_DIR>/data/stormcells/` using the runtime timestamped filenames.
-
-## Containers
-
-The supplied image installs the built Python wheel and pipes the registered
-`edgewarn run` command through `rotatelogs` for persisted, hourly-rotated
-logs:
-
-```dockerfile
-ENTRYPOINT ["/bin/bash", "-o", "pipefail", "-c"]
-CMD ["trap 'kill -TERM 0 >/dev/null 2>&1 || true' TERM; exec edgewarn run --config-path /etc/edgewarn/config 2>&1 | rotatelogs -L \"${EDGEWARN_LOG_DIR}/edgewarn.current.log\" -l \"${EDGEWARN_LOG_DIR}/edgewarn.%Y%m%d-%H.log\" 3600"]
-```
-
-`compose.yaml` mounts runtime output at `/var/lib/edgewarn`, rotated logs at
-`/var/log/edgewarn` (host `./EdgeWARN_logs` by default), and mounts the
-production configuration read-only at `/etc/edgewarn/config`. Use the
-`admin`-profile configuration container for intentional read-write edits. See
-`INSTALLATION.md` for build, specialized-mode, and administrative examples.
-
-## Runtime Base Directory
-
-Runtime output defaults to:
-
-- Linux/macOS: `~/EdgeWARN_input`
-- Windows: `C:\EdgeWARN_input`
-
-The unified API uses the same platform default when no override is supplied.
-
-`config/filesystem.yaml` owns these platform defaults. Resolution is CLI,
-`EDGEWARN_BASE_DIR`, legacy `BASE_DIR`, then YAML. Use `--config-dir` or
-`EDGEWARN_CONFIG_DIR` to select a complete alternate 18-file `config/` tree;
-run `npm run validate-config` before deployment. See
-`docs/core/configuration.md` for catalog ownership.
-
-Supported overrides:
-
-- Python CLI: `--base_dir` / `--base-dir`
-- Unified API: `--base-dir` or `EDGEWARN_BASE_DIR`
-- Temporary aliases: `--base_dir` and `BASE_DIR`
-- RAP maximum analysis age: `EDGEWARN_RAP_MAX_AGE_MINUTES` (default `180`)
-
-RAP ingest checks the configured runtime cache first, then searches NOAA S3
-newest-to-oldest within this analysis-age limit. Freshness is based on the RAP
-analysis timestamp, not the local file modification time.
-
-The unified API honors `PORT`, `--debug-server`, `RATE_LIMIT_MAX_SEC`, and `RATE_LIMIT_MAX_MIN`. Use `ALLOWED_ORIGINS` and `TRUST_PROXY_IPS` to configure browser and proxy trust.
-
-See `INSTALLATION.md` for the full CLI reference, including API debug and rate-limit flags plus the `scripts/sync_nws_zones.py` maintenance utility required before NWS alert ingest.
+Default data directory: `~/EdgeWARN_input` on Linux/macOS or `C:\EdgeWARN_input` on Windows; Docker uses `/var/lib/edgewarn`. Override with `--base-dir` or `EDGEWARN_BASE_DIR`. Production configuration should be mounted read-only; see [INSTALLATION.md](INSTALLATION.md) for administrative editing, NWS zone synchronization, logging, and deployment options.
 
 ## Testing
 
-Node:
-
 ```bash
 npm test
-npm run test:watch
 npm run test:coverage
-```
-
-Python (with `EdgeWARN` active):
-
-```bash
-conda activate EdgeWARN
 python -m pytest
 ```
 
-## Release
-
-Current package version: **3.0.0**
-
-See `CHANGELOG.md` for release history.
+**Version 3.0.0** · [Installation](INSTALLATION.md) · [Configuration](docs/core/configuration.md) · [Changelog](CHANGELOG.md)
