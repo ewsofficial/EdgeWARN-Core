@@ -66,9 +66,9 @@
     "representation": "binary_chunks"
   },
   {
-    "id": "MRMS_NLDN_CG_005min_AvgDensity",
-    "storageDirectory": "MRMS_NLDN_CG_005min_AvgDensity",
-    "legacyFilePrefix": "MRMS_NLDN_CG_005min_AvgDensity",
+    "id": "MRMS_NLDN_CG_001min_AvgDensity",
+    "storageDirectory": "MRMS_NLDN_CG_001min_AvgDensity",
+    "legacyFilePrefix": "MRMS_NLDN_CG_001min_AvgDensity",
     "representation": "binary_chunks"
   },
   {

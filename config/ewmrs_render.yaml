@@ -38,7 +38,7 @@ mrms_layers:
   - {name: MRMS_MergedAzShear_0-2kmAGL,       colormap_key: AzShear,          filepath: MRMS_AZSHEARLOW_DIR,  outdir: GUI_AZSHEARLOW_DIR,  required: true}
   - {name: MRMS_MergedAzShear_3-6kmAGL,       colormap_key: AzShear,          filepath: MRMS_AZSHEARMID_DIR,  outdir: GUI_AZSHEARMID_DIR,  required: true}
   - {name: MRMS_MESH,                         colormap_key: MESH,             filepath: MRMS_MESH_DIR,        outdir: GUI_MESH_DIR,        required: true}
-  - {name: MRMS_NLDN_CG_005min_AvgDensity,       colormap_key: VILDensity,       filepath: MRMS_NLDN_DIR,        outdir: GUI_NLDN_DIR,        required: true}
+  - {name: MRMS_NLDN_CG_001min_AvgDensity,       colormap_key: VILDensity,       filepath: MRMS_NLDN_DIR,        outdir: GUI_NLDN_DIR,        required: true}
 
 # GOES layer catalog. Channel IDs and physical transforms must match ABI metadata.
 goes_layers:

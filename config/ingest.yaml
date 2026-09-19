@@ -35,7 +35,7 @@ mrms:
       EchoTop_18_00.50: EchoTop_18
       EchoTop_30_00.50: EchoTop_30
       MESH_00.50: MESH
-      NLDN_CG_005min_AvgDensity_00.00: NLDN_CG_005min_AvgDensity
+      NLDN_CG_001min_AvgDensity_00.00: NLDN_CG_001min_AvgDensity
       PrecipRate_00.00: PrecipRate
       RadarOnly_QPE_01H_00.00: RadarOnly_QPE_01H
       MergedAzShear_0-2kmAGL_00.50: MergedAzShear_0-2kmAGL
@@ -55,7 +55,7 @@ mrms:
     - {region: CONUS, product: EchoTop_50_00.50,                     outdir: MRMS_ECHOTOP50_DIR}
     - {region: CONUS, product: RadarQualityIndex_00.00,              outdir: MRMS_RQI_DIR}
     - {region: CONUS, product: MESH_00.50,                           outdir: MRMS_MESH_DIR}
-    - {region: CONUS, product: NLDN_CG_005min_AvgDensity_00.00,      outdir: MRMS_NLDN_DIR}
+    - {region: CONUS, product: NLDN_CG_001min_AvgDensity_00.00,      outdir: MRMS_NLDN_DIR}
     - {region: CONUS, product: PrecipRate_00.00,                     outdir: MRMS_PRECIPRATE_DIR}
     - {region: CONUS, product: RadarOnly_QPE_01H_00.00,              outdir: MRMS_QPE_DIR}
     - {region: CONUS, product: MergedAzShear_0-2kmAGL_00.50,         outdir: MRMS_AZSHEARLOW_DIR}
