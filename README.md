@@ -63,6 +63,8 @@ edgewarn run core --config-path /etc/edgewarn/config
 
 Use repeatable `--args WORKER JSON_ARGV` flags to forward a JSON array of strings to just one worker. The supported workers are `core`, `ewmrs`, and `nexrad`. See [INSTALLATION.md](INSTALLATION.md#running-real-time-services) for examples, direct source entry points, and options.
 
+> **NWS zone prerequisite.** EWMRS workers refuse to start when NWS zone assets are missing — startup fails with `NWS zone assets are missing ...`. Run `edgewarn sync-nws-zones --apply` before starting EWMRS (source installs only; the Docker image bundles a zone snapshot). The assets live in `assets/nws_zones/` and are gitignored, so a fresh clone or a deleted folder will hit this. To skip NWS entirely, use `--disable-nws`.
+
 ### Unified API
 
 Run from the repository root:
