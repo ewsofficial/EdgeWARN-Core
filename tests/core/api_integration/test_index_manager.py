@@ -84,3 +84,34 @@ def test_cleanup_inactive_cells_preserves_files_when_disabled(mock_io_manager, m
         manager.cleanup_inactive_cells()
 
     assert old_cell_file.exists()
+
+
+def test_database_projection_is_reused_for_both_indexes(
+    mock_io_manager, mock_fs, monkeypatch
+):
+    projection = (["20230101-120000"], {"101": 123.0})
+    calls = []
+
+    class FakeRepository:
+        path = mock_fs / "stormprob.sqlite3"
+
+        def index_projection(self):
+            calls.append(True)
+            return projection
+
+    FakeRepository.path.touch()
+    (mock_fs / "stormcell" / "stormcells_20230101-120000.json").touch()
+    (mock_fs / "cell" / "101.json").touch()
+    monkeypatch.setattr(
+        "EdgeWARN.stormprob.database.StormProbRepository", FakeRepository
+    )
+
+    with patch("EdgeWARN.api_integration.index_manager.fs.STORMCELL_DIR", mock_fs / "stormcell"), \
+         patch("EdgeWARN.api_integration.index_manager.fs.CELL_DIR", mock_fs / "cell"):
+        manager = APIIndexManager(mock_io_manager)
+        manager.initialize_indexes()
+
+    assert len(calls) == 1
+    assert manager.projection_reused is True
+    assert manager.stormcell_timestamps == {"20230101-120000"}
+    assert manager.cell_timestamps == {"101": 123.0}

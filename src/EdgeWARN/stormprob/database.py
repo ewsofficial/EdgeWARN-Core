@@ -30,6 +30,13 @@ DB_VERSION = 1
 LEADS = (15, 30, 45, 60)
 PENDING_MODEL_VERSION = "stormprob-pending/v1"
 
+_PROJECTION_INDEX_SQL = """
+    CREATE INDEX IF NOT EXISTS observations_cycle_cell
+        ON cell_observations(cycle_id,cell_id);
+    CREATE INDEX IF NOT EXISTS cycles_published
+        ON cycles(state,projection_state,cycle_id,committed_at);
+"""
+
 logger = logging.getLogger(__name__)
 
 
@@ -183,6 +190,11 @@ class StormProbRepository:
         if version > DB_VERSION:
             raise RuntimeError(f"StormProb database version {version} is newer than this reader")
         if version == DB_VERSION:
+            # Version 1 has not shipped yet, so these additive indexes remain
+            # in v1. Install them on development DBs created before this fix
+            # without replaying the complete table schema on every writer.
+            db.executescript(_PROJECTION_INDEX_SQL)
+            db.commit()
             return
         db.executescript("""
             CREATE TABLE IF NOT EXISTS cycles (
@@ -242,6 +254,7 @@ class StormProbRepository:
                 imported_at TEXT NOT NULL
             );
         """)
+        db.executescript(_PROJECTION_INDEX_SQL)
         db.execute(f"PRAGMA user_version={DB_VERSION}")
         db.commit()
 
@@ -575,9 +588,15 @@ class StormProbRepository:
             cycles = db.execute("""SELECT projection_path FROM cycles WHERE
                 state='inputs-committed' AND projection_state='published'
                 AND projection_path IS NOT NULL""").fetchall()
-            cells = db.execute("""SELECT o.cell_id,MAX(c.committed_at) AS committed_at
-                FROM cell_observations o JOIN cycles c ON c.cycle_id=o.cycle_id
-                WHERE c.state='inputs-committed' AND c.projection_state='published'
+            cells = db.execute("""WITH published_cycles AS MATERIALIZED (
+                    SELECT cycle_id,committed_at
+                    FROM cycles INDEXED BY cycles_published
+                    WHERE state='inputs-committed' AND projection_state='published'
+                )
+                SELECT o.cell_id,MAX(c.committed_at) AS committed_at
+                FROM published_cycles c
+                JOIN cell_observations o INDEXED BY observations_cycle_cell
+                    ON o.cycle_id=c.cycle_id
                 GROUP BY o.cell_id""").fetchall()
         timestamps = []
         for row in cycles:

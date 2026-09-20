@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from util.io import IOManager
@@ -25,6 +26,30 @@ class APIIndexManager:
         self.stormcell_timestamps = set()
         self._initial_scan_done = False
         self._stormcell_initial_scan_done = False
+        self._database_projection_loaded = False
+        self._database_projection = None
+        self.projection_query_seconds = 0.0
+        self.projection_reused = False
+
+    def _load_database_projection(self):
+        """Return one immutable database snapshot for this index update."""
+        if self._database_projection_loaded:
+            self.projection_reused = self._database_projection is not None
+            return self._database_projection
+
+        self._database_projection_loaded = True
+        try:
+            from EdgeWARN.stormprob.database import StormProbRepository
+
+            repository = StormProbRepository()
+            if not repository.path.exists():
+                return None
+            started = time.perf_counter()
+            self._database_projection = repository.index_projection()
+            self.projection_query_seconds = time.perf_counter() - started
+            return self._database_projection
+        except FileNotFoundError:
+            return None
         
     def initialize_indexes(self):
         """
@@ -47,16 +72,10 @@ class APIIndexManager:
             fs.STORMCELL_DIR.mkdir(parents=True, exist_ok=True)
         
         timestamps = []
-        database_present = False
-        try:
-            from EdgeWARN.stormprob.database import StormProbRepository
-            repository = StormProbRepository()
-            database_present = repository.path.exists()
-            if database_present:
-                timestamps, _ = repository.index_projection()
-        except FileNotFoundError:
-            pass
-        if not database_present:
+        projection = self._load_database_projection()
+        if projection is not None:
+            timestamps, _ = projection
+        else:
             timestamps = [file.stem.removeprefix("stormcells_") for file in
                           sorted(fs.STORMCELL_DIR.glob("stormcells_*.json"))]
 
@@ -80,16 +99,11 @@ class APIIndexManager:
         current_time = datetime.now(timezone.utc).timestamp()
         
         self.cell_timestamps.clear()
-        database_present = False
-        try:
-            from EdgeWARN.stormprob.database import StormProbRepository
-            repository = StormProbRepository()
-            database_present = repository.path.exists()
-            if database_present:
-                _, self.cell_timestamps = repository.index_projection()
-        except FileNotFoundError:
-            pass
-        if not database_present:
+        projection = self._load_database_projection()
+        if projection is not None:
+            _, projected_cell_timestamps = projection
+            self.cell_timestamps.update(projected_cell_timestamps)
+        else:
             for file in fs.CELL_DIR.glob("*.json"):
                 if file.stem == "cell_index":
                     continue

@@ -1,5 +1,6 @@
 import json
 import copy
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -535,18 +536,44 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
         result = (cell.get("modules") or {}).get("StormProb") or {}
         if result.get("status") in {"success", "error", "skipped"}:
             forecasts.extend(result.get("leads", []))
+    publication_started = time.perf_counter()
+    sqlite_started = time.perf_counter()
     repository.commit_cycle(str(timestamp), timestamp, cells, manifest_record,
                             projection_cells=projected_cells, projection_path=json_path,
                             forecasts=forecasts or None)
+    sqlite_seconds = time.perf_counter() - sqlite_started
     coordinator = CTAMPublicationCoordinator(fs.DATA_DIR / "ctam" / "transactions")
     coordinator.recover()
-    coordinator.publish(payloads, publish_indexes=lambda: _update_api_indexes(projected_cells, remove_old_cells, timestamp), transaction_id=str(timestamp).replace(":", "-"),
+    index_seconds = 0.0
+
+    def _publish_indexes():
+        nonlocal index_seconds
+        started = time.perf_counter()
+        try:
+            _update_api_indexes(projected_cells, remove_old_cells, timestamp)
+        finally:
+            index_seconds = time.perf_counter() - started
+
+    filesystem_started = time.perf_counter()
+    coordinator.publish(payloads, publish_indexes=_publish_indexes, transaction_id=str(timestamp).replace(":", "-"),
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
+    filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
     repository.mark_projection_published(str(timestamp))
+    backup_started = time.perf_counter()
     try:
         repository.backup_if_due()
     except Exception as exc:
         io_manager.write_warning(f"StormProb daily backup failed: {exc}")
+    backup_seconds = time.perf_counter() - backup_started
+    io_manager.write_info(
+        "Publication phases "
+        f"cycle_id={timestamp} cells={len(projected_cells)} "
+        f"sqlite_transaction_seconds={sqlite_seconds:.6f} "
+        f"filesystem_publication_seconds={filesystem_seconds:.6f} "
+        f"api_index_seconds={index_seconds:.6f} "
+        f"backup_seconds={backup_seconds:.6f} "
+        f"total_seconds={time.perf_counter() - publication_started:.6f}"
+    )
 
 
 def _update_history(cells, timestamp):
@@ -568,9 +595,24 @@ def _update_api_indexes(cells, remove_old_cells, timestamp):
         active_cell_ids = [cell["id"] for cell in cells if "timestamp" in cell]
 
         def _update():
+            rebuild_started = time.perf_counter()
             api_index.update_stormcell_index(datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).strftime("%Y%m%d-%H%M%S"))
             api_index.update_cell_index(active_cell_ids)
+            rebuild_seconds = time.perf_counter() - rebuild_started
+            cleanup_started = time.perf_counter()
             api_index.cleanup_inactive_cells()
+            cleanup_seconds = time.perf_counter() - cleanup_started
+            io_manager.write_info(
+                "API index rebuild "
+                f"cycle_id={timestamp} active_cells={len(active_cell_ids)} "
+                f"projection_timestamps={len(api_index.stormcell_timestamps)} "
+                f"projection_cells={len(api_index.cell_timestamps)} "
+                f"projection_query_seconds={api_index.projection_query_seconds:.6f} "
+                f"projection_reused={api_index.projection_reused} "
+                "sqlite_indexes=cycles_published,observations_cycle_cell "
+                f"rebuild_seconds={rebuild_seconds:.6f} "
+                f"cleanup_seconds={cleanup_seconds:.6f}"
+            )
 
         _run_step("Integration - API Index", _update)
     except Exception as e:

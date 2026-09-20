@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from EdgeWARN.stormprob.database import LEADS, StormProbRepository
+from EdgeWARN.stormprob.database import DB_VERSION, LEADS, StormProbRepository
 from EdgeWARN.stormprob.records import build_observation_record
 from EdgeWARN.stormprob.migrate import migrate
 from EdgeWARN.ctam.publication import CTAMPublicationCoordinator, PublicationError
@@ -42,6 +42,59 @@ def test_commit_cycle_is_atomic_idempotent_and_read_only(tmp_path):
             db.execute("DELETE FROM cycles")
     assert repo.legacy_history(101)[0]["id"] == 101
     assert "stormprob" not in repo.legacy_history(101)[0]
+
+
+def test_version_one_migration_adds_projection_indexes_idempotently(tmp_path):
+    repo = StormProbRepository(tmp_path)
+    with repo.writer():
+        pass
+    with repo.writer():
+        pass
+
+    with repo.reader() as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == DB_VERSION == 1
+        indexes = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+
+    assert {"cycles_published", "observations_cycle_cell"} <= indexes
+
+
+def test_index_projection_uses_published_cycle_indexes(tmp_path):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    cell_path = tmp_path / "data" / "cells" / "101.json"
+    snapshot = tmp_path / "data" / "stormcells" / "stormcells_20240501-120000.json"
+    cell_path.parent.mkdir(parents=True)
+    snapshot.parent.mkdir(parents=True)
+    cell_path.write_text("[]")
+    snapshot.write_text("{}")
+    repo.commit_cycle(
+        "cycle1", cell["timestamp"], [cell],
+        projection_cells=[cell], projection_path=snapshot,
+    )
+    repo.mark_projection_published("cycle1")
+
+    with repo.reader() as db:
+        plan = db.execute("""EXPLAIN QUERY PLAN
+            WITH published_cycles AS MATERIALIZED (
+                SELECT cycle_id,committed_at
+                FROM cycles INDEXED BY cycles_published
+                WHERE state='inputs-committed' AND projection_state='published'
+            )
+            SELECT o.cell_id,MAX(c.committed_at)
+            FROM published_cycles c
+            JOIN cell_observations o INDEXED BY observations_cycle_cell
+                ON o.cycle_id=c.cycle_id
+            GROUP BY o.cell_id""").fetchall()
+    details = " ".join(str(row[3]) for row in plan)
+
+    assert "cycles_published" in details
+    assert "observations_cycle_cell" in details
+    assert repo.index_projection()[0] == ["20240501-120000"]
 
 
 def test_failed_cycle_does_not_leave_partial_rows(tmp_path):
