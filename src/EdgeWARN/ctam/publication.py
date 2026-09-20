@@ -92,9 +92,9 @@ class CTAMPublicationCoordinator:
         atomic_write_json(journal_path, journal)
         try:
             for item in targets:
-                self.replace(item["temporary"], item["target"]); item["replaced"] = True
-                atomic_write_json(journal_path, journal)
+                self.replace(item["temporary"], item["target"])
                 if _hash(Path(item["target"]).read_bytes()) != item["post_hash"]: raise PublicationError("replacement did not preserve serialized payload")
+                item["replaced"] = True
             # Alerts are host-owned payload publication, not a side effect of a
             # module process.  They happen only after every JSON target has
             # validated and before indexes make the cycle discoverable.
