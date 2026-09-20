@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import sqlite3
@@ -28,6 +29,8 @@ from .records import SCHEMA_VERSION, build_observation_record
 DB_VERSION = 1
 LEADS = (15, 30, 45, 60)
 PENDING_MODEL_VERSION = "stormprob-pending/v1"
+
+logger = logging.getLogger(__name__)
 
 
 def database_path(base_dir: Path | str | None = None) -> Path:
@@ -103,6 +106,40 @@ def _unpack(data: bytes, count: int) -> list[float]:
     if len(data) != 4 * count:
         raise ValueError("corrupt float32 vector length")
     return list(struct.unpack(f"<{count}f", data))
+
+
+def _forecast_key(forecast: dict) -> tuple[str, str, str, int]:
+    return (
+        str(forecast["cell_id"]),
+        _time(forecast["analysis_time"]),
+        str(forecast["model_version"]),
+        int(forecast["lead_minutes"]),
+    )
+
+
+def _normalize_forecasts(forecasts: list[dict]) -> list[dict]:
+    """Collapse identical forecast keys and reject conflicting payloads."""
+    unique: dict[tuple[str, str, str, int], dict] = {}
+    for forecast in forecasts:
+        key = _forecast_key(forecast)
+        prior = unique.get(key)
+        if prior is None:
+            unique[key] = forecast
+            continue
+        if prior != forecast:
+            raise ValueError(
+                "conflicting duplicate forecast key "
+                f"cell_id={key[0]!r}, analysis_time={key[1]!r}, "
+                f"model_version={key[2]!r}, lead_minutes={key[3]}; "
+                f"first={_json(clean_projection(prior))}; "
+                f"duplicate={_json(clean_projection(forecast))}"
+            )
+        logger.warning(
+            "Deduplicated identical StormProb forecast key "
+            "cell_id=%r, analysis_time=%r, model_version=%r, lead_minutes=%d",
+            *key,
+        )
+    return list(unique.values())
 
 
 class StormProbRepository:
@@ -293,22 +330,32 @@ class StormProbRepository:
                 self._upsert_observation(db, cell, record, str(cycle_id))
                 count += 1
             if forecasts:
+                forecasts = _normalize_forecasts(forecasts)
                 expected = {(str(cell["id"]), _time(cell["timestamp"])) for cell in cells
                             if isinstance(cell, dict) and cell.get("id") is not None
                             and cell.get("timestamp")}
                 groups: dict[tuple[str, str, str], set[int]] = {}
                 for forecast in forecasts:
-                    key = (str(forecast["cell_id"]), _time(forecast["analysis_time"]))
+                    forecast_key = _forecast_key(forecast)
+                    key = forecast_key[:2]
                     if key not in expected:
-                        raise ValueError("forecast does not belong to committed cycle")
-                    group = (*key, str(forecast["model_version"]))
+                        raise ValueError(
+                            "forecast does not belong to committed cycle: "
+                            f"cell_id={key[0]!r}, analysis_time={key[1]!r}"
+                        )
+                    group = forecast_key[:3]
                     leads = groups.setdefault(group, set())
-                    lead = int(forecast["lead_minutes"])
-                    if lead in leads:
-                        raise ValueError("duplicate forecast lead")
-                    leads.add(lead)
-                if any(leads != set(LEADS) for leads in groups.values()):
-                    raise ValueError("model forecast must include all four leads")
+                    leads.add(forecast_key[3])
+                for group, leads in groups.items():
+                    missing = sorted(set(LEADS) - leads)
+                    unexpected = sorted(leads - set(LEADS))
+                    if missing or unexpected:
+                        raise ValueError(
+                            "incomplete model forecast group "
+                            f"cell_id={group[0]!r}, analysis_time={group[1]!r}, "
+                            f"model_version={group[2]!r}; missing_leads={missing}; "
+                            f"unexpected_leads={unexpected}"
+                        )
                 for forecast in forecasts:
                     self._upsert_forecast(db, str(cycle_id), forecast)
             return count

@@ -21,7 +21,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from util.atomic import atomic_write_json
 
@@ -172,6 +172,28 @@ class ServiceHeartbeat:
 def write_heartbeat(heartbeat: ServiceHeartbeat, destination: str | os.PathLike) -> Path:
     """Atomically publish a heartbeat to its sibling-temp + replace commit point."""
     return atomic_write_json(destination, heartbeat.as_dict())
+
+
+def run_heartbeat_loop(
+    stop_event,
+    publish: Callable[[], None],
+    *,
+    interval_seconds: float,
+) -> None:
+    """Publish immediately and periodically until ``stop_event`` is set.
+
+    Publication failures are reported and retried on the next interval so a
+    transient filesystem error cannot silently kill service liveness updates.
+    """
+    if interval_seconds <= 0:
+        raise ValueError("heartbeat interval_seconds must be positive")
+    while not stop_event.is_set():
+        try:
+            publish()
+        except Exception as exc:
+            print(f"[Heartbeat] Publication failed: {exc}")
+        if stop_event.wait(interval_seconds):
+            break
 
 
 def read_heartbeat_file(path: str | os.PathLike) -> ServiceHeartbeat | None:

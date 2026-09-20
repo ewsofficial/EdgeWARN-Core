@@ -45,12 +45,19 @@ class StormProbCycleService:
 
     def __init__(self, repository: StormProbRepository | None = None):
         self.repository = repository or StormProbRepository()
+        self._previous_alerts: dict[str, AlertPayload] | None = None
 
     def model_inputs(self, cell_id: Any, analysis_time: Any) -> dict:
         return self.repository.model_inputs(cell_id, through=analysis_time)
 
-    @staticmethod
-    def previous_alert(cell_id: Any) -> AlertPayload | None:
+    def preload_previous_alerts(self, cell_ids) -> None:
+        self._previous_alerts = AlertManager.load_latest_for_cells(
+            "StormProb", cell_ids
+        )
+
+    def previous_alert(self, cell_id: Any) -> AlertPayload | None:
+        if self._previous_alerts is not None:
+            return self._previous_alerts.get(str(cell_id))
         return AlertManager.load("StormProb", cell_id)
 
     @staticmethod
@@ -157,6 +164,7 @@ class BuiltinStormProbAdapter:
         """Infer up to 128 ready cells together, preserving per-cell outcomes."""
         if len(cells) > onnx_runtime.BATCH_SIZE:
             raise ValueError("StormProb batch exceeds graph capacity")
+        batch_started = time.perf_counter()
         fields = {
             "radial_history": ("radial_history", (30, 64), np.float32),
             "statistics_history": ("radial_statistics_history", (30, 1), np.float32),
@@ -179,7 +187,13 @@ class BuiltinStormProbAdapter:
                 prepared.append((cell, inputs, observation, started))
             except Exception as exc:
                 self._record_failure(cell, exc, started)
+        prepared_at = time.perf_counter()
         if not prepared:
+            self.last_batch_timing = {
+                "prepare_seconds": prepared_at - batch_started,
+                "inference_seconds": 0.0,
+                "postprocess_seconds": 0.0,
+            }
             return
         try:
             calibrator = self._load_models()
@@ -193,8 +207,15 @@ class BuiltinStormProbAdapter:
         except Exception as exc:
             for cell, _, _, started in prepared:
                 self._record_failure(cell, exc, started)
+            self.last_batch_timing = {
+                "prepare_seconds": prepared_at - batch_started,
+                "inference_seconds": time.perf_counter() - prepared_at,
+                "postprocess_seconds": 0.0,
+            }
             return
+        inferred_at = time.perf_counter()
         for index, (cell, inputs, observation, started) in enumerate(prepared):
+            finish_started = time.perf_counter()
             try:
                 one = {name: value[index:index + 1] for name, value in outputs.items()}
                 result = self._finish(cell, inputs, observation, one, calibrator)
@@ -204,6 +225,17 @@ class BuiltinStormProbAdapter:
                 cell["modules"][self.name] = result
             except Exception as exc:
                 self._record_failure(cell, exc, started)
+            finally:
+                print(
+                    "[StormProb] _finish "
+                    f"cell_id={cell.get('id')!r} "
+                    f"elapsed={time.perf_counter() - finish_started:.3f}s"
+                )
+        self.last_batch_timing = {
+            "prepare_seconds": prepared_at - batch_started,
+            "inference_seconds": inferred_at - prepared_at,
+            "postprocess_seconds": time.perf_counter() - inferred_at,
+        }
 
     def alerts(self, cell: dict[str, Any]) -> list[AlertPayload]:
         result = cell.get("modules", {}).get(self.name, {})

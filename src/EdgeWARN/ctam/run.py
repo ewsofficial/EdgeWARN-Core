@@ -129,23 +129,62 @@ def _run_builtin_stormprob(cells):
     """
     from .builtins import BuiltinStormProbAdapter, StormProbCycleService
     from EdgeWARN.stormprob.onnx_runtime import BATCH_SIZE
-    adapter = BuiltinStormProbAdapter(StormProbCycleService())
+    service = StormProbCycleService()
+    alert_lookup_started = time.perf_counter()
+    service.preload_previous_alerts(cell.get("id") for cell in cells)
+    alert_lookup_seconds = time.perf_counter() - alert_lookup_started
+    print(
+        "[StormProb] alert_lookup "
+        f"cells={len(cells)} elapsed={alert_lookup_seconds:.3f}s"
+    )
+    adapter = BuiltinStormProbAdapter(service)
     success_count = error_count = alert_count = 0
+    forecast_seconds = alert_seconds = 0.0
+    forecast_parts = {
+        "prepare_seconds": 0.0,
+        "inference_seconds": 0.0,
+        "postprocess_seconds": 0.0,
+    }
     for batch_start in range(0, len(cells), BATCH_SIZE):
         batch = cells[batch_start:batch_start + BATCH_SIZE]
+        forecast_started = time.perf_counter()
         try:
             adapter.run_batch(batch)
         except Exception as exc:
             for cell in batch:
                 cell.setdefault("modules", {})[adapter.name] = {
                     "status": "error", "error": str(exc)}
+        batch_timing = getattr(adapter, "last_batch_timing", {})
+        for name in forecast_parts:
+            forecast_parts[name] += batch_timing.get(name, 0.0)
+        forecast_seconds += time.perf_counter() - forecast_started
+        alerts_started = time.perf_counter()
         for cell_idx, cell in enumerate(batch, batch_start):
             success_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success")
             error_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") != "success")
+            publish_started = time.perf_counter()
+            published = 0
             try:
-                alert_count += adapter.publish_alerts(adapter.alerts(cell))
+                published = adapter.publish_alerts(adapter.alerts(cell))
+                alert_count += published
             except Exception as exc:
                 print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormProb alerts FAILED: {exc}")
+            finally:
+                print(
+                    "[StormProb] publish_alerts "
+                    f"cell_id={cell.get('id')!r} count={published} "
+                    f"elapsed={time.perf_counter() - publish_started:.3f}s"
+                )
+        alert_seconds += time.perf_counter() - alerts_started
+    print(
+        "[CTAM] StormProb timing: "
+        f"forecast={forecast_seconds:.3f}s, "
+        f"prepare={forecast_parts['prepare_seconds']:.3f}s, "
+        f"inference={forecast_parts['inference_seconds']:.3f}s, "
+        f"postprocess={forecast_parts['postprocess_seconds']:.3f}s, "
+        f"alert_lookup={alert_lookup_seconds:.3f}s, "
+        f"alert_generation_and_publish={alert_seconds:.3f}s"
+    )
     return success_count, error_count, alert_count
 
 

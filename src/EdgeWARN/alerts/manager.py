@@ -139,6 +139,38 @@ class AlertManager:
         return source_alerts[0] if source_alerts else None
 
     @staticmethod
+    def load_latest_for_cells(
+        source: str,
+        cell_ids,
+    ) -> Dict[str, AlertPayload]:
+        """Load the newest matching alert per cell with one directory scan.
+
+        StormProb evaluates hundreds of cells per cycle. Calling ``load()`` for
+        each cell repeatedly opened every alert file, making alert lookup
+        quadratic in cell and retained-alert counts on slow runtime volumes.
+        """
+        wanted = {str(cell_id) for cell_id in cell_ids}
+        if not wanted or not fs.EDGEWARN_ALERTS_IDS_DIR.exists():
+            return {}
+        latest: Dict[str, AlertPayload] = {}
+        for path in fs.EDGEWARN_ALERTS_IDS_DIR.glob("*.json"):
+            try:
+                with open(path, "r") as handle:
+                    data = json.load(handle)
+                cell_id = str(data.get("cell_id", ""))
+                if data.get("source") != source or cell_id not in wanted:
+                    continue
+                alert = AlertManager._dict_to_payload(data)
+                prior = latest.get(cell_id)
+                if prior is None or alert.effective_time > prior.effective_time:
+                    latest[cell_id] = alert
+            except Exception as exc:
+                io_manager.write_error(
+                    f"Failed to read alert {path.name} during batch lookup: {exc}"
+                )
+        return latest
+
+    @staticmethod
     def load_all(cell_id: str) -> List[AlertPayload]:
         """
         Load every alert for a given cell, regardless of source.

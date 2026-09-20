@@ -13,8 +13,8 @@ Run directly:
 
 It does not import or start EWMRS, NEXRAD, METAR, NWS, WPC, or GOES ABI loops.
 Behavior mirrors the other direct services: a single-instance lock beneath
-``state/realtime/services/``, an atomic canonical heartbeat refreshed from the
-selection loop's ticks, and clean SIGINT/SIGTERM shutdown of its own worker.
+``state/realtime/services/``, an atomic canonical heartbeat refreshed by an
+independent liveness thread, and clean SIGINT/SIGTERM shutdown of its own worker.
 No import side effects: parsing and runtime initialization happen in ``main()``.
 """
 
@@ -22,7 +22,6 @@ import os
 import signal
 import sys
 import threading
-import time
 import uuid
 from datetime import datetime, timezone
 
@@ -41,6 +40,7 @@ from util.runtime.primary_service import (
 )
 from util.runtime.services import (
     ServiceHeartbeat,
+    run_heartbeat_loop,
     services_dir,
     write_heartbeat,
 )
@@ -87,15 +87,7 @@ def main():
         signal.signal(signum, _request_stop)
 
     heartbeat_destination = str(services_dir(args.base_dir) / f"{SERVICE_NAME}.json")
-    last_beat = {"monotonic": 0.0}
-
     def refresh_heartbeat():
-        now_monotonic = time.monotonic()
-        if stop_event.is_set() or (
-            now_monotonic - last_beat["monotonic"] < HEARTBEAT_MIN_INTERVAL_SECONDS
-        ):
-            return
-        last_beat["monotonic"] = now_monotonic
         beat = ServiceHeartbeat(
             service=SERVICE_NAME,
             pid=os.getpid(),
@@ -107,16 +99,28 @@ def main():
         )
         write_heartbeat(beat, heartbeat_destination)
 
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=run_heartbeat_loop,
+        args=(heartbeat_stop, refresh_heartbeat),
+        kwargs={"interval_seconds": HEARTBEAT_MIN_INTERVAL_SECONDS},
+        name="edgewarn-heartbeat",
+        daemon=False,
+    )
+    heartbeat_thread.start()
+
     try:
         run_primary_cycle_loop(
             checker=MRMSUpdateChecker(verbose=True),
             cycle_config=build_cycle_config(args),
             supervisor=None,
-            on_tick=refresh_heartbeat,
+            on_tick=None,
             stop_event=stop_event,
         )
     finally:
         stop_event.set()
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=HEARTBEAT_MIN_INTERVAL_SECONDS + 1.0)
         try:
             os.unlink(heartbeat_destination)
         except OSError:

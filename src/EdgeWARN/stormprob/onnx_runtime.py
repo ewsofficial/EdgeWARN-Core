@@ -8,6 +8,7 @@ from __future__ import annotations
 from functools import lru_cache
 import hashlib
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -101,6 +102,7 @@ def infer_pair(radial_session, motion_session, *, radial_history, statistics_his
     for key, shape in required.items():
         if tensors[key].shape != shape:
             raise ValueError(f"{key} shape {tensors[key].shape}; expected {shape}")
+    inference_started = time.perf_counter()
     try:
         mean, log_std = radial_session.run(None, {key: tensors[key] for key in
             ("radial_history", "statistics_history", "current_features", "history_mask")})
@@ -109,6 +111,11 @@ def infer_pair(radial_session, motion_session, *, radial_history, statistics_his
              "trajectory_sequence", "trajectory_mask")})
     except Exception as exc:
         raise ModelUnavailable(f"StormProb ONNX inference failed: {exc}") from exc
+    finally:
+        print(
+            "[StormProb] infer_pair elapsed="
+            f"{time.perf_counter() - inference_started:.3f}s"
+        )
     outputs = {"coefficient_mean": mean, "coefficient_log_std": log_std,
                "residual_motion_mps": residual}
     for name, value in outputs.items():

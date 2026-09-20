@@ -34,6 +34,26 @@ def test_unready_committed_row_skips_before_model_load(tmp_path, monkeypatch):
     assert len(cell["modules"]["StormProb"]["leads"]) == 4
 
 
+def test_cycle_service_uses_preloaded_alert_index(monkeypatch):
+    expected = object()
+    monkeypatch.setattr(
+        "EdgeWARN.ctam.builtins.stormprob.AlertManager.load_latest_for_cells",
+        lambda source, cell_ids: {"101": expected},
+    )
+    monkeypatch.setattr(
+        "EdgeWARN.ctam.builtins.stormprob.AlertManager.load",
+        lambda *_: (_ for _ in ()).throw(AssertionError("per-cell rescan")),
+    )
+    service = StormProbCycleService.__new__(StormProbCycleService)
+    service.repository = None
+    service._previous_alerts = None
+
+    service.preload_previous_alerts([101, 102])
+
+    assert service.previous_alert(101) is expected
+    assert service.previous_alert(102) is None
+
+
 def test_first_frame_produces_four_leads_from_committed_features(tmp_path, monkeypatch):
     repo = StormProbRepository(tmp_path)
     cell = _cell()

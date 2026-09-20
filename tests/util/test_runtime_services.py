@@ -21,6 +21,7 @@ from util.runtime.services import (
     heartbeat_path,
     read_heartbeat_file,
     required_service_for_route,
+    run_heartbeat_loop,
     scan_service_states,
     services_dir,
     write_heartbeat,
@@ -224,3 +225,52 @@ def test_max_backlog_cycles_is_configured():
     from util.runtime.config import section
 
     assert int(section("cycle")["max_backlog_cycles"]) >= 1
+
+
+def test_heartbeat_loop_publishes_while_owner_is_busy():
+    publications = []
+
+    class StopAfterThreeWaits:
+        def __init__(self):
+            self.waits = 0
+
+        def is_set(self):
+            return self.waits >= 3
+
+        def wait(self, interval):
+            assert interval == 2.0
+            self.waits += 1
+            return self.is_set()
+
+    run_heartbeat_loop(
+        StopAfterThreeWaits(),
+        lambda: publications.append("heartbeat"),
+        interval_seconds=2.0,
+    )
+
+    assert publications == ["heartbeat", "heartbeat", "heartbeat"]
+
+
+def test_heartbeat_loop_retries_after_publication_failure(capsys):
+    attempts = []
+
+    class StopAfterTwoWaits:
+        def __init__(self):
+            self.waits = 0
+
+        def is_set(self):
+            return self.waits >= 2
+
+        def wait(self, _interval):
+            self.waits += 1
+            return self.is_set()
+
+    def publish():
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise OSError("temporary filesystem failure")
+
+    run_heartbeat_loop(StopAfterTwoWaits(), publish, interval_seconds=1.0)
+
+    assert attempts == [1, 2]
+    assert "temporary filesystem failure" in capsys.readouterr().out

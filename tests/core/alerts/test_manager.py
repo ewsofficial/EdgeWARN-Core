@@ -188,6 +188,31 @@ class TestAlertManager:
     def test_load_all_empty_dir(self, override_alerts_dir):
         assert AlertManager.load_all("nonexistent") == []
 
+    def test_load_latest_for_cells_scans_once_and_filters_source(self, override_alerts_dir):
+        first = datetime(2026, 3, 4, 12, 0, 0)
+        second = first + timedelta(minutes=15)
+        alerts = [
+            AlertPayload("TSTM", "StormProb", "cell_1", [(35.0, -97.0)],
+                         first, first + timedelta(minutes=30)),
+            AlertPayload("TSTM", "StormProb", "cell_1", [(35.1, -97.1)],
+                         second, second + timedelta(minutes=30)),
+            AlertPayload("TSTM", "Other", "cell_1", [(36.0, -98.0)],
+                         second, second + timedelta(minutes=30)),
+            AlertPayload("TSTM", "StormProb", "cell_2", [(37.0, -99.0)],
+                         first, first + timedelta(minutes=30)),
+            AlertPayload("TSTM", "StormProb", "ignored", [(38.0, -100.0)],
+                         first, first + timedelta(minutes=30)),
+        ]
+        AlertManager.publish_many(alerts)
+
+        latest = AlertManager.load_latest_for_cells(
+            "StormProb", ["cell_1", "cell_2"]
+        )
+
+        assert set(latest) == {"cell_1", "cell_2"}
+        assert latest["cell_1"].effective_time == second
+        assert latest["cell_1"].source == "StormProb"
+
     def test_load_append_republish(self, override_alerts_dir):
         """Demonstrates the load → modify → republish workflow."""
         now = datetime(2026, 3, 4, 14, 0, 0)

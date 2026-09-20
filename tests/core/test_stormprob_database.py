@@ -176,7 +176,7 @@ def test_reprocessing_explicitly_invalidates_deployed_forecasts(tmp_path):
         "probability_threshold": 0.25,
     }
     forecasts = [forecast | {"lead_minutes": lead} for lead in LEADS]
-    with pytest.raises(ValueError, match="all four leads"):
+    with pytest.raises(ValueError, match=r"missing_leads=\[30, 45, 60\]"):
         repo.commit_cycle("cycle1", cell["timestamp"], [cell], forecasts=[forecast])
     repo.commit_cycle("cycle1", cell["timestamp"], [cell], forecasts=forecasts)
     with repo.reader() as db:
@@ -187,6 +187,66 @@ def test_reprocessing_explicitly_invalidates_deployed_forecasts(tmp_path):
     repo.commit_cycle("cycle1", cell["timestamp"], [cell])
     with repo.reader() as db:
         assert db.execute("SELECT count(*) FROM forecasts").fetchone()[0] == 4
+
+
+def test_forecast_commit_deduplicates_identical_keys(tmp_path, caplog):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    base = {
+        "cell_id": 101, "analysis_time": cell["timestamp"],
+        "model_version": "stormprob-test/v1", "status": "skipped",
+        "reason": "input-not-ready",
+    }
+    forecasts = [base | {"lead_minutes": lead} for lead in LEADS]
+    forecasts.append(dict(forecasts[0]))
+
+    repo.commit_cycle("cycle1", cell["timestamp"], [cell], forecasts=forecasts)
+
+    assert "cell_id='101'" in caplog.text
+    assert "lead_minutes=15" in caplog.text
+    with repo.reader() as db:
+        deployed = db.execute(
+            "SELECT count(*) FROM forecasts WHERE model_version=?",
+            ("stormprob-test/v1",),
+        ).fetchone()[0]
+    assert deployed == 4
+
+
+def test_forecast_commit_reports_conflicting_duplicate_payloads(tmp_path):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    base = {
+        "cell_id": 101, "analysis_time": cell["timestamp"],
+        "model_version": "stormprob-test/v1", "status": "skipped",
+        "reason": "first-reason", "lead_minutes": 15,
+    }
+    forecasts = [base | {"lead_minutes": lead} for lead in LEADS]
+    forecasts.append(base | {"reason": "conflicting-reason"})
+
+    with pytest.raises(ValueError) as failure:
+        repo.commit_cycle("cycle1", cell["timestamp"], [cell], forecasts=forecasts)
+
+    message = str(failure.value)
+    assert "cell_id='101'" in message
+    assert "lead_minutes=15" in message
+    assert "first-reason" in message
+    assert "conflicting-reason" in message
+
+
+def test_no_model_commit_keeps_explicit_pending_leads(tmp_path):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+
+    repo.commit_cycle("cycle1", cell["timestamp"], [cell], forecasts=None)
+
+    with repo.reader() as db:
+        rows = db.execute(
+            "SELECT lead_minutes,model_version,status,reason FROM forecasts "
+            "ORDER BY lead_minutes"
+        ).fetchall()
+    assert [row[0] for row in rows] == list(LEADS)
+    assert all(row[1:] == ("stormprob-pending/v1", "not-computed", "model-not-deployed")
+               for row in rows)
 
 
 def test_model_inputs_long_track_preserves_age_and_30_row_window(tmp_path):
