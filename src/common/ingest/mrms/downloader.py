@@ -118,6 +118,37 @@ def _staged_record(product, path, *, source, family="mrms"):
     )
 
 
+async def _download_mrms_https_async(dt, region, modifier, outdir, downloader):
+    """Try the same requested MRMS time on HTTPS after any S3 miss/failure."""
+    label = _mrms_modifier_label(modifier)
+    try:
+        urls = await HttpsFileFinder(dt, io_manager).find_files(region, modifier)
+        if not urls:
+            return label, None
+        path = await HttpsFileDownloader(dt, io_manager).download_matching(urls, outdir)
+        if path is not None and Path(path).suffix == ".gz":
+            path = await downloader.async_decompress_file(Path(path))
+        return label, _staged_record(label, path, source="https")
+    except Exception as exc:
+        io_manager.write_error(f"HTTPS fallback failed for {label}: {exc}")
+        return label, None
+
+
+def _download_mrms_https_sync(dt, region, modifier, outdir, downloader):
+    label = _mrms_modifier_label(modifier)
+    try:
+        urls = HttpsFileFinder(dt, io_manager).find_files_sync(region, modifier)
+        if not urls:
+            return label, None
+        path = HttpsFileDownloader(dt, io_manager).download_matching_sync(urls, outdir)
+        if path is not None and Path(path).suffix == ".gz":
+            path = downloader.decompress_file(Path(path))
+        return label, _staged_record(label, path, source="https")
+    except Exception as exc:
+        io_manager.write_error(f"HTTPS fallback failed for {label}: {exc}")
+        return label, None
+
+
 def _goes_staged_records(goes_spec, paths, *, source):
     spec = normalize_goes_modifier(goes_spec)
     label = _get_goes_spec_label(spec)
@@ -340,46 +371,10 @@ async def download_modifier_async(region, modifier, outdir, dt, max_entries, s3_
         _record_perf_metric(perf_maps, "lookup_ms", modifier_name, (asyncio.get_running_loop().time() - lookup_started_at) * 1000)
 
         if not file_list:
-            io_manager.write_warning(f"[{trace_id}] No files found in S3 for {bucket_path} at {dt}. Attempting HTTPS fallback...")
-            
-            # --- HTTPS FALLBACK ---
-            downloaded = None
-            staged_path = None
-            try:
-                https_finder = HttpsFileFinder(dt, io_manager)
-                https_file_list = await https_finder.find_files(region, modifier)
-                
-                if not https_file_list:
-                    io_manager.write_error(f"[{trace_id}] HTTPS Fallback failed: No files found for {modifier} at {dt}")
-                    perf_tracker.stop(f"Ingest - MRMS - {modifier_name}")
-                    return modifier_name, None
-
-                https_downloader = HttpsFileDownloader(dt, io_manager)
-                download_started_at = asyncio.get_running_loop().time()
-                downloaded = await https_downloader.download_matching(https_file_list, outdir)
-                _record_perf_metric(perf_maps, "download_ms", modifier_name, (asyncio.get_running_loop().time() - download_started_at) * 1000)
-                
-                if downloaded:
-                    staged_path = downloaded
-                    if downloaded.suffix == ".gz":
-                        decompress_started_at = asyncio.get_running_loop().time()
-                        staged_path = await downloader.async_decompress_file(downloaded)
-                        _record_perf_metric(perf_maps, "decompress_ms", modifier_name, (asyncio.get_running_loop().time() - decompress_started_at) * 1000)
-                else:
-                    io_manager.write_error(f"[{trace_id}] HTTPS Fallback failed: Could not download matching file for {modifier}")
-
-            except Exception as e:
-                io_manager.write_error(f"[{trace_id}] HTTPS Fallback Exception: {e}")
-            
+            io_manager.write_warning(f"[{trace_id}] No S3 file for {modifier_name} at {dt}; trying HTTPS")
+            result = await _download_mrms_https_async(dt, region, modifier, outdir, downloader)
             perf_tracker.stop(f"Ingest - MRMS - {modifier_name}")
-            return (
-                modifier_name,
-                _staged_record(
-                    modifier_name,
-                    staged_path,
-                    source="https",
-                ),
-            )
+            return result
         
         # Download most recent file asynchronously (S3)
         downloaded = None
@@ -396,7 +391,15 @@ async def download_modifier_async(region, modifier, outdir, dt, max_entries, s3_
                 staged_path = await downloader.async_decompress_file(downloaded)
                 _record_perf_metric(perf_maps, "decompress_ms", modifier_name, (asyncio.get_running_loop().time() - decompress_started_at) * 1000)
         else:
-            io_manager.write_error(f"[{trace_id}] Failed to download {bucket_path} file")
+            io_manager.write_warning(f"[{trace_id}] S3 fetch failed for {modifier_name}; trying HTTPS")
+            result = await _download_mrms_https_async(dt, region, modifier, outdir, downloader)
+            perf_tracker.stop(f"Ingest - MRMS - {modifier_name}")
+            return result
+
+        if staged_path is None:
+            result = await _download_mrms_https_async(dt, region, modifier, outdir, downloader)
+            perf_tracker.stop(f"Ingest - MRMS - {modifier_name}")
+            return result
         
         perf_tracker.stop(f"Ingest - MRMS - {modifier_name}")
         return (
@@ -409,9 +412,10 @@ async def download_modifier_async(region, modifier, outdir, dt, max_entries, s3_
         )
     
     except Exception as e:
-        io_manager.write_error(f"[{trace_id}] Failed to process {bucket_path} - {e}")
+        io_manager.write_error(f"[{trace_id}] S3 processing failed for {modifier_name}: {e}")
+        result = await _download_mrms_https_async(dt, region, modifier, outdir, downloader)
         perf_tracker.stop(f"Ingest - MRMS - {modifier_name}")
-        return modifier_name, None
+        return result
 
 def download_files_sync_fallback(dt, max_entries, target_modifiers=None):
     """Sync fallback for a selected MRMS phase (or all products)."""
@@ -465,8 +469,8 @@ def download_modifier_sync(region, modifier, outdir, dt, max_entries):
         file_list = finder.lookup_files(bucket_path, start_after=start_after)
 
         if not file_list:
-            io_manager.write_warning(f"No files found for {bucket_path} at {dt}")
-            return modifier_name, None
+            io_manager.write_warning(f"No S3 file for {modifier_name} at {dt}; trying HTTPS")
+            return _download_mrms_https_sync(dt, region, modifier, outdir, downloader)
         
         # Download most recent file that matches the target minute
         downloaded = downloader.download_matching(file_list, outdir)
@@ -475,12 +479,14 @@ def download_modifier_sync(region, modifier, outdir, dt, max_entries):
             staged_path = downloader.decompress_file(downloaded)
         else:
             if not downloaded:
-                io_manager.write_error(f"Failed to download {bucket_path} file")
-                return modifier_name, None
+                io_manager.write_warning(f"S3 fetch failed for {modifier_name}; trying HTTPS")
+                return _download_mrms_https_sync(dt, region, modifier, outdir, downloader)
+        if staged_path is None:
+            return _download_mrms_https_sync(dt, region, modifier, outdir, downloader)
     
     except Exception as e:
-        io_manager.write_error(f"Failed to process {bucket_path} - {e}")
-        return modifier_name, None
+        io_manager.write_error(f"S3 processing failed for {modifier_name}: {e}")
+        return _download_mrms_https_sync(dt, region, modifier, outdir, downloader)
     return (
         modifier_name,
         _staged_record(

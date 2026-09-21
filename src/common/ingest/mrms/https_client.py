@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from bs4 import BeautifulSoup
 import logging
+import os
 
 # We'll use the existing IOManager if possible, or fallback to logging
 try:
@@ -175,42 +176,7 @@ class HttpsFileDownloader:
         Given a list of file URLs, find the one matching self.dt (minute precision) 
         and download it.
         """
-        target_ts = self.dt.strftime("%Y%m%d-%H%M")
-        
-        # Find exact minute match first
-        match = None
-        for url in file_urls:
-            # url: .../MRMS_EchoTop_18_00.50_20260124-140035.grib2.gz
-            # We want to match 20260124-1400XX
-            if target_ts in url.replace(":", ""): # Some might have colons? unlikely in filename
-                match = url
-                break
-        
-        if not match:
-             # If exact minute not found, maybe try fuzzy match within +/- 2 mins?
-             # For now, simplistic exact minute match (ignoring seconds)
-             # Regex to extract timestamp
-             # ..._YYYYMMDD-HHMMSS.grib2.gz
-             matches = []
-             match_window = ncep_match_window_seconds()
-             for url in file_urls:
-                 ts_match = re.search(r'(\d{8}-\d{6})', url)
-                 if ts_match:
-                     file_ts_str = ts_match.group(1)
-                     try:
-                         file_dt = datetime.strptime(file_ts_str, "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
-                         # Calculate difference
-                         target_dt = self.dt if self.dt.tzinfo else self.dt.replace(tzinfo=timezone.utc)
-                         diff = abs((file_dt - target_dt).total_seconds())
-                         if diff < match_window:
-                            matches.append((diff, url))
-                     except:
-                         pass
-             
-             if matches:
-                 # Sort by time difference
-                 matches.sort(key=lambda x: x[0])
-                 match = matches[0][1]
+        match = self._select_matching_url(file_urls)
 
         if not match:
             return None
@@ -259,7 +225,55 @@ class HttpsFileDownloader:
                 self.io_manager.write_error(f"Download error {match}: {e}")
                 return None
 
-    # Sync wrapper if needed, but we mostly use async in the pipeline
+    def _select_matching_url(self, file_urls):
+        """Apply the same exact-minute/limited-offset rule to both transports."""
+        target_ts = self.dt.strftime("%Y%m%d-%H%M")
+        for url in file_urls:
+            if target_ts in url.replace(":", ""):
+                return url
+        matches = []
+        target_dt = self.dt if self.dt.tzinfo else self.dt.replace(tzinfo=timezone.utc)
+        for url in file_urls:
+            found = re.search(r'(\d{8}-\d{6})', url)
+            if found is None:
+                continue
+            try:
+                file_dt = datetime.strptime(found.group(1), "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            diff = abs((file_dt - target_dt).total_seconds())
+            if diff < ncep_match_window_seconds():
+                matches.append((diff, url))
+        return min(matches)[1] if matches else None
+
     def download_matching_sync(self, file_urls, outdir):
-        # Implementation using requests for sync fallback
-        pass
+        match = self._select_matching_url(file_urls)
+        if match is None:
+            return None
+        outdir = Path(outdir)
+        outdir.mkdir(parents=True, exist_ok=True)
+        out_path = outdir / match.rsplit('/', 1)[-1]
+        if out_path.is_file():
+            return out_path
+        part_path = out_path.with_name(f".{out_path.name}.part")
+        try:
+            with requests.get(match, timeout=ncep_sync_timeout_seconds(), stream=True) as response:
+                response.raise_for_status()
+                written = 0
+                with open(part_path, 'wb') as handle:
+                    for chunk in response.iter_content(chunk_size=ncep_download_chunk_size_bytes()):
+                        if chunk:
+                            written += len(chunk)
+                            handle.write(chunk)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                expected = response.headers.get('Content-Length')
+                if written == 0 or (expected is not None and written != int(expected)):
+                    raise IOError(f"incomplete HTTPS download: expected {expected} bytes, got {written}")
+            part_path.replace(out_path)
+            return out_path
+        except Exception as exc:
+            self.io_manager.write_error(f"HTTPS download error {match}: {exc}")
+            return None
+        finally:
+            part_path.unlink(missing_ok=True)

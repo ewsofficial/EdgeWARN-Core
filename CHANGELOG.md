@@ -60,6 +60,9 @@
 - Configurable EWMRS worker cap with simplified worker memory configuration.
 
 ### Changed
+- MRMS ingest now tries the timestamp-matched HTTPS source when an S3 listing
+  misses, an S3 download fails, or per-product S3 processing errors; async and
+  synchronous paths preserve atomic staging and the configured time window.
 - EWMRS MRMS rendering is now triggered on every enabled Core ingest cycle and
   scans each configured layer independently. Complete renders are reused,
   newly available layers are rendered, and lagging products no longer block
@@ -132,6 +135,7 @@
 - Fixed the API crash caused by `Filehandle.createReadStream()`.
 
 ### Testing
+- Added MRMS S3-to-HTTPS failover and timestamp-window regressions.
 - Added regressions for partial MRMS availability, per-layer EWMRS checkpoint
   behavior, preserved EdgeWARN integration gates, indexed StormProb
   projections, CTAM journal writes, and StormProb timing/heartbeat reporting.

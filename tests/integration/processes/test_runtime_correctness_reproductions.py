@@ -209,6 +209,11 @@ def test_mrms_batch_fails_when_decompression_returns_none(monkeypatch, tmp_path)
 
     monkeypatch.setattr(downloader, "FileFinder", Finder)
     monkeypatch.setattr(downloader, "FileDownloader", Download)
+    monkeypatch.setattr(
+        downloader,
+        "_download_mrms_https_sync",
+        lambda *_args, **_kwargs: ("Test", None),
+    )
 
     label, ok = downloader.download_modifier_sync(
         "CONUS",

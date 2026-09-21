@@ -125,6 +125,11 @@ staging, and cleanup. Important entry points are:
 Detection and integration modifiers are deliberately separate. A structured
 `DownloadBatchResult` reports attempted, downloaded, and failed products;
 readiness requires every requested product to be present and successful.
+For each MRMS product, an S3 listing miss, failed S3 fetch, or S3 processing
+error triggers an HTTPS lookup/download for the requested timestamp before
+that product is reported unavailable. The HTTPS matcher accepts the exact
+minute or the configured narrow timestamp window; it does not substitute an
+arbitrarily newer file. Both source paths stage files atomically.
 `max_entries` and `remove_old_files` default to the runtime/catalog settings,
 so configuration remains the source of truth unless a caller explicitly
 overrides them. Cleanup is restricted to configured runtime directories.
