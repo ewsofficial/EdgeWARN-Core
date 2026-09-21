@@ -60,6 +60,17 @@
 - Configurable EWMRS worker cap with simplified worker memory configuration.
 
 ### Changed
+- EWMRS MRMS rendering is now triggered on every enabled Core ingest cycle and
+  scans each configured layer independently. Complete renders are reused,
+  newly available layers are rendered, and lagging products no longer block
+  unrelated MRMS output; RAP and EdgeWARN integration retain their stricter
+  exact-input readiness gates.
+- StormProb publication now reuses a single indexed database projection for
+  API index updates instead of repeatedly scanning all stored entries, and
+  CTAM publication avoids redundant journal writes.
+- Removed PrecipRate from the MRMS scan-discovery readiness subset so its
+  upstream latency cannot delay selection of an otherwise usable cycle; it
+  remains available to integration and EWMRS rendering after arrival.
 - StormProb emits `tstm_wind: "false"` when no wind assessment is available.
 - The primary cycle now performs primary-only work and publishes durable
   records as the sole cross-service handoff; the GOES render loop is a
@@ -103,6 +114,9 @@
   generated on first run by the geomapper instead of tracked in git.
 
 ### Fixed
+- Improved StormProb phase timing and heartbeat diagnostics, batched previous
+  alert lookup, forecast-key handling, and publication visibility so slow or
+  malformed work is isolated and observable.
 - Corrected historical and single-frame processing semantics and prevented
   unavailable RAP data from stalling integration.
 - Stabilized NEXRAD worker lifecycle, bounded realtime work, and improved
@@ -118,6 +132,9 @@
 - Fixed the API crash caused by `Filehandle.createReadStream()`.
 
 ### Testing
+- Added regressions for partial MRMS availability, per-layer EWMRS checkpoint
+  behavior, preserved EdgeWARN integration gates, indexed StormProb
+  projections, CTAM journal writes, and StormProb timing/heartbeat reporting.
 - Added API contract, security, compatibility, and production-readiness
   coverage for the unified service.
 - Added configuration catalog, schema, override, provenance, and source-boundary
