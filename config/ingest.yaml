@@ -77,7 +77,6 @@ mrms:
     - {region: CONUS, product: EchoTop_18_00.50,                     outdir: MRMS_ECHOTOP18_DIR}
     - {region: CONUS, product: EchoTop_30_00.50,                     outdir: MRMS_ECHOTOP30_DIR}
     - {region: CONUS, product: EchoTop_50_00.50,                     outdir: MRMS_ECHOTOP50_DIR}
-    - {region: CONUS, product: PrecipRate_00.00,                     outdir: MRMS_PRECIPRATE_DIR}
     - {region: CONUS, product: MergedAzShear_0-2kmAGL_00.50,         outdir: MRMS_AZSHEARLOW_DIR}
     - {region: CONUS, product: MergedAzShear_3-6kmAGL_00.50,         outdir: MRMS_AZSHEARMID_DIR}
     - {region: CONUS, product: VIL_Density_00.50,                    outdir: MRMS_DVIL_DIR}

@@ -23,13 +23,6 @@
   {
     "@tuple": [
       "CONUS",
-      "PrecipRate_00.00",
-      "fs:MRMS_PRECIPRATE_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
       "MergedAzShear_0-2kmAGL_00.50",
       "fs:MRMS_AZSHEARLOW_DIR"
     ]

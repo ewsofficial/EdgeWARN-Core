@@ -121,6 +121,12 @@ readiness requires every requested product to be present and successful.
 so configuration remains the source of truth unless a caller explicitly
 overrides them. Cleanup is restricted to configured runtime directories.
 
+PrecipRate is excluded from the MRMS scan-discovery readiness subset because
+its upstream latency can delay selection of an otherwise usable cycle. It
+remains in the full ingest catalog and the integration/render paths, so the
+selected cycle still downloads it, computes `maxPrecipRate`, and serves the
+`MRMS_PrecipRate` EWMRS product.
+
 ProbSevere is a distinct MRMS-family product with its own bucket-path and JSON
 handling. Its product identity must be preserved in manifests and downstream
 processing.

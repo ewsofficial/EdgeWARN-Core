@@ -39,7 +39,7 @@ def test_mrms_readiness_catalog_baseline():
 def test_mrms_readiness_catalog_length():
     from common.ingest.mrms.config import get_check_modifiers
 
-    assert len(get_check_modifiers()) == 12
+    assert len(get_check_modifiers()) == 11
 
 
 def test_mrms_readiness_is_subset_of_ingest():
@@ -123,6 +123,20 @@ def test_detection_and_integration_partition_the_ingest_catalog():
 
     assert detection & integration == set()
     assert detection | integration == set(ingest_modifiers)
+
+
+def test_preciprate_is_downstream_only_for_readiness():
+    requires("xarray")
+    from common.ingest.mrms.config import get_check_modifiers
+    from common.ingest.mrms.main import get_ewmrs_modifiers, get_integration_modifiers
+
+    readiness = {product for _, product, _ in get_check_modifiers()}
+    integration = set(get_integration_modifiers())
+    ewmrs = set(get_ewmrs_modifiers())
+
+    assert "PrecipRate_00.00" not in readiness
+    assert "PrecipRate_00.00" in integration
+    assert "PrecipRate_00.00" in ewmrs
 
 
 # --- MRMS integration statistics ------------------------------------------
