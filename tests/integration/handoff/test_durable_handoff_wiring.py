@@ -132,7 +132,7 @@ def test_cycle_publishes_mrms_and_rap_ready_records(stubbed_workers, monkeypatch
     assert outcome.completed
 
 
-def test_failed_mrms_phase_publishes_no_mrms_ready_record(stubbed_workers, monkeypatch, tmp_path):
+def test_failed_mrms_phase_still_publishes_ewmrs_cycle_trigger(stubbed_workers, monkeypatch, tmp_path):
     _patch_downloaders(monkeypatch, tmp_path)
 
     async def failing_detection(dt, max_entries=10, remove_old_files=True):
@@ -150,9 +150,12 @@ def test_failed_mrms_phase_publishes_no_mrms_ready_record(stubbed_workers, monke
         outcome = _run_cycle(tmp_path, manager)
 
     assert outcome.completed is False
-    # The MRMS phase failed, so no successful mrms-ready record may exist,
-    # but the independently validated RAP phase still commits its record.
-    assert all(record is None for _, record in iter_committed_records(tmp_path, "mrms-ready"))
+    # mrms-ready is a cycle trigger, not an aggregate input-readiness claim.
+    # EWMRS will independently scan whatever layer sources are available.
+    assert any(
+        record is not None and record.success
+        for _, record in iter_committed_records(tmp_path, "mrms-ready")
+    )
     rap_records = iter_committed_records(tmp_path, "rap-ready")
     assert any(record is not None and record.success for _, record in rap_records)
 

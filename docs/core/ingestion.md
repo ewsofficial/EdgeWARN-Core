@@ -46,7 +46,10 @@ Readiness transitions are emitted in dependency order:
 
 1. Detection MRMS inputs: the configured detection subset is complete and
    timestamp-valid, so the EdgeWARN detection worker may run.
-2. EWMRS MRMS inputs: detection and integration MRMS batches are both complete.
+2. EWMRS MRMS cycle trigger: emitted every Core ingest cycle. EWMRS scans each
+   configured MRMS source directory independently, reuses complete renders for
+   unchanged source timestamps, and renders newly available layers. There is
+   no aggregate all-products readiness gate.
 3. Base EdgeWARN integration inputs: MRMS inputs plus a valid raw RAP input,
    unless RAP is disabled (for example, `mrms-core-only`).
 4. EdgeWARN integration inputs: base inputs plus scan-time GLM when GOES/GLM is
@@ -67,19 +70,24 @@ The primary publishes successful phases through
 ```
 
 The record contains the canonical UTC cycle ID, producer/run metadata, the
-manifest's exact pinned paths, tolerances, and warnings. A phase is not
-published when its required inputs are unavailable. Publication failure is
+manifest's staged paths, tolerances, and warnings. `mrms-ready` is published as
+an EWMRS cycle trigger even when one or more MRMS products are unavailable;
+`rap-ready` remains gated on a valid exact RAP input. Publication failure is
 logged as a handoff problem and does not rewrite an existing incompatible
 record or make the primary cycle falsely successful.
 
 `run_ewmrs.py` runs `util.runtime.ewmrs_consumer.EwmrsRecordConsumer` as a
-supervised child. It drains `mrms-ready` and `rap-ready` in cycle order, strictly
-re-reads and validates each record at the consumption boundary, and renders or
-converts from the recorded paths rather than selecting a newer local file.
+supervised child. It drains `mrms-ready` and `rap-ready` in cycle order and
+strictly re-reads each record at the consumption boundary. An `mrms-ready`
+record is a cycle trigger: each MRMS layer selects its newest complete local
+source independently, reuses an existing complete render for that source
+timestamp, and leaves unavailable layers for a later cycle. RAP conversion
+continues to use the exact path recorded by `rap-ready`.
 There is a separate durable checkpoint for each phase under
-`<BASE_DIR>/state/realtime/consumers/`. A checkpoint advances only after
-successful artifact publication; render failures remain retryable. Malformed,
-missing, misaligned, or irrecoverably incomplete records are logged and marked
+`<BASE_DIR>/state/realtime/consumers/`. The MRMS checkpoint advances after a
+best-effort per-layer scan completes; unavailable layers are reconsidered on
+the next Core cycle. Renderer exceptions remain retryable without advancing.
+Malformed records and invalid exact-input RAP records are logged and marked
 unrecoverable so they cannot block the backlog indefinitely. Backlogs beyond
 `cycle.max_backlog_cycles` are also explicitly abandoned.
 

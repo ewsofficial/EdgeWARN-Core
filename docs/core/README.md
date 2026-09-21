@@ -118,7 +118,7 @@ isolated to that layer.
 
 ## Scheduling Modes
 
-- The primary service (`run_edgewarn.py`) runs the staged ingest cycle, releases detection inputs first, publishes durable `mrms-ready`/`rap-ready` records, and drives the EdgeWARN worker; the EWMRS service (`run_ewmrs.py`) consumes those records and renders from their exact paths
+- The primary service (`run_edgewarn.py`) runs the staged ingest cycle, releases detection inputs first, publishes durable `mrms-ready`/`rap-ready` records, and drives the EdgeWARN worker; the EWMRS service (`run_ewmrs.py`) treats each `mrms-ready` record as a cycle trigger and independently renders newly available local MRMS layers
 - NEXRAD runs entirely as its own service (`run_nexrad.py`), independent of both other services
 - `process_historical.py` iterates through a requested UTC time range and runs the historical EdgeWARN flow
 

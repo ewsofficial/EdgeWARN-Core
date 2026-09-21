@@ -151,6 +151,57 @@ def test_run_staged_ingest_cycle_can_skip_goes_readiness(monkeypatch, tmp_path):
     assert state.edgewarn_integration_inputs_ready is True
 
 
+def test_ewmrs_cycle_trigger_does_not_wait_for_complete_integration_batch(
+    monkeypatch, tmp_path
+):
+    async def fake_detection(*_args, **_kwargs):
+        return _batch(tmp_path, dt, "Detection")
+
+    async def missing_integration(*_args, **_kwargs):
+        return DownloadBatchResult(
+            attempted=("NLDN",),
+            downloaded=(),
+            failed=("NLDN",),
+        )
+
+    def missing_integration_sync(*_args, **_kwargs):
+        return DownloadBatchResult(
+            attempted=("NLDN",),
+            downloaded=(),
+            failed=("NLDN",),
+        )
+
+    async def fake_rap(*_args, **_kwargs):
+        rap_path = tmp_path / "RAP.20260317-20z.awp130pgrbf00.grib2"
+        rap_path.write_bytes(b"grib")
+        return rap_path
+
+    monkeypatch.setattr(
+        coordinator.mrms_ingest, "download_detection_files_async", fake_detection
+    )
+    monkeypatch.setattr(
+        coordinator.mrms_ingest,
+        "download_integration_files_async",
+        missing_integration,
+    )
+    monkeypatch.setattr(
+        coordinator.mrms_ingest,
+        "download_integration_files",
+        missing_integration_sync,
+    )
+    monkeypatch.setattr(coordinator, "download_rap_async", fake_rap)
+
+    dt = datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc)
+    state = asyncio.run(
+        run_staged_ingest_cycle(dt, lambda _message: None, include_goes=False)
+    )
+
+    assert state.detection_inputs_ready is True
+    assert state.ewmrs_mrms_inputs_ready is True
+    assert state.mrms_integration_inputs_ready is False
+    assert state.edgewarn_integration_inputs_ready is False
+
+
 def test_second_prior_rap_analysis_releases_integration(monkeypatch, tmp_path):
     """Regression for the 2026-07-26 RAP staging outage."""
     rap_dir = tmp_path / "data" / "RAP"

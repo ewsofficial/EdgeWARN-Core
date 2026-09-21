@@ -239,12 +239,11 @@ async def run_staged_ingest_cycle(
     if not mrms_integration_ok:
         state.errors["mrms_integration_ingest"] = "MRMS integration inputs unavailable"
 
-    state.ewmrs_mrms_inputs_ready = include_ewmrs and detection_ok and mrms_integration_ok
-    if include_ewmrs and not state.ewmrs_mrms_inputs_ready:
-        state.errors.setdefault(
-            "ewmrs_ingest",
-            "EWMRS render inputs unavailable from staged MRMS ingest",
-        )
+    # This callback is a cycle trigger, not an aggregate MRMS readiness gate.
+    # EWMRS scans each configured source directory independently and reuses or
+    # renders the newest local file for that layer.  A lagging integration
+    # product must not prevent unrelated, already-staged layers from rendering.
+    state.ewmrs_mrms_inputs_ready = include_ewmrs
     if on_ewmrs_mrms_ready is not None:
         on_ewmrs_mrms_ready(state)
 
@@ -283,7 +282,6 @@ async def run_staged_ingest_cycle(
     state.ewmrs_goes_inputs_ready = (
         include_ewmrs
         and include_goes
-        and state.ewmrs_mrms_inputs_ready
         and goes_ok
     )
     if include_ewmrs and include_goes and not state.ewmrs_goes_inputs_ready:

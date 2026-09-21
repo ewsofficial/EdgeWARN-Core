@@ -98,4 +98,6 @@ def test_tandem_cycle_rejects_partial_detection_batch(tmp_path):
 
     assert state.detection_inputs_ready is False
     assert state.errors["detection_ingest"] == "Detection inputs unavailable"
-    assert state.ewmrs_mrms_inputs_ready is False
+    # EWMRS is triggered for every cycle and independently scans the local
+    # source directory of each layer; detection completeness gates Core only.
+    assert state.ewmrs_mrms_inputs_ready is True

@@ -1,17 +1,19 @@
 """EWMRS phase-record consumer (decomposition Phase 4).
 
 Consumes committed ``mrms-ready`` and ``rap-ready`` phase records published by
-the primary service, rendering from the exact pinned paths in each record.
+the primary service. MRMS records trigger a best-effort per-layer scan of local
+inputs; RAP conversion continues to use the exact pinned input in its record.
 Correctness rules (plans/realtime-runner-decomposition-plan.md):
 
 - Records are processed in cycle-timestamp order; a malformed record stops
   the drain so newer cycles are never rendered under older timestamps.
-- A consumer checkpoint advances only after validated artifact publication;
-  render failures are retried on the next poll without advancing.
+- A consumer checkpoint advances after the MRMS best-effort scan completes or
+  RAP publishes usable artifacts; renderer exceptions are retried on the next
+  poll without advancing.
 - Cycles beyond ``cycle.max_backlog_cycles`` are marked unrecoverable
   explicitly and skipped without rendering; processing resumes at the oldest
   still-valid record.
-- Validation failures (missing or misaligned exact inputs) mark that cycle
+- RAP validation failures (missing or misaligned exact inputs) mark that cycle
   unrecoverable explicitly rather than blocking the backlog forever.
 
 This module runs only inside the EWMRS service process tree; importing it is
@@ -133,10 +135,14 @@ class EwmrsRecordConsumer:
                 )
                 if record is None:
                     break
-                problems = shadow_validate_phase_record(
-                    record,
-                    layers=(self._mrms_layers() if phase == "mrms-ready" else None),
-                    base_dir=self.base_dir,
+                # MRMS records are cycle triggers. Their inputs are useful
+                # provenance, but rendering deliberately scans each layer's
+                # local directory so one absent/lagging product cannot block
+                # all other products. RAP remains an exact-input contract.
+                problems = (
+                    ()
+                    if phase == "mrms-ready"
+                    else shadow_validate_phase_record(record, base_dir=self.base_dir)
                 )
                 if problems:
                     self._log(
@@ -168,27 +174,15 @@ class EwmrsRecordConsumer:
                 break
         return processed, skipped
 
-    def _mrms_layers(self):
-        from EWMRS.render.config import get_mrms_file_list
-
-        return get_mrms_file_list()
-
     def _handle_mrms_ready(self, record: PhaseRecord):
         from EWMRS.pipeline import mrms_required_layer_failures, run_mrms_render_pipeline
 
-        results = run_mrms_render_pipeline(
-            record.analysis_time,
-            input_manifest=record.to_manifest(),
-        )
+        results = run_mrms_render_pipeline(record.analysis_time)
         failed_required, failed_optional = mrms_required_layer_failures(results)
-        for optional_layer in failed_optional:
+        for missing_layer in (*failed_required, *failed_optional):
             self._log(
-                f"[EWMRS] Optional MRMS layer failed to render: {optional_layer}"
-            )
-        if not results or failed_required:
-            raise RuntimeError(
-                "MRMS render did not produce the complete required layer set"
-                + (f": {', '.join(failed_required)}" if failed_required else "")
+                f"[EWMRS] MRMS layer unavailable for this pass; "
+                f"will scan again on the next cycle: {missing_layer}"
             )
 
     def _handle_rap_ready(self, record: PhaseRecord):

@@ -1,10 +1,9 @@
 """Phase 4 EWMRS record-consumer tests.
 
-Covers the consumption rules from
-plans/realtime-runner-decomposition-plan.md: ordered processing of committed
-records using exact paths, checkpoints advancing only after validated artifact
-publication, restart recovery (start after primary / before primary), explicit
-backlog abandonment, and render failures retrying without advancing.
+Covers ordered processing of committed records, per-layer newest-local MRMS
+rendering, exact-path RAP conversion, checkpoint advancement, restart recovery
+(start after primary / before primary), explicit backlog abandonment, and
+render failures retrying without advancing.
 """
 
 import json
@@ -31,7 +30,7 @@ def fake_render(tmp_path, monkeypatch):
     calls = {"mrms": [], "rap": []}
 
     def fake_run_mrms(dt, max_entries=None, input_manifest=None):
-        assert input_manifest is not None
+        assert input_manifest is None
         calls["mrms"].append((dt, input_manifest))
         return {"CompRefQC": "gui/MRMS_MergedReflectivityQC/x.png"}
 
@@ -89,9 +88,9 @@ def test_consumes_committed_records_after_primary(tmp_path, fake_render, monkeyp
     assert skipped == 0
     rendered_dt, rendered_manifest = fake_render["mrms"][0]
     assert rendered_dt == CYCLE_DT
-    # The render receives the exact pinned paths from the record.
-    staged_products = {s.product for s in rendered_manifest.inputs}
-    assert {"Detection", "Integration"} <= staged_products
+    # MRMS uses a per-layer newest-local scan rather than binding the record's
+    # aggregate manifest into every render layer.
+    assert rendered_manifest is None
     assert fake_render["rap"] == [(fake_render["rap"][0][0], CYCLE_DT)]
     # Checkpoint advanced only after validated publication.
     assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == cycle_id
@@ -135,8 +134,8 @@ def test_backlog_excess_marked_unrecoverable_without_rendering(tmp_path, fake_re
     assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == expected
 
 
-def test_missing_exact_input_marks_cycle_unrecoverable(tmp_path, fake_render):
-    """Cleanup overlap: deleted exact inputs never silently render newer files."""
+def test_missing_exact_mrms_input_does_not_block_local_layer_scan(tmp_path, fake_render):
+    """MRMS trigger records do not require every recorded path to survive."""
     _commit(tmp_path, CYCLE_DT)
     # Delete every exact input behind both records.
     for phase in ("mrms-ready", "rap-ready"):
@@ -146,8 +145,8 @@ def test_missing_exact_input_marks_cycle_unrecoverable(tmp_path, fake_render):
 
     consumer = EwmrsRecordConsumer(tmp_path)
     processed, skipped = consumer.process_pending_once()
-    assert processed == 0
-    assert skipped == 2
+    assert processed == 1
+    assert skipped == 1
     assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
     assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
 
@@ -170,6 +169,34 @@ def test_render_failure_retries_without_advancing(tmp_path, fake_render, monkeyp
     assert consumer.checkpoint_for("mrms-ready") is None
     # ...while the successfully rendered rap phase advanced its own cursor.
     assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
+
+
+def test_missing_mrms_layers_do_not_block_cycle_checkpoint(
+    tmp_path, fake_render, monkeypatch
+):
+    cycle_id = _commit(tmp_path, CYCLE_DT, with_rap=False)
+
+    def partially_available_mrms(dt, max_entries=None, input_manifest=None):
+        assert input_manifest is None
+        return {
+            "Available": "gui/available/chunk.f16.gz",
+            "Lagging": None,
+        }
+
+    monkeypatch.setattr(
+        ewmrs_pipeline, "run_mrms_render_pipeline", partially_available_mrms
+    )
+    monkeypatch.setattr(
+        ewmrs_pipeline,
+        "mrms_required_layer_failures",
+        lambda _results: (["Lagging"], []),
+    )
+    logs = []
+    consumer = EwmrsRecordConsumer(tmp_path, log=logs.append)
+
+    assert consumer.process_pending_once() == (1, 0)
+    assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == cycle_id
+    assert any("next cycle: Lagging" in message for message in logs)
 
 
 def test_restart_replays_render_interrupted_before_checkpoint_once(tmp_path, monkeypatch):

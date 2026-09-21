@@ -3,7 +3,7 @@
 Owns EWMRS and non-NEXRAD accessory work:
 
 - Consumption of committed ``mrms-ready``/``rap-ready`` records, rendering
-  MRMS layers from the exact pinned paths in each record.
+  each newly available MRMS layer from its newest local source file.
 - RAP Uint16 conversion (moved out of the shared primary coordinator).
 - GOES ABI ingest and poll-based GOES rendering from locally staged files.
 - METAR, NWS, and WPC continuous ingest loops.
