@@ -234,6 +234,11 @@ def test_second_prior_rap_analysis_releases_integration(monkeypatch, tmp_path):
     monkeypatch.setattr(coordinator.mrms_ingest, "download_integration_files_async", fake_mrms_integration)
     monkeypatch.setattr(coordinator, "download_all_goes_files_async", fake_goes)
     monkeypatch.setattr(synoptic_downloader, "download_synoptic_async", fake_remote)
+
+    async def missing_nomads(*_args):
+        raise FileNotFoundError("not published on NOMADS")
+
+    monkeypatch.setattr(synoptic_downloader, "download_synoptic_https_async", missing_nomads)
     monkeypatch.setattr(synoptic_main.fs, "BASE_DIR", tmp_path)
     monkeypatch.setattr(synoptic_main.fs, "RAP_DIR", rap_dir)
 
@@ -251,3 +256,43 @@ def test_second_prior_rap_analysis_releases_integration(monkeypatch, tmp_path):
     assert state.edgewarn_integration_inputs_ready is True
     assert "rap_ingest" not in state.errors
     assert (rap_dir / "RAP.20260726-11z.awp130pgrbf00.grib2").exists()
+
+
+def test_nomads_rap_analysis_releases_integration(monkeypatch, tmp_path):
+    rap_dir = tmp_path / "data" / "RAP"
+    rap_dir.mkdir(parents=True)
+    dt = datetime(2026, 7, 26, 13, 6, tzinfo=timezone.utc)
+
+    async def fake_detection(*_args, **_kwargs):
+        return _batch(tmp_path, dt, "Detection")
+
+    async def fake_mrms_integration(*_args, **_kwargs):
+        return _batch(tmp_path, dt, "Integration")
+
+    async def missing_s3(*_args):
+        raise FileNotFoundError("S3 object missing")
+
+    async def nomads(key, local_path, _base_url):
+        assert key == "rap.20260726/rap.t13z.awp130pgrbf00.grib2"
+        local_path.write_bytes(b"GRIB\x00\x00\x00\x02")
+        return local_path
+
+    monkeypatch.setattr(coordinator.mrms_ingest, "download_detection_files_async", fake_detection)
+    monkeypatch.setattr(coordinator.mrms_ingest, "download_integration_files_async", fake_mrms_integration)
+    monkeypatch.setattr(synoptic_downloader, "download_synoptic_async", missing_s3)
+    monkeypatch.setattr(synoptic_downloader, "download_synoptic_https_async", nomads)
+    monkeypatch.setattr(synoptic_main.fs, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(synoptic_main.fs, "RAP_DIR", rap_dir)
+
+    state = asyncio.run(
+        run_staged_ingest_cycle(
+            dt, lambda _message: None, include_goes=False, include_ewmrs=False
+        )
+    )
+
+    assert state.rap_inputs_ready is True
+    assert state.edgewarn_integration_inputs_ready is True
+    assert "rap_ingest" not in state.errors
+    assert state.input_manifest.latest_for_product("RAP").path == str(
+        rap_dir / "RAP.20260726-13z.awp130pgrbf00.grib2"
+    )

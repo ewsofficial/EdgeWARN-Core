@@ -60,6 +60,18 @@ def rap_max_files() -> int:
     return _rap()["max_files"]
 
 
+def rap_nomads_base_url() -> str:
+    return _rap()["nomads_base_url"]
+
+
+def rap_nomads_timeout_seconds() -> int:
+    return _rap()["nomads_timeout_seconds"]
+
+
+def rap_nomads_chunk_size_bytes() -> int:
+    return _rap()["nomads_chunk_size_bytes"]
+
+
 def get_rap_max_age_minutes() -> int:
     """Return the configured maximum RAP analysis age.
 

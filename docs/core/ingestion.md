@@ -173,12 +173,15 @@ from the requested scan. The default maximum analysis age is 180 minutes and
 can be overridden with `EDGEWARN_RAP_MAX_AGE_MINUTES`. Freshness is determined
 from the analysis timestamp encoded in the RAP filename, not filesystem mtime.
 
-Definitive S3 404s advance to the next eligible analysis without retrying the
-same key through the synchronous client; transport/authentication failures may
-use one synchronous source fallback. When the search window is exhausted, the
-readiness error includes the configured limit and checked-key results. RAP
-cleanup uses the same encoded-time policy and retains at most the newest three
-eligible analyses under `<BASE_DIR>/data/RAP`.
+For each eligible hour, a definitive S3 404 skips the synchronous S3 attempt;
+other S3 failures receive one synchronous S3 attempt. If S3 cannot provide a
+valid file, RAP downloads the same analysis from the configured NOAA NOMADS
+HTTPS path before considering an older hour. NOMADS downloads are streamed,
+validated as complete GRIB2 files, and published atomically under the same
+local filename as S3 files. When the search window is exhausted, the readiness
+error includes the configured limit and failures from both sources. RAP cleanup
+uses the same encoded-time policy and retains at most the newest three eligible
+analyses under `<BASE_DIR>/data/RAP`.
 
 ## METAR
 

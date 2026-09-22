@@ -1,4 +1,5 @@
 import aioboto3
+import aiohttp
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,9 @@ from common.ingest.synoptic.config import (
     rap_file_pattern,
     rap_local_file_pattern,
     rap_lookback_step_hours,
+    rap_nomads_base_url,
 )
+from common.ingest.synoptic.https_async import download_synoptic_https_async
 from common.ingest.synoptic.s3_sync import SynopticFileDownloader
 from common.ingest.synoptic.s3_async import AsyncSynopticFileDownloader
 
@@ -27,6 +30,8 @@ class SynopticAttempt:
     analysis_time: datetime
     s3_key: str
     failure: str
+    https_url: str | None = None
+    https_failure: str | None = None
 
 
 class SynopticUnavailableError(RuntimeError):
@@ -44,7 +49,13 @@ class SynopticUnavailableError(RuntimeError):
         self.max_age_minutes = max_age_minutes
         self.attempts = tuple(attempts)
         checked = ", ".join(
-            f"{attempt.s3_key}={attempt.failure}" for attempt in attempts
+            f"{attempt.s3_key}={attempt.failure}"
+            + (
+                f", {attempt.https_url}={attempt.https_failure}"
+                if attempt.https_url is not None
+                else ""
+            )
+            for attempt in attempts
         ) or "none"
         super().__init__(
             f"{dataset_name} unavailable within {max_age_minutes}-minute analysis-age "
@@ -80,6 +91,12 @@ def _is_valid_local_file(path: Path) -> bool:
 
 
 def _failure_category(exc: Exception) -> str:
+    if isinstance(exc, FileNotFoundError):
+        return "not_found"
+    if isinstance(exc, ValueError):
+        return "invalid_content"
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return f"http_{exc.status}"
     text = str(exc).lower()
     if any(
         token in text
@@ -166,12 +183,14 @@ async def download_synoptic(
     dataset_name="Synoptic",
     *,
     max_age_minutes,
+    https_base_url: str | None = None,
 ):
     """
     Select the newest acceptable local or remote synoptic analysis.
 
-    Definitive S3 404 responses advance to the next analysis hour. Other async
-    failures receive one synchronous attempt for the same candidate.
+    Definitive S3 404 responses skip the synchronous S3 attempt. Other async
+    failures receive one synchronous S3 attempt for the same candidate. If an
+    HTTPS mirror is configured, try it before advancing to an older analysis.
 
     ``max_age_minutes`` is required rather than defaulted. It used to default to
     60 while the RAP catalog said 180; only ``download_rap`` calls this and it
@@ -211,6 +230,7 @@ async def download_synoptic(
             )
 
         async_failure = None
+        s3_failure = None
         try:
             result = await download_synoptic_async(
                 current_dt, bucket, file_pattern, dir_pattern, out_dir
@@ -223,34 +243,56 @@ async def download_synoptic(
             async_failure = "local_invalid" if result else "transport"
         except FileNotFoundError:
             _log_synoptic_not_found(bucket, s3_key)
-            attempts.append(SynopticAttempt(current_dt, s3_key, "not_found"))
-            continue
+            s3_failure = "not_found"
         except Exception as exc:
             async_failure = _failure_category(exc)
             io_manager.write_warning(
                 f"Async {dataset_name} download for {current_dt} failed: {exc}"
             )
 
-        try:
-            result = download_synoptic_sync(
-                current_dt, bucket, file_pattern, dir_pattern, out_dir
-            )
-            if result and _is_valid_local_file(Path(result)):
-                _log_selected(
-                    dataset_name, requested_time, current_dt, result, "s3_sync"
+        if s3_failure is None:
+            try:
+                result = download_synoptic_sync(
+                    current_dt, bucket, file_pattern, dir_pattern, out_dir
                 )
-                return result
-            failure = "local_invalid" if result else async_failure or "transport"
-            attempts.append(SynopticAttempt(current_dt, s3_key, failure))
-        except FileNotFoundError:
-            _log_synoptic_not_found(bucket, s3_key)
-            attempts.append(SynopticAttempt(current_dt, s3_key, "not_found"))
-        except Exception as exc:
-            failure = _failure_category(exc)
-            attempts.append(SynopticAttempt(current_dt, s3_key, failure))
-            io_manager.write_error(
-                f"Sync {dataset_name} download for {current_dt} failed: {exc}"
-            )
+                if result and _is_valid_local_file(Path(result)):
+                    _log_selected(
+                        dataset_name, requested_time, current_dt, result, "s3_sync"
+                    )
+                    return result
+                s3_failure = "local_invalid" if result else async_failure or "transport"
+            except FileNotFoundError:
+                _log_synoptic_not_found(bucket, s3_key)
+                s3_failure = "not_found"
+            except Exception as exc:
+                s3_failure = _failure_category(exc)
+                io_manager.write_error(
+                    f"Sync {dataset_name} download for {current_dt} failed: {exc}"
+                )
+
+        https_url = None
+        https_failure = None
+        if https_base_url is not None:
+            https_url = f"{https_base_url.rstrip('/')}/{s3_key}"
+            try:
+                result = await download_synoptic_https_async(
+                    s3_key, local_path, https_base_url
+                )
+                if result and _is_valid_local_file(Path(result)):
+                    _log_selected(
+                        dataset_name, requested_time, current_dt, result, "nomads_https"
+                    )
+                    return result
+                https_failure = "local_invalid"
+            except Exception as exc:
+                https_failure = _failure_category(exc)
+                io_manager.write_warning(
+                    f"HTTPS {dataset_name} download for {current_dt} failed: {exc}"
+                )
+
+        attempts.append(
+            SynopticAttempt(current_dt, s3_key, s3_failure, https_url, https_failure)
+        )
 
     error = SynopticUnavailableError(
         dataset_name, requested_time, max_age_minutes, attempts
@@ -271,4 +313,5 @@ async def download_rap(dt):
         fs.RAP_DIR,
         dataset_name="RAP",
         max_age_minutes=get_rap_max_age_minutes(),
+        https_base_url=rap_nomads_base_url(),
     )
