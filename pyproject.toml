@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "edgewarn-core"
-version = "3.0.0"
+version = "3.0.1"
 description = "Backend services and analysis pipeline for EdgeWARN"
 readme = "README.md"
 requires-python = ">=3.13"

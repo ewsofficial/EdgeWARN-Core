@@ -283,7 +283,7 @@ to a registry, a recipient only needs Docker to download and start it:
 
 ```bash
 # Replace this example with the published image reference.
-IMAGE=your-registry/edgewarn-core:3.0.0
+IMAGE=your-registry/edgewarn-core:3.0.1
 docker run -d --name edgewarn --restart unless-stopped "$IMAGE"
 ```
 
@@ -311,7 +311,7 @@ are downloaded during the build and bundled in the image; no zone asset
 mount or separate initialization step is required:
 
 ```bash
-docker build -t edgewarn-core:3.0.0 .
+docker build -t edgewarn-core:3.0.1 .
 export EDGEWARN_HOST_BASE_DIR=/srv/edgewarn/runtime
 export EDGEWARN_CTAM_MODULES_DIR=/srv/edgewarn/ctam_modules
 docker run --rm --name edgewarn \
@@ -319,7 +319,7 @@ docker run --rm --name edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
   -v "$EDGEWARN_CTAM_MODULES_DIR:/opt/edgewarn/ctam_modules:ro" \
   -e EDGEWARN_CTAM_MODULE_DIR=/opt/edgewarn/ctam_modules \
-  edgewarn-core:3.0.0
+  edgewarn-core:3.0.1
 ```
 
 CTAM modules are operator-owned code and are never baked into the image:
@@ -350,17 +350,17 @@ docker run --rm \
   --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
-  edgewarn-core:3.0.0 run core --config-path /etc/edgewarn/config
+  edgewarn-core:3.0.1 run core --config-path /etc/edgewarn/config
 docker run --rm \
   --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
-  edgewarn-core:3.0.0 run ewmrs --config-path /etc/edgewarn/config
+  edgewarn-core:3.0.1 run ewmrs --config-path /etc/edgewarn/config
 docker run --rm \
   --entrypoint edgewarn \
   -v edgewarn-runtime:/var/lib/edgewarn \
   -v "$PWD/config:/etc/edgewarn/config:ro" \
-  edgewarn-core:3.0.0 run nexrad --config-path /etc/edgewarn/config
+  edgewarn-core:3.0.1 run nexrad --config-path /etc/edgewarn/config
 ```
 
 Runtime output and configuration are separate mounts. Production should keep
@@ -462,7 +462,7 @@ cached download layer on subsequent builds; use `docker compose build
 --no-cache edgewarn` to force a fresh snapshot. The build also verifies that
 the installed application can find the bundled assets.
 
-To skip bundling, use `docker build --build-arg EDGEWARN_SYNC_NWS_ZONES=false -t edgewarn-core:3.0.0 .`
+To skip bundling, use `docker build --build-arg EDGEWARN_SYNC_NWS_ZONES=false -t edgewarn-core:3.0.1 .`
 or set `EDGEWARN_SYNC_NWS_ZONES=false` for the Compose build. In that case,
 synchronize and mount the host asset directory before running EWMRS.
 

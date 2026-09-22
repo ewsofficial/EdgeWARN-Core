@@ -1,6 +1,6 @@
 {
   "openapi": "3.1.0",
-  "info": {"title": "EdgeWARN Unified API", "version": "3.0.0", "description": "The versioned, read-only EdgeWARN and EWMRS public API."},
+  "info": {"title": "EdgeWARN Unified API", "version": "3.0.1", "description": "The versioned, read-only EdgeWARN and EWMRS public API."},
   "servers": [{"url": "/"}],
   "paths": {
     "/api/v3": {"get": {"operationId": "getApiDiscovery", "responses": {"200": {"description": "Capability document", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResourceEnvelope"}}}}}}},

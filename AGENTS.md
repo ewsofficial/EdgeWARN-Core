@@ -9,7 +9,7 @@ when instructions differ.
 
 ## What this repository is
 
-EdgeWARN-Core 3.0.0 is the backend for the EdgeWARN weather platform. It is a
+EdgeWARN-Core 3.0.1 is the backend for the EdgeWARN weather platform. It is a
 mixed Python and Node.js system with four independently deployable runtime
 surfaces:
 
