@@ -563,6 +563,29 @@ class StormProbRepository:
                 ORDER BY o.analysis_time DESC LIMIT ?""", params).fetchall()
         return [json.loads(row[0]) for row in reversed(rows)]
 
+    def legacy_histories(self, cell_ids: list[Any]) -> dict[str, list[dict]]:
+        """Read full compatibility histories for touched cells in one snapshot."""
+        ids = list(dict.fromkeys(str(cell_id) for cell_id in cell_ids))
+        histories: dict[str, list[dict]] = {cell_id: [] for cell_id in ids}
+        if not ids:
+            return histories
+        with self.reader() as db:
+            for start in range(0, len(ids), 500):
+                batch = ids[start:start + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = db.execute(f"""SELECT o.cell_id,o.legacy_projection_json
+                    FROM cell_observations o JOIN cycles c ON c.cycle_id=o.cycle_id
+                    WHERE o.cell_id IN ({placeholders})
+                    AND c.state IN ('inputs-committed','legacy-imported')
+                    ORDER BY o.cell_id,o.analysis_time DESC""", batch)
+                for row in rows:
+                    history = histories[row["cell_id"]]
+                    if len(history) < 1000000:  # Match legacy_history's default limit.
+                        history.append(json.loads(row["legacy_projection_json"]))
+        for history in histories.values():
+            history.reverse()
+        return histories
+
     def latest_cycle_before(self, analysis_time: Any) -> list[dict]:
         with self.reader() as db:
             row = db.execute("""SELECT cycle_id,projection_json FROM cycles WHERE analysis_time < ?
@@ -582,22 +605,24 @@ class StormProbRepository:
             row = db.execute("SELECT projection_hash FROM cycles WHERE cycle_id=?", (str(cycle_id),)).fetchone()
         return row[0] if row else None
 
-    def index_projection(self) -> tuple[list[str], dict[str, float]]:
+    def index_projection(self, *, include_pending: bool = False) -> tuple[list[str], dict[str, float]]:
         """Committed paths/IDs for the derived legacy API indexes."""
+        projection_states = ("published", "pending") if include_pending else ("published",)
+        placeholders = ",".join("?" for _ in projection_states)
         with self.reader() as db:
-            cycles = db.execute("""SELECT projection_path FROM cycles WHERE
-                state='inputs-committed' AND projection_state='published'
-                AND projection_path IS NOT NULL""").fetchall()
-            cells = db.execute("""WITH published_cycles AS MATERIALIZED (
+            cycles = db.execute(f"""SELECT projection_path FROM cycles WHERE
+                state='inputs-committed' AND projection_state IN ({placeholders})
+                AND projection_path IS NOT NULL""", projection_states).fetchall()
+            cells = db.execute(f"""WITH published_cycles AS MATERIALIZED (
                     SELECT cycle_id,committed_at
                     FROM cycles INDEXED BY cycles_published
-                    WHERE state='inputs-committed' AND projection_state='published'
+                    WHERE state='inputs-committed' AND projection_state IN ({placeholders})
                 )
                 SELECT o.cell_id,MAX(c.committed_at) AS committed_at
                 FROM published_cycles c
                 JOIN cell_observations o INDEXED BY observations_cycle_cell
                     ON o.cycle_id=c.cycle_id
-                GROUP BY o.cell_id""").fetchall()
+                GROUP BY o.cell_id""", projection_states).fetchall()
         timestamps = []
         for row in cycles:
             path = Path(row[0])
@@ -637,7 +662,16 @@ class StormProbRepository:
             if not target.resolve().is_relative_to(stormcell_dir.resolve()):
                 raise ValueError(f"projection path escapes runtime stormcell directory: {target}")
             cells = json.loads(row["projection_json"])
-            if not target.exists():
+            valid_snapshot = False
+            if target.exists():
+                try:
+                    existing = json.loads(target.read_text(encoding="utf-8"))
+                    valid_snapshot = (isinstance(existing, dict)
+                                      and existing.get("latest_timestamp") == row["cycle_id"]
+                                      and existing.get("features") == cells)
+                except (OSError, ValueError, UnicodeError):
+                    pass
+            if not valid_snapshot:
                 atomic_write_json(target, saver.create_json_structure(row["cycle_id"], cells))
                 restored.append(target)
             for cell in cells:
@@ -645,8 +679,22 @@ class StormProbRepository:
                     touched_ids.add(str(cell["id"]))
         for cell_id in touched_ids:
             target = cell_dir / f"{cell_id}.json"
-            if not target.exists():
-                atomic_write_json(target, self.legacy_history(cell_id))
+            if not target.resolve().is_relative_to(cell_dir.resolve()):
+                raise ValueError(f"cell history path escapes runtime cell directory: {target}")
+            expected = self.legacy_history(cell_id)
+            if target.exists():
+                try:
+                    existing = json.loads(target.read_text(encoding="utf-8"))
+                except (OSError, ValueError, UnicodeError):
+                    # Invalid preexisting history is intentionally preserved by
+                    # normal publication and must stay untouched on recovery.
+                    continue
+                if not isinstance(existing, list):
+                    continue
+                if existing == expected:
+                    continue
+            if expected:
+                atomic_write_json(target, expected)
                 restored.append(target)
         return restored
 

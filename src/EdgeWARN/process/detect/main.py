@@ -169,7 +169,7 @@ def main(
         restored = repository.recover_projections()
         if pending or restored:
             from EdgeWARN.api_integration.index_manager import APIIndexManager
-            APIIndexManager(io_manager).initialize_indexes()
+            APIIndexManager(io_manager, include_pending=True).initialize_indexes()
             for cycle_id in pending:
                 repository.mark_projection_published(cycle_id)
         previous = repository.latest_cycle_before(json_ts)

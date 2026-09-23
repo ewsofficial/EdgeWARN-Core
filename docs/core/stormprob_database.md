@@ -85,8 +85,10 @@ cycles marked `projection_state=pending` and rebuilds API indexes. Successfully
 published cycles are marked `published`, so intentional retention cleanup does
 not resurrect old JSON. Detection writes its intermediate snapshot for
 integration but does not add it to the public index; integration updates the
-index after the database and final JSON commit. This preserves the
-existing external CTAM history read scope while its contract migrates. CTAM
+index after the database and final JSON commit. Recovery includes pending
+cycles in the index only after their files have been restored; the projection
+state changes to `published` after the index write. This preserves the existing
+external CTAM history read scope while its contract migrates. CTAM
 readiness still validates the derived JSON file because the current external
 module file descriptor schema promises a readable file; that contract must be
 updated before the projection is removed.

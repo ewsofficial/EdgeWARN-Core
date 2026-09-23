@@ -64,8 +64,8 @@ Major stages:
    built-in StormProb and skips external modules
 8. Publish the cleaned projection, cell history, public CTAM routes, StormProb
    forecasts, and input manifest through the publication coordinator
-9. Update `stormcell_index.json` and `cell_index.json`, then clean inactive
-   cell files when `remove_old_cells` is true
+9. Clean inactive cell files when `remove_old_cells` is true, then write each
+   API index once after the replacement files are available
 
 ## CTAM Handoff
 
@@ -78,7 +78,7 @@ structure; committed public routes are published separately.
 
 The publication coordinator updates:
 
-- per-cell history files
+- per-cell history files, using one SQLite read snapshot for touched cell IDs
 - API indexes (`stormcell_index.json` and `cell_index.json`)
 - stale cell cleanup policy (inactive cells older than 120 minutes, only when
   `remove_old_cells` is true)

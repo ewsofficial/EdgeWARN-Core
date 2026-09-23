@@ -128,6 +128,18 @@ def test_history_model_inputs_and_reprocessing(tmp_path):
     assert repo.legacy_history(101)[-1]["properties"]["revision"] == 2
 
 
+def test_batch_legacy_histories_match_individual_reads(tmp_path):
+    repo = StormProbRepository(tmp_path)
+    for minute in (0, 5, 10):
+        when = f"2024-05-01T12:{minute:02d}:00"
+        repo.commit_cycle(when, when, [_cell(when, 101), _cell(when, 102)])
+
+    histories = repo.legacy_histories([101, 102, 101, 999])
+    assert histories["101"] == repo.legacy_history(101)
+    assert histories["102"] == repo.legacy_history(102)
+    assert histories["999"] == []
+
+
 def test_legacy_import_hash_validation_and_backup(tmp_path):
     repo = StormProbRepository(tmp_path)
     legacy = tmp_path / "data" / "cells" / "101.json"
@@ -215,6 +227,48 @@ def test_integration_publication_commits_db_before_json_index(tmp_path, monkeypa
     assert "20240501-120000" in json.loads((fs.STORMCELL_DIR / "stormcell_index.json").read_text())["timestamps"]
     assert StormProbRepository(tmp_path).pending_projection_cycles() == []
     assert StormProbRepository(tmp_path).index_projection()[0] == ["20240501-120000"]
+
+
+def test_pending_recovery_projection_lists_only_restored_files(tmp_path, monkeypatch):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    snapshot = tmp_path / "data" / "stormcells" / "stormcells_20240501-120000.json"
+    repo.commit_cycle(cell["timestamp"], cell["timestamp"], [cell],
+                      projection_cells=[cell], projection_path=snapshot)
+    assert repo.index_projection() == ([], {})
+    assert repo.index_projection(include_pending=True) == ([], {})
+
+    repo.recover_projections()
+    timestamps, ids = repo.index_projection(include_pending=True)
+    assert timestamps == ["20240501-120000"]
+    assert "101" in ids
+    assert repo.index_projection() == ([], {})
+
+    import util.file as fs
+    from EdgeWARN.api_integration.index_manager import APIIndexManager
+
+    monkeypatch.setattr(fs, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(fs, "STORMCELL_DIR", tmp_path / "data" / "stormcells")
+    monkeypatch.setattr(fs, "CELL_DIR", tmp_path / "data" / "cells")
+    class Log:
+        def write_info(self, *_): pass
+        def write_warning(self, *_): pass
+    APIIndexManager(Log(), remove_old_cells=False, include_pending=True).initialize_indexes()
+    assert json.loads((fs.STORMCELL_DIR / "stormcell_index.json").read_text())["timestamps"] == timestamps
+    assert json.loads((fs.CELL_DIR / "cell_index.json").read_text())["cellIds"] == [101]
+
+    snapshot.write_text('{"features":')
+    repo.recover_projections()
+    assert json.loads(snapshot.read_text())["features"][0]["id"] == 101
+
+    history = tmp_path / "data" / "cells" / "101.json"
+    history.write_text("[]")
+    repo.recover_projections()
+    assert json.loads(history.read_text()) == repo.legacy_history(101)
+
+    history.write_text('{"invalid":"history"}')
+    repo.recover_projections()
+    assert json.loads(history.read_text()) == {"invalid": "history"}
 
 
 def test_reprocessing_explicitly_invalidates_deployed_forecasts(tmp_path):
