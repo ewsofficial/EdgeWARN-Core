@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import numpy as np
 import rasterio.features
 from skimage import measure
@@ -29,6 +31,7 @@ class CellDataSaver:
             "source": "Edgemont Weather Service",
             "product": "EdgeWARN Storm Cells",
             "version": get_release_version(),
+            "modified": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "latest_timestamp": latest_timestamp,
             "features": features
         }

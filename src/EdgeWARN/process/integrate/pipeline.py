@@ -555,6 +555,7 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
             index_seconds = time.perf_counter() - started
 
     filesystem_started = time.perf_counter()
+    snapshot["modified"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     coordinator.publish(payloads, publish_indexes=_publish_indexes, transaction_id=str(timestamp).replace(":", "-"),
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
     filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
