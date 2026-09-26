@@ -140,6 +140,10 @@ remains in the full ingest catalog and the integration/render paths, so the
 selected cycle still downloads it, computes `maxPrecipRate`, and serves the
 `MRMS_PrecipRate` EWMRS product.
 
+MergedReflectivityAtLowestAltitude is also excluded from scan-discovery
+readiness to avoid waiting for that layer. It remains in the full ingest
+catalog for downstream use.
+
 ProbSevere is a distinct MRMS-family product with its own bucket-path and JSON
 handling. Its product identity must be preserved in manifests and downstream
 processing.

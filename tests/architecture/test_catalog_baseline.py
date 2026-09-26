@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import util.file as fs
 
 from tests.architecture.baseline import assert_baseline, requires
 
@@ -39,7 +40,15 @@ def test_mrms_readiness_catalog_baseline():
 def test_mrms_readiness_catalog_length():
     from common.ingest.mrms.config import get_check_modifiers
 
-    assert len(get_check_modifiers()) == 11
+    assert len(get_check_modifiers()) == 10
+
+
+def test_rala_remains_ingested_but_is_not_a_readiness_check():
+    from common.ingest.mrms.config import get_check_modifiers, get_mrms_modifiers
+
+    rala = ("CONUS", "MergedReflectivityAtLowestAltitude_00.50", fs.MRMS_RALA_DIR)
+    assert rala not in get_check_modifiers()
+    assert rala in get_mrms_modifiers()
 
 
 def test_mrms_readiness_is_subset_of_ingest():
