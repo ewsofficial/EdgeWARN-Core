@@ -49,9 +49,15 @@ Used by `GET /api/v3/storm-snapshots`.
 Used by `GET /api/v3/storm-snapshots/:timestamp`.
 
 This file is served as-is. The current producer writes a wrapper with
-`source`, `product`, `version`, `latest_timestamp`, and `features`; the storm
-cell records are the items in `features[]`. Do not assume a top-level
-`timestamp` or `cells` member.
+`source`, `product`, `version`, `modified`, `latest_timestamp`, and `features`;
+the storm-cell records are the items in `features[]`.
+
+- `modified` (`string`): UTC ISO 8601 timestamp ending in `Z`, refreshed when
+  the snapshot is published. This is the snapshot publication time.
+- `latest_timestamp` (`string`): Timestamp of the latest storm-cell data in
+  the snapshot; it may differ from `modified`.
+
+Do not assume a top-level `timestamp` or `cells` member.
 
 ## Official NWS Alerts
 

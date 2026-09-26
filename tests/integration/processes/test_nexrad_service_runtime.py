@@ -134,7 +134,7 @@ class TestHeartbeatPublicationContract:
             run_id="abc",
             updated_at=datetime.now(timezone.utc),
             phase="supervising",
-            version="3.0.0",
+            version="3.0.1",
         )
         destination = services_dir(tmp_path) / "nexrad.json"
 

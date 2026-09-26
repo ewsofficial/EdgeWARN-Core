@@ -9,11 +9,14 @@
     "rap": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bucket", "file_pattern", "dir_pattern", "local_file_pattern", "date_format", "filename_regex", "max_age_minutes", "lookback_step_hours", "max_files"],
+      "required": ["bucket", "file_pattern", "dir_pattern", "nomads_base_url", "nomads_timeout_seconds", "nomads_chunk_size_bytes", "local_file_pattern", "date_format", "filename_regex", "max_age_minutes", "lookback_step_hours", "max_files"],
       "properties": {
         "bucket": { "type": "string" },
         "file_pattern": { "type": "string" },
         "dir_pattern": { "type": "string" },
+        "nomads_base_url": { "type": "string", "pattern": "^https://[^/]+/.+[^/]$" },
+        "nomads_timeout_seconds": { "type": "integer", "minimum": 1 },
+        "nomads_chunk_size_bytes": { "type": "integer", "minimum": 1 },
         "local_file_pattern": { "type": "string" },
         "date_format": { "type": "string" },
         "filename_regex": { "type": "string" },

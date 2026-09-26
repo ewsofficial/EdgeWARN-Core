@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch
 from datetime import datetime, timezone
 from EdgeWARN.schedule.scheduler import MRMSUpdateChecker
+import EdgeWARN.schedule.scheduler as scheduler_module
 
 # Sample Timestamps
 TS_OLD = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -62,3 +63,39 @@ def test_latest_common_minute_no_intersection(update_checker, mocker):
     common = update_checker.latest_common_minute_1h(modifiers)
     
     assert common is None
+
+
+@pytest.mark.parametrize(
+    ("source_seconds", "expected_cycle"),
+    [
+        ("004040", TS_OLD.replace(hour=0, minute=40)),
+        ("004239", TS_OLD.replace(hour=0, minute=42)),
+    ],
+)
+def test_source_seconds_do_not_shift_scheduler_cycle(
+    update_checker, monkeypatch, source_seconds, expected_cycle
+):
+    cursor = datetime(2023, 1, 1, 0, 40, tzinfo=timezone.utc)
+    source = datetime.strptime(
+        f"20230101{source_seconds}", "%Y%m%d%H%M%S"
+    ).replace(tzinfo=timezone.utc)
+
+    class Finder:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def lookup_files(self, *_args, **_kwargs):
+            return [(f"MRMS_20230101-{source_seconds}.grib2.gz", source)]
+
+    monkeypatch.setattr(scheduler_module, "FileFinder", Finder)
+    monkeypatch.setattr(scheduler_module, "parse_mrms_bucket_path", lambda *_: "MRMS/")
+    actual = update_checker._get_modifier_times(
+        ("CONUS", "MergedReflectivityQCComposite", "unused"),
+        cursor.replace(minute=44),
+        last_processed=cursor,
+        s3_bucket="unused",
+        max_entries=2,
+    )
+
+    assert actual == {expected_cycle}
+    assert (max(actual) > cursor) == (expected_cycle > cursor)

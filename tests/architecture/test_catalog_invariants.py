@@ -128,7 +128,7 @@ def test_mrms_product_outdirs_are_unique(mrms_goes):
 def test_mrms_readiness_is_a_subset_of_ingest(mrms_goes):
     """A readiness check on an un-ingested product would never be satisfied."""
     mrms = mrms_goes["mrms"]
-    assert len(mrms["check_products"]) == 12
+    assert len(mrms["check_products"]) == 10
 
     ingested = {(p["region"], p["product"]) for p in mrms["products"]}
     orphans = [

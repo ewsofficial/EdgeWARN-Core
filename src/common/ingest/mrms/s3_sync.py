@@ -75,7 +75,7 @@ class FileFinder:
                                 # Extract timestamp from S3 path
                                 timestamp = extract_timestamp(s3_path, use_timezone_utc=True, round_to_minute=False, isoformat=False)
 
-                                if timestamp > self.dt:
+                                if timestamp.replace(second=0, microsecond=0) > self.dt:
                                     continue
 
                                 entry = (timestamp, s3_path)

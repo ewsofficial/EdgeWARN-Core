@@ -41,7 +41,7 @@ Requires Conda or Miniconda, Node.js/npm, and Git. Docker users can skip this se
 ```bash
 git clone https://github.com/ewsofficial/EdgeWARN-Core.git
 cd EdgeWARN-Core
-git switch version-test/3.0.0
+git switch version-test/3.0.1
 conda env create -f environment.yml
 conda activate EdgeWARN
 python -m pip install --no-deps -e .
@@ -49,7 +49,7 @@ npm install
 edgewarn --version
 ```
 
-The branch command selects v3.0.0 while the default branch tracks an earlier release. `environment.yml` is the runtime dependency authority; `--no-deps` avoids duplicate pip resolution.
+The branch command selects v3.0.1 while the default branch tracks an earlier release. `environment.yml` is the runtime dependency authority; `--no-deps` avoids duplicate pip resolution.
 
 ### Processing
 
@@ -108,4 +108,4 @@ npm run test:coverage
 python -m pytest
 ```
 
-**Version 3.0.0** · [Installation](INSTALLATION.md) · [Configuration](docs/core/configuration.md) · [Changelog](CHANGELOG.md)
+**Version 3.0.1** · [Installation](INSTALLATION.md) · [Configuration](docs/core/configuration.md) · [Changelog](CHANGELOG.md)

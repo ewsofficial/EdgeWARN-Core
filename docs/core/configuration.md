@@ -30,7 +30,7 @@ independently overridable as `--ctam-module-dir`, then
 | `api_index.yaml` | Generated EdgeWARN index/snapshot retention. |
 | `ingest.yaml` | MRMS/GOES ingest products, source keys, and retention. |
 | `nexrad.yaml` | NEXRAD discovery, parsing, grouping, and output selection. |
-| `synoptic_rap.yaml` | RAP source discovery, freshness, and request policy. |
+| `synoptic_rap.yaml` | RAP S3 and NOMADS HTTPS sources, freshness, and request policy. |
 | `wpc.yaml` | WPC surface-analysis sources and artifact naming. |
 | `metar.yaml` | METAR source, parsing, and retention settings. |
 | `nws.yaml` | NWS alert and zone-sync sources, headers, and retry policy. |

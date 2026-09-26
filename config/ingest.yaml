@@ -82,7 +82,6 @@ mrms:
     - {region: CONUS, product: VIL_Density_00.50,                    outdir: MRMS_DVIL_DIR}
     - {region: ProbSevere, product: null,                            outdir: MRMS_PROBSEVERE_DIR}
     - {region: CONUS, product: PrecipFlag_00.00,                     outdir: MRMS_PRECIPTYP_DIR}
-    - {region: CONUS, product: MergedReflectivityAtLowestAltitude_00.50, outdir: MRMS_RALA_DIR}
     - {region: CONUS, product: MergedReflectivityQCComposite_00.50,  outdir: MRMS_COMPOSITE_DIR}
     - {region: CONUS, product: VII_00.50,                            outdir: MRMS_VII_DIR}
 

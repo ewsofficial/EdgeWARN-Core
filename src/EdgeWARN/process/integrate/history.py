@@ -39,6 +39,12 @@ class CellHistoryManager:
         timestamp refreshes rather than appends.
         """
         updates = {}
+        active_ids = [cell["id"] for cell in cells if cell.get("id") and "timestamp" in cell]
+        try:
+            from EdgeWARN.stormprob.database import StormProbRepository
+            database_histories = StormProbRepository().legacy_histories(active_ids)
+        except FileNotFoundError:
+            database_histories = {}
         for cell in cells:
             cell_id = cell.get("id")
             if not cell_id:
@@ -71,11 +77,7 @@ class CellHistoryManager:
             history = []
             
             # Load existing history
-            try:
-                from EdgeWARN.stormprob.database import StormProbRepository
-                history = StormProbRepository().legacy_history(cell_id)
-            except FileNotFoundError:
-                pass
+            history = list(database_histories.get(str(cell_id), []))
             if not history and file_path.exists():
                 try:
                     with open(file_path, 'r') as f:

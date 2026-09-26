@@ -58,13 +58,6 @@
   {
     "@tuple": [
       "CONUS",
-      "MergedReflectivityAtLowestAltitude_00.50",
-      "fs:MRMS_RALA_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
       "MergedReflectivityQCComposite_00.50",
       "fs:MRMS_COMPOSITE_DIR"
     ]

@@ -14,7 +14,7 @@ from EdgeWARN.api_integration.config import (
 class APIIndexManager:
     """Manages index files for the API to track available resources."""
 
-    def __init__(self, io_manager: IOManager, remove_old_cells=None):
+    def __init__(self, io_manager: IOManager, remove_old_cells=None, *, include_pending=False):
         self.io_manager = io_manager
         self.stormcell_index_path = fs.STORMCELL_DIR / "stormcell_index.json"
         self.cell_index_path = fs.CELL_DIR / "cell_index.json"
@@ -30,6 +30,9 @@ class APIIndexManager:
         self._database_projection = None
         self.projection_query_seconds = 0.0
         self.projection_reused = False
+        self.include_pending = include_pending
+        self.cleanup_seconds = 0.0
+        self.index_write_seconds = 0.0
 
     def _load_database_projection(self):
         """Return one immutable database snapshot for this index update."""
@@ -45,7 +48,10 @@ class APIIndexManager:
             if not repository.path.exists():
                 return None
             started = time.perf_counter()
-            self._database_projection = repository.index_projection()
+            if self.include_pending:
+                self._database_projection = repository.index_projection(include_pending=True)
+            else:
+                self._database_projection = repository.index_projection()
             self.projection_query_seconds = time.perf_counter() - started
             return self._database_projection
         except FileNotFoundError:
@@ -208,8 +214,60 @@ class APIIndexManager:
                 except Exception as e:
                     self.io_manager.write_error(f"Failed to delete old cell file {cell_id}.json: {e}")
                     
-                # Remove from tracking
-                del self.cell_timestamps[cell_id]
+                # A failed unlink must remain listed while its file exists.
+                if not file_path.exists():
+                    del self.cell_timestamps[cell_id]
                 
         # Update index to match reality
         self._write_cell_index()
+
+    def publish_cycle_indexes(self, timestamp: str, cell_ids: list) -> None:
+        """Build both final listings, clean expired files, then write each once."""
+        fs.STORMCELL_DIR.mkdir(parents=True, exist_ok=True)
+        fs.CELL_DIR.mkdir(parents=True, exist_ok=True)
+        projection = self._load_database_projection()
+        if projection is None:
+            self.stormcell_timestamps = {
+                path.stem.removeprefix("stormcells_")
+                for path in fs.STORMCELL_DIR.glob("stormcells_*.json")
+            }
+            self.cell_timestamps = {
+                path.stem: path.stat().st_mtime
+                for path in fs.CELL_DIR.glob("*.json") if path.stem != "cell_index"
+            }
+        else:
+            timestamps, cell_timestamps = projection
+            self.stormcell_timestamps = set(timestamps)
+            self.cell_timestamps = dict(cell_timestamps)
+
+        snapshot = fs.STORMCELL_DIR / f"stormcells_{timestamp}.json"
+        if snapshot.exists():
+            self.stormcell_timestamps.add(timestamp)
+        now = datetime.now(timezone.utc).timestamp()
+        for cell_id in cell_ids:
+            if (fs.CELL_DIR / f"{cell_id}.json").exists():
+                self.cell_timestamps[str(cell_id)] = now
+
+        self._initial_scan_done = True
+        cleanup_started = time.perf_counter()
+        if self.remove_old_cells:
+            cutoff = now - inactive_cell_max_age_minutes() * 60
+            for cell_id, touched_at in list(self.cell_timestamps.items()):
+                if touched_at >= cutoff:
+                    continue
+                path = fs.CELL_DIR / f"{cell_id}.json"
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:
+                    self.io_manager.write_error(f"Failed to delete old cell file {cell_id}.json: {exc}")
+                if not path.exists():
+                    del self.cell_timestamps[cell_id]
+
+        self.cleanup_seconds = time.perf_counter() - cleanup_started
+        write_started = time.perf_counter()
+        self._write_cell_index()
+        atomic_write_json(self.stormcell_index_path, {
+            "timestamps": sorted(self.stormcell_timestamps),
+            "lastUpdated": datetime.now(timezone.utc).isoformat(),
+        }, indent=2)
+        self.index_write_seconds = time.perf_counter() - write_started

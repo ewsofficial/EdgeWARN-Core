@@ -7,6 +7,9 @@ rap:
   bucket: noaa-rap-pds
   file_pattern: 'rap.t{hour:02d}z.awp130pgrbf00.grib2'
   dir_pattern: 'rap.{date}'
+  nomads_base_url: 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/rap/prod'
+  nomads_timeout_seconds: 120
+  nomads_chunk_size_bytes: 1048576
   local_file_pattern: 'RAP.{date}-{hour:02d}z.awp130pgrbf00.grib2'
   date_format: '%Y%m%d'
   filename_regex: '^RAP\.(?P<date>\d{8})-(?P<hour>\d{2})z\.awp130pgrbf00\.grib2$'

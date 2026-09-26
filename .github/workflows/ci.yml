@@ -182,7 +182,7 @@ jobs:
           cp -R "${GITHUB_WORKSPACE}/config" "${smoke_dir}"
           cd "${RUNNER_TEMP}"
           edgewarn --help
-           test "$(edgewarn --version)" = "edgewarn 3.0.0"
+           test "$(edgewarn --version)" = "edgewarn 3.0.1"
           edgewarn configure --config-path "${smoke_dir}" \
             runtime.run.disable_nexrad true
 

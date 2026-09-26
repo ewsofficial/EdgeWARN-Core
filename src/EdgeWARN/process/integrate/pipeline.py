@@ -555,6 +555,7 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
             index_seconds = time.perf_counter() - started
 
     filesystem_started = time.perf_counter()
+    snapshot["modified"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     coordinator.publish(payloads, publish_indexes=_publish_indexes, transaction_id=str(timestamp).replace(":", "-"),
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
     filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
@@ -596,12 +597,11 @@ def _update_api_indexes(cells, remove_old_cells, timestamp):
 
         def _update():
             rebuild_started = time.perf_counter()
-            api_index.update_stormcell_index(datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).strftime("%Y%m%d-%H%M%S"))
-            api_index.update_cell_index(active_cell_ids)
+            api_index.publish_cycle_indexes(
+                datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).strftime("%Y%m%d-%H%M%S"),
+                active_cell_ids,
+            )
             rebuild_seconds = time.perf_counter() - rebuild_started
-            cleanup_started = time.perf_counter()
-            api_index.cleanup_inactive_cells()
-            cleanup_seconds = time.perf_counter() - cleanup_started
             io_manager.write_info(
                 "API index rebuild "
                 f"cycle_id={timestamp} active_cells={len(active_cell_ids)} "
@@ -611,7 +611,8 @@ def _update_api_indexes(cells, remove_old_cells, timestamp):
                 f"projection_reused={api_index.projection_reused} "
                 "sqlite_indexes=cycles_published,observations_cycle_cell "
                 f"rebuild_seconds={rebuild_seconds:.6f} "
-                f"cleanup_seconds={cleanup_seconds:.6f}"
+                f"cleanup_seconds={api_index.cleanup_seconds:.6f} "
+                f"index_write_seconds={api_index.index_write_seconds:.6f}"
             )
 
         _run_step("Integration - API Index", _update)

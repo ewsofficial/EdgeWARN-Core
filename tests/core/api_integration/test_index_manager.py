@@ -115,3 +115,77 @@ def test_database_projection_is_reused_for_both_indexes(
     assert manager.projection_reused is True
     assert manager.stormcell_timestamps == {"20230101-120000"}
     assert manager.cell_timestamps == {"101": 123.0}
+
+
+def test_publish_cycle_writes_each_index_once_after_cleanup(mock_io_manager, mock_fs, monkeypatch):
+    from EdgeWARN.api_integration import index_manager as module
+
+    storm_dir = mock_fs / "stormcell"
+    cell_dir = mock_fs / "cell"
+    (storm_dir / "stormcells_20230101-120000.json").touch()
+    (cell_dir / "101.json").write_text("[]")
+    (cell_dir / "102.json").write_text("[]")
+    writes = []
+    original_write = module.atomic_write_json
+
+    def recorded_write(path, payload, **kwargs):
+        writes.append((path.name, payload))
+        return original_write(path, payload, **kwargs)
+
+    monkeypatch.setattr(module, "atomic_write_json", recorded_write)
+    monkeypatch.setattr(module, "inactive_cell_max_age_minutes", lambda: 1)
+    with patch.object(module.fs, "STORMCELL_DIR", storm_dir), patch.object(module.fs, "CELL_DIR", cell_dir):
+        manager = APIIndexManager(mock_io_manager, remove_old_cells=True)
+        monkeypatch.setattr(manager, "_load_database_projection", lambda: ([], {"102": 0.0}))
+        manager.publish_cycle_indexes("20230101-120000", [101])
+
+    assert [name for name, _ in writes] == ["cell_index.json", "stormcell_index.json"]
+    assert writes[0][1]["cellIds"] == [101]
+    assert writes[1][1]["timestamps"] == ["20230101-120000"]
+    assert not (cell_dir / "102.json").exists()
+
+
+def test_failed_cleanup_keeps_existing_cell_listed(mock_io_manager, mock_fs, monkeypatch):
+    from EdgeWARN.api_integration import index_manager as module
+
+    cell_dir = mock_fs / "cell"
+    storm_dir = mock_fs / "stormcell"
+    old_file = cell_dir / "102.json"
+    old_file.write_text("[]")
+    monkeypatch.setattr(module, "inactive_cell_max_age_minutes", lambda: 1)
+    original_unlink = type(old_file).unlink
+
+    def fail_unlink(path, *args, **kwargs):
+        if path == old_file:
+            raise PermissionError("injected")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(old_file), "unlink", fail_unlink)
+    with patch.object(module.fs, "STORMCELL_DIR", storm_dir), patch.object(module.fs, "CELL_DIR", cell_dir):
+        manager = APIIndexManager(mock_io_manager, remove_old_cells=True)
+        monkeypatch.setattr(manager, "_load_database_projection", lambda: ([], {"102": 0.0}))
+        manager.publish_cycle_indexes("missing", [])
+
+    assert old_file.exists()
+    assert json.loads((cell_dir / "cell_index.json").read_text())["cellIds"] == [102]
+
+
+def test_historical_old_scan_keeps_inactive_files_and_rebuilds_corrupt_indexes(
+    mock_io_manager, mock_fs, monkeypatch
+):
+    from EdgeWARN.api_integration import index_manager as module
+
+    cell_dir = mock_fs / "cell"
+    storm_dir = mock_fs / "stormcell"
+    (cell_dir / "102.json").write_text("[]")
+    (cell_dir / "cell_index.json").write_text("broken")
+    (storm_dir / "stormcells_20230101-115500.json").write_text("{}")
+    (storm_dir / "stormcell_index.json").write_text("broken")
+    with patch.object(module.fs, "STORMCELL_DIR", storm_dir), patch.object(module.fs, "CELL_DIR", cell_dir):
+        manager = APIIndexManager(mock_io_manager, remove_old_cells=False)
+        monkeypatch.setattr(manager, "_load_database_projection", lambda: ([], {"102": 0.0}))
+        manager.publish_cycle_indexes("20230101-115500", [])
+
+    assert (cell_dir / "102.json").exists()
+    assert json.loads((cell_dir / "cell_index.json").read_text())["cellIds"] == [102]
+    assert json.loads((storm_dir / "stormcell_index.json").read_text())["timestamps"] == ["20230101-115500"]

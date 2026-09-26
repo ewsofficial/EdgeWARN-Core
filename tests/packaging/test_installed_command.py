@@ -114,7 +114,7 @@ def test_wheel_help_version_and_import_are_independent_of_checkout(installed_com
     assert help_result.returncode == 0, help_result.stderr
     assert "run" in help_result.stdout and "configure" in help_result.stdout
     assert version_result.returncode == 0, version_result.stderr
-    assert version_result.stdout.strip() == "edgewarn 3.0.0"
+    assert version_result.stdout.strip() == "edgewarn 3.0.1"
     assert probe.returncode == 0, probe.stderr
     payload = json.loads(probe.stdout)
     assert not Path(payload["file"]).resolve().is_relative_to(REPO_ROOT)
