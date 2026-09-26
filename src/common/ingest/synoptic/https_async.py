@@ -11,6 +11,30 @@ from common.ingest.synoptic.config import (
 )
 
 
+def validate_grib2_file(path: Path) -> None:
+    """Check every GRIB2 message boundary without loading the file into memory."""
+    with path.open("rb") as source:
+        source.seek(0, os.SEEK_END)
+        size = source.tell()
+        offset = 0
+        if size < 20:
+            raise ValueError(f"incomplete GRIB2 file: {path}")
+
+        while offset < size:
+            source.seek(offset)
+            header = source.read(16)
+            if len(header) != 16 or header[:4] != b"GRIB" or header[7] != 2:
+                raise ValueError(f"invalid GRIB2 message at offset {offset}: {path}")
+            length = int.from_bytes(header[8:16], "big")
+            end = offset + length
+            if length < 20 or end > size:
+                raise ValueError(f"incomplete GRIB2 message at offset {offset}: {path}")
+            source.seek(end - 4)
+            if source.read(4) != b"7777":
+                raise ValueError(f"missing GRIB2 end marker at offset {offset}: {path}")
+            offset = end
+
+
 async def download_synoptic_https_async(s3_key: str, local_path: Path, base_url: str) -> Path:
     """Fetch the same dated RAP key as S3, publishing only a complete GRIB2 file."""
     url = f"{base_url.rstrip('/')}/{s3_key}"
@@ -25,26 +49,22 @@ async def download_synoptic_https_async(s3_key: str, local_path: Path, base_url:
                     raise FileNotFoundError(url)
                 response.raise_for_status()
                 written = 0
-                header = bytearray()
                 with open(part_path, "wb") as output:
                     async for chunk in response.content.iter_chunked(
                         rap_nomads_chunk_size_bytes()
                     ):
                         if chunk:
-                            if len(header) < 8:
-                                header.extend(chunk[: 8 - len(header)])
                             written += len(chunk)
                             output.write(chunk)
                     output.flush()
                     os.fsync(output.fileno())
 
-                if len(header) < 8 or header[:4] != b"GRIB" or header[7] != 2:
-                    raise ValueError(f"NOMADS response is not GRIB2: {url}")
                 expected = response.content_length
                 if expected is not None and written != expected:
                     raise IOError(
                         f"incomplete NOMADS download: expected {expected} bytes, got {written}"
                     )
+                validate_grib2_file(part_path)
 
         os.replace(part_path, local_path)
         return local_path

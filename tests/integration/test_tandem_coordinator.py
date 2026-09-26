@@ -227,7 +227,9 @@ def test_second_prior_rap_analysis_releases_integration(monkeypatch, tmp_path):
             "rap.{date}",
             rap_dir,
         )
-        local_path.write_bytes(b"grib")
+        local_path.write_bytes(
+            b"GRIB\x00\x00\x00\x02" + (24).to_bytes(8, "big") + b"data7777"
+        )
         return local_path
 
     monkeypatch.setattr(coordinator.mrms_ingest, "download_detection_files_async", fake_detection)
@@ -274,7 +276,9 @@ def test_nomads_rap_analysis_releases_integration(monkeypatch, tmp_path):
 
     async def nomads(key, local_path, _base_url):
         assert key == "rap.20260726/rap.t13z.awp130pgrbf00.grib2"
-        local_path.write_bytes(b"GRIB\x00\x00\x00\x02")
+        local_path.write_bytes(
+            b"GRIB\x00\x00\x00\x02" + (24).to_bytes(8, "big") + b"data7777"
+        )
         return local_path
 
     monkeypatch.setattr(coordinator.mrms_ingest, "download_detection_files_async", fake_detection)

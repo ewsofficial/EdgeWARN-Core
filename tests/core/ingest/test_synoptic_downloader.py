@@ -10,6 +10,7 @@ import common.ingest.synoptic.downloader as synoptic_downloader
 DT = datetime(2026, 7, 26, 13, 6, tzinfo=timezone.utc)
 FILE_PATTERN = "rap.t{hour:02d}z.awp130pgrbf00.grib2"
 DIR_PATTERN = "rap.{date}"
+GRIB2 = b"GRIB\x00\x00\x00\x02" + (24).to_bytes(8, "big") + b"data7777"
 
 
 async def _download(tmp_path, **kwargs):
@@ -38,7 +39,7 @@ async def test_current_and_previous_missing_selects_second_previous(
         _, local_path = synoptic_downloader._build_synoptic_s3_params(
             current_dt, FILE_PATTERN, DIR_PATTERN, tmp_path
         )
-        local_path.write_bytes(b"grib")
+        local_path.write_bytes(GRIB2)
         return local_path
 
     def fake_sync(*_args):
@@ -62,7 +63,7 @@ async def test_valid_local_fallback_avoids_network(
     monkeypatch, mock_io_manager, tmp_path
 ):
     local_path = tmp_path / "RAP.20260726-12z.awp130pgrbf00.grib2"
-    local_path.write_bytes(b"cached-grib")
+    local_path.write_bytes(GRIB2)
     async_calls = []
 
     async def fake_async(current_dt, *_args):
@@ -93,7 +94,7 @@ async def test_invalid_local_file_proceeds_to_remote(
 
     async def fake_async(current_dt, *_args):
         assert current_dt.hour == 13
-        local_path.write_bytes(b"downloaded")
+        local_path.write_bytes(GRIB2)
         return local_path
 
     monkeypatch.setattr(synoptic_downloader, "io_manager", mock_io_manager)
@@ -102,10 +103,30 @@ async def test_invalid_local_file_proceeds_to_remote(
     result = await _download(tmp_path)
 
     assert result == local_path
-    assert local_path.read_bytes() == b"downloaded"
+    assert local_path.read_bytes() == GRIB2
     assert "Ignoring invalid local RAP file" in (
         mock_io_manager.write_warning.call_args_list[0].args[0]
     )
+
+
+@pytest.mark.asyncio
+async def test_truncated_cached_grib_is_removed_before_remote_retry(
+    monkeypatch, mock_io_manager, tmp_path
+):
+    local_path = tmp_path / "RAP.20260726-13z.awp130pgrbf00.grib2"
+    local_path.write_bytes(GRIB2[:-4])
+
+    async def fake_async(current_dt, *_args):
+        assert current_dt.hour == 13
+        assert not local_path.exists()
+        local_path.write_bytes(GRIB2)
+        return local_path
+
+    monkeypatch.setattr(synoptic_downloader, "io_manager", mock_io_manager)
+    monkeypatch.setattr(synoptic_downloader, "download_synoptic_async", fake_async)
+
+    assert await _download(tmp_path) == local_path
+    assert local_path.read_bytes() == GRIB2
 
 
 @pytest.mark.asyncio
@@ -155,7 +176,7 @@ async def test_async_transport_failure_uses_sync_once(
         _, local_path = synoptic_downloader._build_synoptic_s3_params(
             current_dt, FILE_PATTERN, DIR_PATTERN, tmp_path
         )
-        local_path.write_bytes(b"grib")
+        local_path.write_bytes(GRIB2)
         return local_path
 
     monkeypatch.setattr(synoptic_downloader, "io_manager", mock_io_manager)
@@ -214,7 +235,7 @@ async def test_fallback_builds_correct_month_rollover_key(
         )
         keys.append(key)
         if current_dt.hour == 23:
-            local_path.write_bytes(b"grib")
+            local_path.write_bytes(GRIB2)
             return local_path
         raise FileNotFoundError(key)
 
@@ -257,7 +278,7 @@ async def test_s3_404_uses_nomads_for_same_hour(monkeypatch, mock_io_manager, tm
     async def nomads(key, local_path, base_url):
         calls.append(("nomads", key))
         assert base_url == "https://nomads.example/rap/prod"
-        local_path.write_bytes(b"GRIB\x00\x00\x00\x02")
+        local_path.write_bytes(GRIB2)
         return local_path
 
     monkeypatch.setattr(synoptic_downloader, "io_manager", mock_io_manager)
@@ -330,7 +351,7 @@ async def test_async_s3_transport_then_sync_failure_uses_nomads(
 
     async def nomads(_key, local_path, _base_url):
         calls.append("nomads")
-        local_path.write_bytes(b"GRIB\x00\x00\x00\x02")
+        local_path.write_bytes(GRIB2)
         return local_path
 
     monkeypatch.setattr(synoptic_downloader, "io_manager", mock_io_manager)

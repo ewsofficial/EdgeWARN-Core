@@ -18,7 +18,10 @@ from common.ingest.synoptic.config import (
     rap_lookback_step_hours,
     rap_nomads_base_url,
 )
-from common.ingest.synoptic.https_async import download_synoptic_https_async
+from common.ingest.synoptic.https_async import (
+    download_synoptic_https_async,
+    validate_grib2_file,
+)
 from common.ingest.synoptic.s3_sync import SynopticFileDownloader
 from common.ingest.synoptic.s3_async import AsyncSynopticFileDownloader
 
@@ -85,8 +88,11 @@ def _eligible_analysis_times(dt: datetime, max_age_minutes: int, step_hours=None
 
 def _is_valid_local_file(path: Path) -> bool:
     try:
-        return path.is_file() and path.stat().st_size > 0
-    except OSError:
+        if not path.is_file():
+            return False
+        validate_grib2_file(path)
+        return True
+    except (OSError, ValueError):
         return False
 
 
@@ -218,6 +224,8 @@ async def download_synoptic(
             io_manager.write_warning(
                 f"Ignoring invalid local {dataset_name} file: {local_path}"
             )
+            if local_path.is_file():
+                local_path.unlink()
 
         if current_dt != requested_time.replace(minute=0, second=0, microsecond=0):
             io_manager.write_info(

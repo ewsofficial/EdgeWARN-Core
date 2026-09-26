@@ -1,14 +1,22 @@
 """NOMADS RAP download and atomic staging tests."""
 
+import base64
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from common.ingest.synoptic import https_async
 
 
-GRIB2 = b"GRIB\x00\x00\x00\x02" + b"weather data"
+def grib2(payload=b"weather data"):
+    length = 16 + len(payload) + 4
+    return b"GRIB\x00\x00\x00\x02" + length.to_bytes(8, "big") + payload + b"7777"
+
+
+GRIB2 = grib2()
 BASE_URL = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rap/prod"
+RAP_FIXTURE = Path(__file__).resolve().parents[3] / "fixtures/weather/rap.grib2.b64"
 
 
 class FakeContent:
@@ -53,6 +61,14 @@ class FakeSession:
         return self.response
 
 
+def test_real_rap_fixture_passes_grib2_framing_check(tmp_path):
+    payload = base64.b64decode(RAP_FIXTURE.read_text())
+    path = tmp_path / "rap.grib2"
+    path.write_bytes(payload + payload)
+
+    https_async.validate_grib2_file(path)
+
+
 @pytest.mark.asyncio
 async def test_nomads_download_uses_dated_key_and_publishes_grib2(monkeypatch, tmp_path):
     requested = []
@@ -73,6 +89,55 @@ async def test_nomads_download_uses_dated_key_and_publishes_grib2(monkeypatch, t
     assert requested == [f"{BASE_URL}/{key}"]
     assert local_path.read_bytes() == GRIB2
     assert not (tmp_path / f".{local_path.name}.nomads.part").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        GRIB2[:-4],
+        GRIB2[:-1],
+        GRIB2 + grib2(b"second")[:-4],
+        GRIB2 + b"trailing bytes",
+    ],
+)
+async def test_nomads_rejects_truncated_or_unframed_chunked_response(
+    monkeypatch, tmp_path, payload
+):
+    response = FakeResponse(chunks=[payload[:8], payload[8:]])
+    monkeypatch.setattr(
+        https_async.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: FakeSession(response, []),
+    )
+    local_path = tmp_path / "rap.grib2"
+
+    with pytest.raises(ValueError, match="GRIB2"):
+        await https_async.download_synoptic_https_async(
+            "rap.20260726/rap.t13z.awp130pgrbf00.grib2", local_path, BASE_URL
+        )
+
+    assert not local_path.exists()
+    assert not (tmp_path / ".rap.grib2.nomads.part").exists()
+
+
+@pytest.mark.asyncio
+async def test_nomads_accepts_complete_concatenated_messages_without_length(
+    monkeypatch, tmp_path
+):
+    payload = GRIB2 + grib2(b"second")
+    response = FakeResponse(chunks=[payload[:11], payload[11:]])
+    monkeypatch.setattr(
+        https_async.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: FakeSession(response, []),
+    )
+    local_path = tmp_path / "rap.grib2"
+
+    assert await https_async.download_synoptic_https_async(
+        "rap.20260726/rap.t13z.awp130pgrbf00.grib2", local_path, BASE_URL
+    ) == local_path
+    assert local_path.read_bytes() == payload
 
 
 @pytest.mark.asyncio
