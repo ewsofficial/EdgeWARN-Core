@@ -1,0 +1,25 @@
+{
+  "valid": [
+    {"configured_id": "MRMS_MergedAzShear_3-6kmAGL_00.50", "product_id": "MergedAzShear_3-6kmAGL_00.50", "path_name": "MRMS_MergedAzShear_3-6kmAGL"},
+    {"configured_id": "MRMS_Reflectivity_-15C_00.50", "product_id": "Reflectivity_-15C_00.50", "path_name": "MRMS_Reflectivity_-15C"},
+    {"configured_id": "MRMS_NewProduct_01.25", "product_id": "NewProduct_01.25", "path_name": "MRMS_NewProduct"},
+    {"configured_id": "MRMS_RadarOnly_QPE_01H_00.00", "product_id": "RadarOnly_QPE_01H_00.00", "path_name": "MRMS_RadarOnly_QPE_01H"},
+    {"configured_id": "MRMS_ProbSevere", "product_id": "ProbSevere", "path_name": "MRMS_ProbSevere"}
+  ],
+  "invalid": [
+    "", "MESH_00.50", "mrms_MESH_00.50", "MRMS_MRMS_MESH_00.50",
+    "MRMS_../MESH_00.50", "MRMS_MESH\\_00.50", "MRMS_MESH_00.50\n",
+    "MRMS_MESH_00.50\u0000", "MRMS_MESH_0.50", "MRMS_MESH_00.5",
+    "MRMS_MESH_000.50", "MRMS_MESH_00.500", "MRMS_MÉSH_00.50",
+    "MRMS_MESH_００.５０", " MRMS_MESH_00.50", "MRMS__00.50",
+    "MRMS_probsevere", "MRMS_ProbSevere/../MESH", null,
+    {"product": "MRMS_MESH_00.50", "enabled": false}
+  ],
+  "collisions": [
+    ["MRMS_MESH_00.50", "MRMS_MESH_01.00"],
+    ["MRMS_MESH_00.50", "MRMS_mesh_00.50"],
+    ["MRMS_MergedReflectivityQCComposite_01.00"],
+    ["MRMS_precipflag_00.00"],
+    ["MRMS_ProbSevere_00.50"]
+  ]
+}

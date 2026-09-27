@@ -53,6 +53,7 @@ namespaces = true
 
 [tool.setuptools.package-data]
 EWMRS = ["*.json"]
+"common.ingest.mrms" = ["core-contract.json"]
 
 # StormProb is intentionally kept outside the Python package in the source
 # tree, but must be installed with the wheel.  ``data-files`` preserves the

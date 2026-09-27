@@ -11,14 +11,19 @@ from tests.architecture.source_inspect import SRC, production_sources
 
 CTAM = "EdgeWARN/ctam/"
 ENV_READERS = {"common/config/loader.py", "common/config/overlay.py", "config/loader.js"}
-URL_SENTINELS = {
+URL_LITERAL_EXCEPTIONS = {
     ("api/middleware/logging.js", "http://edgewarn.invalid"),
     # The private loopback CTAM API is bound to 127.0.0.1 on an OS-assigned
     # ephemeral port and is never reachable off-host; docs/ctam pins the URL
     # shape. It is deliberately not a public, deployable endpoint.
     ("EdgeWARN/ctam/api/server.py", "http://127.0.0.1:"),
+    # Configurable MRMS phase 2 deliberately moves protected source identity
+    # into code. Operational timeouts/retention remain catalog-owned.
+    ("common/ingest/mrms/source.py", "https://mrms.ncep.noaa.gov/data/2D"),
+    ("common/ingest/mrms/source.py", "https://mrms.ncep.noaa.gov/data/ProbSevere"),
 }
 CATALOG_REGISTRIES = {
+    "common/ingest/mrms/core_contract.py": "phase 2 immutable protected Core contract",
     "EWMRS/rap/config.py": "the Phase 5 code-owned Uint16 display registry",
     CTAM: "explicitly out of scope for this configuration plan",
 }
@@ -70,7 +75,7 @@ def _url_literals(root: Path = SRC) -> list[tuple[str, str]]:
             values = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str) and node not in docstrings]
         else:
             values = re.findall(r"[\"'](https?://[^\"']+)[\"']", source)
-        found.extend((relative, value) for value in values if value.startswith(("http://", "https://")) and (relative, value) not in URL_SENTINELS)
+        found.extend((relative, value) for value in values if value.startswith(("http://", "https://")) and (relative, value) not in URL_LITERAL_EXCEPTIONS)
     return found
 
 
@@ -195,7 +200,7 @@ def _operational_numeric_literals(root: Path = SRC) -> list[tuple[str, str, str]
     return sorted(found)
 
 
-def test_production_url_literals_are_not_endpoints():
+def test_production_url_literals_stay_with_explicit_owners():
     assert _url_literals() == []
 
 
