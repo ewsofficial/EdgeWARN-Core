@@ -1,0 +1,2610 @@
+{
+  "documents": {
+    "api": {
+      "artifacts": {
+        "chunk_length_slack_bytes": 1024,
+        "json_cache": {
+          "max_entries": 256,
+          "max_size_bytes": 33554432
+        },
+        "list_limit": 1000,
+        "size_limits_bytes": {
+          "binary": 134217728,
+          "image": 33554432,
+          "json": 8388608
+        }
+      },
+      "cache_control_max_age": {
+        "asset": 31536000,
+        "collection": 5,
+        "resource": 60
+      },
+      "logging": {
+        "access_log_enabled": true
+      },
+      "pagination": {
+        "default_limit": 100,
+        "max_limit": 1000
+      },
+      "product_catalog": {
+        "entries": 32
+      },
+      "query": {
+        "allowed_params": [
+          "cursor",
+          "limit"
+        ],
+        "limit_pattern": "^(?:[1-9][0-9]{0,2}|1000)$",
+        "max_value_length": 256
+      },
+      "rate_limits": {
+        "legacy_headers": false,
+        "per_minute": {
+          "max": 6000,
+          "window_ms": 60000
+        },
+        "per_second": {
+          "max": 100,
+          "window_ms": 1000
+        },
+        "standard_headers": true
+      },
+      "render_defaults": {
+        "grid": {
+          "cols": 10,
+          "rows": 5,
+          "tile_size": 700
+        },
+        "grid_maxima": {
+          "cols": 100,
+          "rows": 100,
+          "tile_size": 4096
+        }
+      },
+      "schema_version": 1,
+      "security": {
+        "allowed_origins": [
+          "*"
+        ],
+        "compression_skip_media": "image/*",
+        "cors": {
+          "allowed_headers": [
+            "Content-Type",
+            "X-Request-Id"
+          ],
+          "credentials": false,
+          "max_age": 600,
+          "methods": [
+            "GET",
+            "HEAD",
+            "OPTIONS"
+          ]
+        },
+        "csp_default_src": "'self'",
+        "hsts_max_age_seconds": 31536000,
+        "trust_proxy": false
+      },
+      "server": {
+        "debug_port": 3001,
+        "host": "0.0.0.0",
+        "openapi_spec": "<src_dir>/api/openapi/v3.yaml",
+        "port": 5000,
+        "production_version_label": "2.x",
+        "request_timeout_ms": 30000,
+        "service_stale_after_seconds": 30,
+        "v3_api_version": "3.0.1"
+      },
+      "validation": {
+        "radar_products": [
+          "DBZH",
+          "VRADH",
+          "WRADH",
+          "PHIDP",
+          "CCORH",
+          "RHOHV",
+          "ZDR"
+        ]
+      }
+    },
+    "api_index": {
+      "api_index": {
+        "inactive_cell_max_age_minutes": 120,
+        "initialize_at_startup": {
+          "historical": false,
+          "realtime": true
+        },
+        "remove_old_cells": {
+          "historical": false,
+          "realtime": true
+        }
+      },
+      "schema_version": 1
+    },
+    "detection": {
+      "alert_matching": {
+        "events": [
+          "Tornado Warning",
+          "Severe Thunderstorm Warning",
+          "Tornado Watch",
+          "Severe Thunderstorm Watch",
+          "Special Weather Statement",
+          "Severe Weather Statement",
+          "Flash Flood Warning"
+        ],
+        "geometry_cache_max_entries": 512,
+        "point_match_buffer_deg": 0.01,
+        "polygon_match_buffer_deg": 0.005,
+        "snapshot_cache_max_entries": 8
+      },
+      "detection": {
+        "dataset_load_max_workers": 3,
+        "drop_offset": 10.0,
+        "fallback_dt_seconds": 120.0,
+        "min_seed_percentage": 0.001,
+        "refl_threshold": 37.5,
+        "stormcell_cleanup_max_age_minutes": 120,
+        "tracking_disabled_defaults": {
+          "event_type": "active",
+          "prediction_count": 0,
+          "tracking_mode": "active"
+        }
+      },
+      "gatemapper": {
+        "baseline_refl_floor": 37.5,
+        "contour_downsample": 8,
+        "contour_downsample_adaptive": {
+          "coarse_below_points": 24,
+          "coarse_step": 4,
+          "keep_all_below_points": 8,
+          "keep_all_step": 1
+        },
+        "contour_level": 0.5,
+        "coordinate_decimals": 3,
+        "crop_pad_px": 2,
+        "dynamic_min_threshold": {
+          "high": 40.0,
+          "low": 37.5,
+          "switch_max_refl": 45.0
+        },
+        "max_refl_clamp": 52.0,
+        "reject_clusters_at_or_below_gates": 5
+      },
+      "hail": {
+        "contour_level": 0.5,
+        "contour_sampling_step": 5,
+        "preciptype_class": 6
+      },
+      "morphology": {
+        "min_contour_points_for_defects": 10,
+        "min_pixels_full_analysis": 25
+      },
+      "save": {
+        "centroid_decimals": 3,
+        "polygon_decimals": 3
+      },
+      "schema_version": 1,
+      "tracker": {
+        "decay_confidence_factor": 0.85,
+        "decay_confidence_floor": 0.3,
+        "decay_max_refl_dbz": 30.0
+      }
+    },
+    "ewmrs_pipeline": {
+      "caches": {
+        "tile_index_entries": 512
+      },
+      "nexrad_gui": {
+        "max_workers": 8,
+        "poll_interval_min_seconds": 1.0,
+        "poll_interval_seconds": 30.0,
+        "retention_minutes": 120
+      },
+      "rap_uint16": {
+        "force": false,
+        "layers": [
+          {
+            "colormap_key": "RAP_Temperature_LL",
+            "description": "RAP 2 meter temperature",
+            "filter": {
+              "level": 2,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "name": "RAP_Temperature_2m",
+            "outdir": "Temperature_2m",
+            "scale": {
+              "max": 330.0,
+              "min": 180.0
+            },
+            "short_names": [
+              "2t",
+              "t",
+              "t2m"
+            ],
+            "units": "K"
+          },
+          {
+            "colormap_key": "RAP_Dewpoint_2m",
+            "description": "RAP 2 meter dewpoint temperature",
+            "filter": {
+              "level": 2,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "name": "RAP_Dewpoint_2m",
+            "outdir": "Dewpoint_2m",
+            "scale": {
+              "max": 330.0,
+              "min": 180.0
+            },
+            "short_names": [
+              "2d",
+              "d2m",
+              "dpt"
+            ],
+            "units": "K"
+          },
+          {
+            "colormap_key": "RAP_Wind_LL",
+            "description": "RAP 10 meter u-component wind",
+            "filter": {
+              "level": 10,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "name": "RAP_UWind_10m",
+            "outdir": "UWind_10m",
+            "scale": {
+              "max": 80.0,
+              "min": -80.0
+            },
+            "short_names": [
+              "10u",
+              "u10",
+              "u"
+            ],
+            "units": "m s-1"
+          },
+          {
+            "colormap_key": "RAP_Wind_LL",
+            "description": "RAP 10 meter v-component wind",
+            "filter": {
+              "level": 10,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "name": "RAP_VWind_10m",
+            "outdir": "VWind_10m",
+            "scale": {
+              "max": 80.0,
+              "min": -80.0
+            },
+            "short_names": [
+              "10v",
+              "v10",
+              "v"
+            ],
+            "units": "m s-1"
+          },
+          {
+            "colormap_key": "RAP_Temperature_LL",
+            "description": "RAP surface temperature",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "surface"
+            },
+            "name": "RAP_Temperature_Surface",
+            "outdir": "Temperature_Surface",
+            "scale": {
+              "max": 330.0,
+              "min": 180.0
+            },
+            "short_names": [
+              "t"
+            ],
+            "units": "K"
+          },
+          {
+            "colormap_key": "RAP_RelativeHumidity",
+            "description": "RAP 2 meter relative humidity",
+            "filter": {
+              "level": 2,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "name": "RAP_RelativeHumidity_2m",
+            "outdir": "RelativeHumidity_2m",
+            "scale": {
+              "max": 100.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "2r",
+              "r"
+            ],
+            "units": "%"
+          },
+          {
+            "colormap_key": "RAP_ThetaE_Surface",
+            "description": "RAP surface pseudo-adiabatic potential temperature",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "surface"
+            },
+            "name": "RAP_ThetaE_Surface",
+            "outdir": "ThetaE_Surface",
+            "scale": {
+              "max": 390.0,
+              "min": 250.0
+            },
+            "short_names": [
+              "papt"
+            ],
+            "units": "K"
+          },
+          {
+            "description": "RAP surface mean sea level pressure",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "surface"
+            },
+            "name": "RAP_MSLP_Surface",
+            "outdir": "MSLP_Surface",
+            "scale": {
+              "max": 105000.0,
+              "min": 95000.0
+            },
+            "short_names": [
+              "prmsl"
+            ],
+            "units": "Pa"
+          },
+          {
+            "colormap_key": "RAP_SnowWaterEquivalent_Surface",
+            "description": "RAP snow water equivalent",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "surface"
+            },
+            "name": "RAP_SnowWaterEquivalent_Surface",
+            "outdir": "SnowWaterEquivalent_Surface",
+            "scale": {
+              "max": 200.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "sdwe"
+            ],
+            "units": "kg m-2"
+          },
+          {
+            "colormap_key": "RAP_SnowDepth_Surface",
+            "description": "RAP snow depth",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "surface"
+            },
+            "name": "RAP_SnowDepth_Surface",
+            "outdir": "SnowDepth_Surface",
+            "scale": {
+              "max": 5.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "sde"
+            ],
+            "units": "m"
+          },
+          {
+            "colormap_key": "RAP_WetBulbZeroHeight",
+            "description": "RAP wet bulb zero height",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "lowestLevelWetBulb0"
+            },
+            "name": "RAP_WetBulbZeroHeight",
+            "outdir": "WetBulbZeroHeight",
+            "scale": {
+              "max": 6000.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "gh"
+            ],
+            "units": "gpm"
+          },
+          {
+            "colormap_key": "RAP_FreezingLevelHeight",
+            "description": "RAP 0C isotherm height",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "isothermZero"
+            },
+            "name": "RAP_FreezingLevelHeight",
+            "outdir": "FreezingLevelHeight",
+            "scale": {
+              "max": 6000.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "gh"
+            ],
+            "units": "gpm"
+          },
+          {
+            "colormap_key": "RAP_CAPE",
+            "description": "RAP surface convective available potential energy",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "surface"
+            },
+            "name": "RAP_CAPE_Surface",
+            "outdir": "CAPE_Surface",
+            "scale": {
+              "max": 6000.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "cape"
+            ],
+            "units": "J kg-1"
+          },
+          {
+            "colormap_key": "RAP_CIN_Surface",
+            "description": "RAP surface convective inhibition",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "surface"
+            },
+            "name": "RAP_CIN_Surface",
+            "outdir": "CIN_Surface",
+            "scale": {
+              "max": 0.0,
+              "min": -1000.0
+            },
+            "short_names": [
+              "cin"
+            ],
+            "units": "J kg-1"
+          },
+          {
+            "colormap_key": "RAP_CAPE",
+            "description": "RAP mixed-layer CAPE from the 90-0 mb above ground layer",
+            "filter": {
+              "level": 9000,
+              "typeOfLevel": "pressureFromGroundLayer"
+            },
+            "name": "RAP_MLCAPE",
+            "outdir": "MLCAPE",
+            "scale": {
+              "max": 6000.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "cape"
+            ],
+            "units": "J kg-1"
+          },
+          {
+            "colormap_key": "RAP_MLCIN",
+            "description": "RAP mixed-layer CIN from the 90-0 mb above ground layer",
+            "filter": {
+              "level": 9000,
+              "typeOfLevel": "pressureFromGroundLayer"
+            },
+            "name": "RAP_MLCIN",
+            "outdir": "MLCIN",
+            "scale": {
+              "max": 0.0,
+              "min": -1000.0
+            },
+            "short_names": [
+              "cin"
+            ],
+            "units": "J kg-1"
+          },
+          {
+            "colormap_key": "RAP_CAPE",
+            "description": "RAP most-unstable CAPE from the 255-0 mb above ground layer",
+            "filter": {
+              "level": 25500,
+              "typeOfLevel": "pressureFromGroundLayer"
+            },
+            "name": "RAP_MUCAPE",
+            "outdir": "MUCAPE",
+            "scale": {
+              "max": 6000.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "cape"
+            ],
+            "units": "J kg-1"
+          },
+          {
+            "colormap_key": "RAP_MUCIN",
+            "description": "RAP most-unstable CIN from the 255-0 mb above ground layer",
+            "filter": {
+              "level": 25500,
+              "typeOfLevel": "pressureFromGroundLayer"
+            },
+            "name": "RAP_MUCIN",
+            "outdir": "MUCIN",
+            "scale": {
+              "max": 0.0,
+              "min": -1000.0
+            },
+            "short_names": [
+              "cin"
+            ],
+            "units": "J kg-1"
+          },
+          {
+            "colormap_key": "RAP_CAPE",
+            "description": "RAP 0-3 km CAPE",
+            "filter": {
+              "level": 0,
+              "typeOfLevel": "heightAboveGroundLayer"
+            },
+            "name": "RAP_CAPE_0_3km",
+            "outdir": "CAPE_0-3km",
+            "scale": {
+              "max": 6000.0,
+              "min": 0.0
+            },
+            "short_names": [
+              "cape"
+            ],
+            "units": "J kg-1"
+          },
+          {
+            "colormap_key": "RAP_SRH",
+            "description": "RAP 0-3 km storm-relative helicity",
+            "filter": {
+              "level": 3000,
+              "typeOfLevel": "heightAboveGroundLayer"
+            },
+            "name": "RAP_SRH_0-3km",
+            "outdir": "SRH_0-3km",
+            "scale": {
+              "max": 1000.0,
+              "min": -500.0
+            },
+            "short_names": [
+              "hlcy"
+            ],
+            "units": "m2 s-2"
+          },
+          {
+            "colormap_key": "RAP_SRH",
+            "description": "RAP 0-1 km storm-relative helicity",
+            "filter": {
+              "level": 1000,
+              "typeOfLevel": "heightAboveGroundLayer"
+            },
+            "name": "RAP_SRH_0-1km",
+            "outdir": "SRH-0-1km",
+            "scale": {
+              "max": 1000.0,
+              "min": -500.0
+            },
+            "short_names": [
+              "hlcy"
+            ],
+            "units": "m2 s-2"
+          },
+          {
+            "colormap_key": "RAP_LiftedIndex_Surface_500_1000mb",
+            "description": "RAP surface lifted index over the 500-1000 mb layer",
+            "filter": {
+              "level": 500,
+              "typeOfLevel": "isobaricLayer"
+            },
+            "name": "RAP_LiftedIndex_Surface_500_1000mb",
+            "outdir": "LiftedIndex_Surface_500-1000mb",
+            "scale": {
+              "max": 15.0,
+              "min": -15.0
+            },
+            "short_names": [
+              "lftx"
+            ],
+            "units": "K"
+          },
+          {
+            "colormap_key": "RAP_AbsoluteVorticity_500mb",
+            "description": "RAP 500 mb absolute vorticity",
+            "filter": {
+              "level": 500,
+              "typeOfLevel": "isobaricInhPa"
+            },
+            "name": "RAP_AbsoluteVorticity_500mb",
+            "outdir": "AbsoluteVorticity_500mb",
+            "scale": {
+              "max": 0.0002,
+              "min": -0.0002
+            },
+            "short_names": [
+              "absv"
+            ],
+            "units": "s-1"
+          }
+        ],
+        "max_timestamps": 3,
+        "templates": [
+          {
+            "layers": [
+              {
+                "colormap_key": "{temperature_colormap}",
+                "description": "RAP {level} mb temperature",
+                "filter": {
+                  "level": "{level}",
+                  "typeOfLevel": "isobaricInhPa"
+                },
+                "name": "RAP_Temperature_{level}mb",
+                "outdir": "Temperature_{level}mb",
+                "scale": {
+                  "max": 330.0,
+                  "min": 180.0
+                },
+                "short_names": [
+                  "t"
+                ],
+                "units": "K"
+              },
+              {
+                "colormap_key": "RAP_RelativeHumidity",
+                "description": "RAP {level} mb relative humidity",
+                "filter": {
+                  "level": "{level}",
+                  "typeOfLevel": "isobaricInhPa"
+                },
+                "name": "RAP_RelativeHumidity_{level}mb",
+                "outdir": "RelativeHumidity_{level}mb",
+                "scale": {
+                  "max": 100.0,
+                  "min": 0.0
+                },
+                "short_names": [
+                  "r"
+                ],
+                "units": "%"
+              }
+            ],
+            "values": [
+              {
+                "level": 925,
+                "temperature_colormap": "RAP_Temperature_LL",
+                "wind_colormap": "RAP_Wind_LL"
+              },
+              {
+                "level": 850,
+                "temperature_colormap": "RAP_Temperature_LL",
+                "wind_colormap": "RAP_Wind_LL"
+              },
+              {
+                "level": 700,
+                "temperature_colormap": "RAP_Temperature_LL",
+                "wind_colormap": "RAP_Wind_ML"
+              },
+              {
+                "level": 500,
+                "temperature_colormap": "RAP_Temperature_HL",
+                "wind_colormap": "RAP_Wind_ML"
+              },
+              {
+                "level": 250,
+                "temperature_colormap": "RAP_Temperature_HL",
+                "wind_colormap": "RAP_Wind_HL"
+              }
+            ]
+          },
+          {
+            "layers": [
+              {
+                "colormap_key": "{wind_colormap}",
+                "description": "RAP {level} mb u-component wind",
+                "filter": {
+                  "level": "{level}",
+                  "typeOfLevel": "isobaricInhPa"
+                },
+                "name": "RAP_UWind_{level}mb",
+                "outdir": "UWind_{level}mb",
+                "scale": {
+                  "max": 80.0,
+                  "min": -80.0
+                },
+                "short_names": [
+                  "u"
+                ],
+                "units": "m s-1"
+              },
+              {
+                "colormap_key": "{wind_colormap}",
+                "description": "RAP {level} mb v-component wind",
+                "filter": {
+                  "level": "{level}",
+                  "typeOfLevel": "isobaricInhPa"
+                },
+                "name": "RAP_VWind_{level}mb",
+                "outdir": "VWind_{level}mb",
+                "scale": {
+                  "max": 80.0,
+                  "min": -80.0
+                },
+                "short_names": [
+                  "v"
+                ],
+                "units": "m s-1"
+              }
+            ],
+            "values": [
+              {
+                "level": 925,
+                "wind_colormap": "RAP_Wind_LL"
+              },
+              {
+                "level": 850,
+                "wind_colormap": "RAP_Wind_LL"
+              },
+              {
+                "level": 700,
+                "wind_colormap": "RAP_Wind_ML"
+              },
+              {
+                "level": 500,
+                "wind_colormap": "RAP_Wind_ML"
+              },
+              {
+                "level": 250,
+                "wind_colormap": "RAP_Wind_HL"
+              }
+            ]
+          }
+        ],
+        "timestamp_format": "%Y%m%d-%H%M00",
+        "uint16": {
+          "nodata": 65535,
+          "valid_max": 65534
+        }
+      },
+      "render": {
+        "cleanup_after": true,
+        "goes_cleanup_max_age_minutes": 120,
+        "goes_cleanup_min_interval_seconds": 300,
+        "gui_cleanup_max_age_minutes": 120,
+        "phase_name": "EWMRS"
+      },
+      "render_threads": {
+        "max_tile_threads": 8
+      },
+      "schema_version": 1,
+      "workers": {
+        "max_workers": 4,
+        "numeric_thread_caps": {
+          "value": 1,
+          "variables": [
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS"
+          ]
+        },
+        "psutil_fallback_max": 2,
+        "worker_memory_cap": 384
+      }
+    },
+    "ewmrs_render": {
+      "chunk_format": {
+        "bytes_per_component": 2,
+        "channels": 1,
+        "compression": "gzip",
+        "data_type": "float16",
+        "encoding": "float16",
+        "file_suffix": ".f16.gz",
+        "format_version": 2,
+        "grid_origin": "bottom_left",
+        "media_type": "application/octet-stream",
+        "no_data": "nan",
+        "pixel_row_order": "top_to_bottom",
+        "value_kind": "scalar",
+        "wire_version": 2
+      },
+      "goes_layers": {
+        "common": {
+          "fallback_variable_names": [
+            "Rad"
+          ],
+          "required": false,
+          "source_type": "goes_abi",
+          "variable_name": "CMI"
+        },
+        "layers": [
+          {
+            "channel_id": "C01",
+            "colormap_key": "GOES_RGB_Raw",
+            "filepath": "GOES_ABI_VISIBLE_BLUE_DIR",
+            "mask_max": {
+              "C01": 1.2
+            },
+            "mask_min": {
+              "C01": 0.0
+            },
+            "name": "GOES_ABI_C01_Reflectance",
+            "outdir": "GUI_GOES_C01_DIR",
+            "value_transform": "reflectance_from_rad"
+          },
+          {
+            "channel_id": "C02",
+            "colormap_key": "GOES_RGB_Raw",
+            "filepath": "GOES_ABI_VISIBLE_RED_DIR",
+            "mask_max": {
+              "C02": 1.2
+            },
+            "mask_min": {
+              "C02": 0.0
+            },
+            "name": "GOES_ABI_C02_Reflectance",
+            "outdir": "GUI_GOES_C02_DIR",
+            "value_transform": "reflectance_from_rad"
+          },
+          {
+            "channel_id": "C03",
+            "colormap_key": "GOES_RGB_Raw",
+            "filepath": "GOES_ABI_VEGGIE_DIR",
+            "mask_max": {
+              "C03": 1.2
+            },
+            "mask_min": {
+              "C03": 0.0
+            },
+            "name": "GOES_ABI_C03_Reflectance",
+            "outdir": "GUI_GOES_C03_DIR",
+            "value_transform": "reflectance_from_rad"
+          },
+          {
+            "channel_id": "C04",
+            "colormap_key": "GOES_RGB_Raw",
+            "filepath": "GOES_ABI_CIRRUS_DIR",
+            "mask_max": {
+              "C04": 1.2
+            },
+            "mask_min": {
+              "C04": 0.0
+            },
+            "name": "GOES_ABI_C04_Reflectance",
+            "outdir": "GUI_GOES_C04_DIR",
+            "value_transform": "reflectance_from_rad"
+          },
+          {
+            "channel_id": "C05",
+            "colormap_key": "GOES_RGB_Raw",
+            "filepath": "GOES_ABI_SNOW_ICE_DIR",
+            "mask_max": {
+              "C05": 1.2
+            },
+            "mask_min": {
+              "C05": 0.0
+            },
+            "name": "GOES_ABI_C05_Reflectance",
+            "outdir": "GUI_GOES_C05_DIR",
+            "value_transform": "reflectance_from_rad"
+          },
+          {
+            "channel_id": "C06",
+            "colormap_key": "GOES_RGB_Raw",
+            "filepath": "GOES_ABI_PARTICLE_SIZE_DIR",
+            "mask_max": {
+              "C06": 1.2
+            },
+            "mask_min": {
+              "C06": 0.0
+            },
+            "name": "GOES_ABI_C06_Reflectance",
+            "outdir": "GUI_GOES_C06_DIR",
+            "value_transform": "reflectance_from_rad"
+          },
+          {
+            "channel_id": "C07",
+            "colormap_key": "GOES_ABI_C07_BrightnessTemp",
+            "filepath": "GOES_ABI_SHORTWAVE_IR_DIR",
+            "mask_max": {
+              "C07": 330.0
+            },
+            "mask_min": {
+              "C07": 180.0
+            },
+            "name": "GOES_ABI_C07_BrightnessTemp",
+            "outdir": "GUI_GOES_C07_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C08",
+            "colormap_key": "GOES_ABI_C08_BrightnessTemp",
+            "filepath": "GOES_ABI_UPPER_LEVEL_WV_DIR",
+            "mask_max": {
+              "C08": 300.0
+            },
+            "mask_min": {
+              "C08": 180.0
+            },
+            "name": "GOES_ABI_C08_BrightnessTemp",
+            "outdir": "GUI_GOES_C08_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C09",
+            "colormap_key": "GOES_ABI_C09_BrightnessTemp",
+            "filepath": "GOES_ABI_MID_LEVEL_WV_DIR",
+            "mask_max": {
+              "C09": 310.0
+            },
+            "mask_min": {
+              "C09": 180.0
+            },
+            "name": "GOES_ABI_C09_BrightnessTemp",
+            "outdir": "GUI_GOES_C09_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C10",
+            "colormap_key": "GOES_ABI_C10_BrightnessTemp",
+            "filepath": "GOES_ABI_LOWER_LEVEL_WV_DIR",
+            "mask_max": {
+              "C10": 320.0
+            },
+            "mask_min": {
+              "C10": 185.0
+            },
+            "name": "GOES_ABI_C10_BrightnessTemp",
+            "outdir": "GUI_GOES_C10_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C11",
+            "colormap_key": "GOES_ABI_C11_BrightnessTemp",
+            "filepath": "GOES_ABI_CLD_TOP_PHASE_DIR",
+            "mask_max": {
+              "C11": 330.0
+            },
+            "mask_min": {
+              "C11": 180.0
+            },
+            "name": "GOES_ABI_C11_BrightnessTemp",
+            "outdir": "GUI_GOES_C11_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C12",
+            "colormap_key": "GOES_ABI_C12_BrightnessTemp",
+            "filepath": "GOES_ABI_OZONE_DIR",
+            "mask_max": {
+              "C12": 330.0
+            },
+            "mask_min": {
+              "C12": 180.0
+            },
+            "name": "GOES_ABI_C12_BrightnessTemp",
+            "outdir": "GUI_GOES_C12_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C13",
+            "colormap_key": "GOES_IR",
+            "filepath": "GOES_ABI_CLEAN_LWIR_DIR",
+            "mask_max": {
+              "C13": 330.0
+            },
+            "mask_min": {
+              "C13": 180.0
+            },
+            "name": "GOES_ABI_C13_BrightnessTemp",
+            "outdir": "GUI_GOES_C13_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C14",
+            "colormap_key": "GOES_IR",
+            "filepath": "GOES_ABI_LONGWAVE_IR_DIR",
+            "mask_max": {
+              "C14": 330.0
+            },
+            "mask_min": {
+              "C14": 180.0
+            },
+            "name": "GOES_ABI_C14_BrightnessTemp",
+            "outdir": "GUI_GOES_C14_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C15",
+            "colormap_key": "GOES_IR",
+            "filepath": "GOES_ABI_DIRTY_LWIR_DIR",
+            "mask_max": {
+              "C15": 330.0
+            },
+            "mask_min": {
+              "C15": 180.0
+            },
+            "name": "GOES_ABI_C15_BrightnessTemp",
+            "outdir": "GUI_GOES_C15_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          },
+          {
+            "channel_id": "C16",
+            "colormap_key": "GOES_ABI_C16_BrightnessTemp",
+            "filepath": "GOES_ABI_CO2_LWIR_DIR",
+            "mask_max": {
+              "C16": 330.0
+            },
+            "mask_min": {
+              "C16": 180.0
+            },
+            "name": "GOES_ABI_C16_BrightnessTemp",
+            "outdir": "GUI_GOES_C16_DIR",
+            "value_transform": "brightness_temp_from_rad"
+          }
+        ]
+      },
+      "goes_transform": {
+        "resampling": "bilinear"
+      },
+      "mrms_layers": [
+        {
+          "colormap_key": "NWS_Reflectivity",
+          "name": "MRMS_MergedReflectivityQC",
+          "outdir": "GUI_COMPOSITE_DIR",
+          "product": "MergedReflectivityQCComposite_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "EnhancedEchoTop",
+          "name": "MRMS_EchoTop18",
+          "outdir": "GUI_ECHOTOP18_DIR",
+          "product": "EchoTop_18_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "EnhancedEchoTop",
+          "name": "MRMS_EchoTop30",
+          "outdir": "GUI_ECHOTOP30_DIR",
+          "product": "EchoTop_30_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "NWS_Reflectivity",
+          "name": "MRMS_ReflectivityAtLowestAltitude",
+          "outdir": "GUI_RALA_DIR",
+          "product": "MergedReflectivityAtLowestAltitude_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "NWS_Reflectivity",
+          "name": "MRMS_ReflectivityAt0C",
+          "outdir": "GUI_REF_0C_DIR",
+          "product": "Reflectivity_0C_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "NWS_Reflectivity",
+          "name": "MRMS_ReflectivityAtM5C",
+          "outdir": "GUI_REFM5C_DIR",
+          "product": "Reflectivity_-5C_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "NWS_Reflectivity",
+          "name": "MRMS_ReflectivityAtM15C",
+          "outdir": "GUI_REFM15C_DIR",
+          "product": "Reflectivity_-15C_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "PrecipRate",
+          "name": "MRMS_PrecipRate",
+          "outdir": "GUI_PRECIPRATE_DIR",
+          "product": "PrecipRate_00.00",
+          "required": true
+        },
+        {
+          "colormap_key": "VILDensity",
+          "name": "MRMS_VILDensity",
+          "outdir": "GUI_VILD_DIR",
+          "product": "VIL_Density_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "QPE_01H",
+          "name": "MRMS_QPE",
+          "outdir": "GUI_QPE_DIR",
+          "product": "RadarOnly_QPE_01H_00.00",
+          "required": true
+        },
+        {
+          "colormap_key": "VIL",
+          "name": "MRMS_VIL",
+          "outdir": "GUI_VIL_DIR",
+          "product": "VIL_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "VIL",
+          "name": "MRMS_VII",
+          "outdir": "GUI_VII_DIR",
+          "product": "VII_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "AzShear",
+          "name": "MRMS_MergedAzShear_0-2kmAGL",
+          "outdir": "GUI_AZSHEARLOW_DIR",
+          "product": "MergedAzShear_0-2kmAGL_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "AzShear",
+          "name": "MRMS_MergedAzShear_3-6kmAGL",
+          "outdir": "GUI_AZSHEARMID_DIR",
+          "product": "MergedAzShear_3-6kmAGL_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "MESH",
+          "name": "MRMS_MESH",
+          "outdir": "GUI_MESH_DIR",
+          "product": "MESH_00.50",
+          "required": true
+        },
+        {
+          "colormap_key": "VILDensity",
+          "name": "MRMS_NLDN_CG_001min_AvgDensity",
+          "outdir": "GUI_NLDN_DIR",
+          "product": "NLDN_CG_001min_AvgDensity_00.00",
+          "required": true
+        }
+      ],
+      "nexrad_gui": {
+        "variable_colormaps": {
+          "DBZH": "NWS_Reflectivity",
+          "PHIDP": "PHIDP",
+          "RHOHV": "RHOHV",
+          "VRADH": "VRADH",
+          "WRADH": "WRADH",
+          "ZDR": "ZDR"
+        }
+      },
+      "schema_version": 1,
+      "tiles": {
+        "tile_size": 700
+      }
+    },
+    "filesystem": {
+      "base_dir": {
+        "posix": "~/EdgeWARN_input",
+        "windows": "C:\\\\EdgeWARN_input"
+      },
+      "cleanup_defaults": {
+        "max_age_minutes": 60,
+        "max_files": 10
+      },
+      "schema_version": 1
+    },
+    "historical": {
+      "historical": {
+        "cleanup_max_files": 5,
+        "lat": [
+          20,
+          55
+        ],
+        "lon": [
+          -130,
+          -60
+        ],
+        "step_minutes": 1,
+        "throttle_seconds": 1
+      },
+      "schema_version": 1
+    },
+    "ingest": {
+      "goes": {
+        "abi_channels": [
+          {
+            "id": "C01",
+            "name": "visible_blue",
+            "outdir": "GOES_ABI_VISIBLE_BLUE_DIR"
+          },
+          {
+            "id": "C02",
+            "name": "visible_red",
+            "outdir": "GOES_ABI_VISIBLE_RED_DIR"
+          },
+          {
+            "id": "C03",
+            "name": "veggie",
+            "outdir": "GOES_ABI_VEGGIE_DIR"
+          },
+          {
+            "id": "C04",
+            "name": "cirrus",
+            "outdir": "GOES_ABI_CIRRUS_DIR"
+          },
+          {
+            "id": "C05",
+            "name": "snow_ice",
+            "outdir": "GOES_ABI_SNOW_ICE_DIR"
+          },
+          {
+            "id": "C06",
+            "name": "particle_size",
+            "outdir": "GOES_ABI_PARTICLE_SIZE_DIR"
+          },
+          {
+            "id": "C07",
+            "name": "shortwave_ir",
+            "outdir": "GOES_ABI_SHORTWAVE_IR_DIR"
+          },
+          {
+            "id": "C08",
+            "name": "upper_level_wv",
+            "outdir": "GOES_ABI_UPPER_LEVEL_WV_DIR"
+          },
+          {
+            "id": "C09",
+            "name": "mid_level_wv",
+            "outdir": "GOES_ABI_MID_LEVEL_WV_DIR"
+          },
+          {
+            "id": "C10",
+            "name": "lower_level_wv",
+            "outdir": "GOES_ABI_LOWER_LEVEL_WV_DIR"
+          },
+          {
+            "id": "C11",
+            "name": "cld_top_phase",
+            "outdir": "GOES_ABI_CLD_TOP_PHASE_DIR"
+          },
+          {
+            "id": "C12",
+            "name": "ozone",
+            "outdir": "GOES_ABI_OZONE_DIR"
+          },
+          {
+            "id": "C13",
+            "name": "clean_lwir",
+            "outdir": "GOES_ABI_CLEAN_LWIR_DIR"
+          },
+          {
+            "id": "C14",
+            "name": "longwave_ir",
+            "outdir": "GOES_ABI_LONGWAVE_IR_DIR"
+          },
+          {
+            "id": "C15",
+            "name": "dirty_lwir",
+            "outdir": "GOES_ABI_DIRTY_LWIR_DIR"
+          },
+          {
+            "id": "C16",
+            "name": "co2_lwir",
+            "outdir": "GOES_ABI_CO2_LWIR_DIR"
+          }
+        ],
+        "abi_product": "ABI-L1b-RadC",
+        "bucket": "noaa-goes19",
+        "bucket_path_pattern": "{product}/{YYYY}/{DDD}/{HH}/",
+        "cleanup_max_age_minutes": 60,
+        "filename_matcher_template": "(?:_|-)M\\d{channel_id}_",
+        "glm_outdir": "GOES_GLM_DIR",
+        "glm_product": "GLM-L2-LCFA",
+        "hour_lookback": 3,
+        "max_entries": 96,
+        "max_files_per_spec": 2
+      },
+      "mrms": {
+        "cleanup_max_age_minutes": 60,
+        "decompress_chunk_size_bytes": 1048576,
+        "downloads": {
+          "max_concurrency": 8,
+          "optional_timeout_seconds": 30
+        },
+        "ncep_https": {
+          "download_chunk_size_bytes": 8192,
+          "match_window_seconds": 120,
+          "sync_timeout_seconds": 10
+        },
+        "products": [
+          "MRMS_EchoTop_18_00.50",
+          "MRMS_EchoTop_30_00.50",
+          "MRMS_EchoTop_50_00.50",
+          "MRMS_RadarQualityIndex_00.00",
+          "MRMS_MESH_00.50",
+          "MRMS_NLDN_CG_001min_AvgDensity_00.00",
+          "MRMS_PrecipRate_00.00",
+          "MRMS_RadarOnly_QPE_01H_00.00",
+          "MRMS_MergedAzShear_0-2kmAGL_00.50",
+          "MRMS_MergedAzShear_3-6kmAGL_00.50",
+          "MRMS_VIL_Density_00.50",
+          "MRMS_MergedRhoHV_00.50",
+          "MRMS_MergedReflectivityAtLowestAltitude_00.50",
+          "MRMS_VII_00.50",
+          "MRMS_VIL_00.50",
+          "MRMS_Reflectivity_0C_00.50",
+          "MRMS_Reflectivity_-5C_00.50",
+          "MRMS_Reflectivity_-15C_00.50"
+        ],
+        "remove_old_files": true
+      },
+      "schema_version": 2
+    },
+    "integration": {
+      "glm": {
+        "bin_size_degrees": 1.0
+      },
+      "output": {
+        "decimals": 2
+      },
+      "probsevere_field_map": {
+        "AccumFCD": "AccumFCD",
+        "CAPE_M10M30": "CAPE_M10M30",
+        "CompRef": "COMPREF",
+        "DCAPE": "DCAPE",
+        "EBShear": "EBSHEAR",
+        "EchoTop50": "EchoTop_50",
+        "FlashDensity": "FLASH_DENSITY",
+        "FlashRate": "FLASH_RATE",
+        "H50_Above_0C": "H50_Above_0C",
+        "ICP": "ICP",
+        "LCL": "LCL",
+        "LJA": "LJA",
+        "LLLR": "LLLR",
+        "MESH": "MESH",
+        "MLCAPE": "MLCAPE",
+        "MLCIN": "MLCIN",
+        "MLLR": "MLLR",
+        "MUCAPE": "MUCAPE",
+        "MaxFCD": "MaxFCD",
+        "MaxFED": "MaxFED",
+        "MaxLLAz": "MAXLLAZ",
+        "MaxRC_Emiss": "MAXRC_EMISS",
+        "MeanWind_1-3kmAGL": "MEANWIND_1-3kmAGL",
+        "MinFlashArea": "MinFlashArea",
+        "PWAT": "PWAT",
+        "ProbHail": "ProbHail",
+        "ProbSevere": "ProbSevere",
+        "ProbTor": "ProbTor",
+        "ProbWind": "ProbWind",
+        "Ref10": "REF10",
+        "Ref20": "REF20",
+        "SRH01km": "SRH01KM",
+        "SRH02km": "SRW02KM",
+        "SRW46km": "SRW46KM",
+        "TE@MaxFCD": "TE@MaxFCD",
+        "VIL": "VIL",
+        "Wetbulb_0C_Hgt": "WETBULB_0C_HGT",
+        "avg_beam_hgt": "AVG_BEAM_HGT",
+        "p98LLAz": "P98LLAZ",
+        "p98MLAz": "P98MLAZ"
+      },
+      "rap_products": {
+        "derived": [
+          {
+            "formula": "temp_2m - dewpoint_2m",
+            "key": "dewpoint_depression"
+          },
+          {
+            "formula": "freezing_level_m / 1000",
+            "key": "freezing_level_height"
+          }
+        ],
+        "isobaric_levels_mb": [
+          1000,
+          975,
+          950,
+          925,
+          900,
+          875,
+          850,
+          825,
+          800,
+          775,
+          750,
+          725,
+          700,
+          675,
+          650,
+          625,
+          600,
+          575,
+          550,
+          525,
+          500,
+          475,
+          450,
+          425,
+          400,
+          375,
+          350,
+          325,
+          300,
+          275,
+          250,
+          225,
+          200,
+          175,
+          150,
+          125,
+          100
+        ],
+        "products": [
+          {
+            "filter": {
+              "typeOfLevel": "isobaricInhPa"
+            },
+            "key_template": "wind_field.u{level}",
+            "levels": [
+              1000,
+              975,
+              950,
+              925,
+              900,
+              875,
+              850,
+              825,
+              800,
+              775,
+              750,
+              725,
+              700,
+              675,
+              650,
+              625,
+              600,
+              575,
+              550,
+              525,
+              500,
+              475,
+              450,
+              425,
+              400,
+              375,
+              350,
+              325,
+              300,
+              275,
+              250,
+              225,
+              200,
+              175,
+              150,
+              125,
+              100
+            ],
+            "var": "u",
+            "var_aliases": [
+              "u",
+              "UGRD",
+              "u-component_of_wind_isobaric",
+              "wind_u"
+            ]
+          },
+          {
+            "filter": {
+              "typeOfLevel": "isobaricInhPa"
+            },
+            "key_template": "wind_field.v{level}",
+            "levels": [
+              1000,
+              975,
+              950,
+              925,
+              900,
+              875,
+              850,
+              825,
+              800,
+              775,
+              750,
+              725,
+              700,
+              675,
+              650,
+              625,
+              600,
+              575,
+              550,
+              525,
+              500,
+              475,
+              450,
+              425,
+              400,
+              375,
+              350,
+              325,
+              300,
+              275,
+              250,
+              225,
+              200,
+              175,
+              150,
+              125,
+              100
+            ],
+            "var": "v",
+            "var_aliases": [
+              "v",
+              "VGRD",
+              "v-component_of_wind_isobaric",
+              "wind_v"
+            ]
+          },
+          {
+            "filter": {
+              "level": 10,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "u10m",
+            "var": "u10",
+            "var_aliases": [
+              "u10",
+              "10u",
+              "u"
+            ]
+          },
+          {
+            "filter": {
+              "level": 10,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "v10m",
+            "var": "v10",
+            "var_aliases": [
+              "v10",
+              "10v",
+              "v"
+            ]
+          },
+          {
+            "filter": {
+              "level": 2,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "temp_2m",
+            "transform": "kelvin_to_celsius",
+            "var": "t2m",
+            "var_aliases": [
+              "t2m",
+              "2t",
+              "t"
+            ]
+          },
+          {
+            "filter": {
+              "level": 2,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "dewpoint_2m",
+            "transform": "kelvin_to_celsius",
+            "var": "d2m",
+            "var_aliases": [
+              "d2m",
+              "2d",
+              "dpt"
+            ]
+          },
+          {
+            "filter": {
+              "typeOfLevel": "isothermZero"
+            },
+            "key": "freezing_level_m",
+            "var": "gh"
+          }
+        ]
+      },
+      "schema_version": 1,
+      "stats_datasets": [
+        {
+          "key": "Ref0",
+          "method": "max",
+          "name": "Ref0",
+          "product": "Reflectivity_0C_00.50"
+        },
+        {
+          "key": "Ref5",
+          "method": "max",
+          "name": "Ref5",
+          "product": "Reflectivity_-5C_00.50"
+        },
+        {
+          "key": "Ref15",
+          "method": "max",
+          "name": "Ref15",
+          "product": "Reflectivity_-15C_00.50"
+        },
+        {
+          "key": "maxCGFlashDensity",
+          "method": "max",
+          "name": "NLDN",
+          "product": "NLDN_CG_001min_AvgDensity_00.00"
+        },
+        {
+          "key": "maxEchoTop18",
+          "method": "max",
+          "name": "EchoTop18",
+          "product": "EchoTop_18_00.50"
+        },
+        {
+          "key": "p95EchoTop18",
+          "method": "percentile",
+          "name": "EchoTop18 (95th)",
+          "percentile": 95,
+          "product": "EchoTop_18_00.50"
+        },
+        {
+          "key": "p90EchoTop18",
+          "method": "percentile",
+          "name": "EchoTop18 (90th)",
+          "percentile": 90,
+          "product": "EchoTop_18_00.50"
+        },
+        {
+          "key": "maxEchoTop30",
+          "method": "max",
+          "name": "EchoTop30",
+          "product": "EchoTop_30_00.50"
+        },
+        {
+          "key": "p90EchoTop30",
+          "method": "percentile",
+          "name": "EchoTop30 (90th)",
+          "percentile": 90,
+          "product": "EchoTop_30_00.50"
+        },
+        {
+          "key": "p90EchoTop50",
+          "method": "percentile",
+          "name": "EchoTop50 (90th)",
+          "percentile": 90,
+          "product": "EchoTop_50_00.50"
+        },
+        {
+          "key": "maxVIL",
+          "method": "max",
+          "name": "VIL",
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "p95VIL",
+          "method": "percentile",
+          "name": "VIL (95th)",
+          "percentile": 95,
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "p90VIL",
+          "method": "percentile",
+          "name": "VIL (90th)",
+          "percentile": 90,
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "p50VIL",
+          "method": "percentile",
+          "name": "VIL (50th)",
+          "percentile": 50,
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "maxVILDensity",
+          "method": "max",
+          "name": "VIL Density",
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "p95VILDensity",
+          "method": "percentile",
+          "name": "VIL Density (95th)",
+          "percentile": 95,
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "p90VILDensity",
+          "method": "percentile",
+          "name": "VIL Density (90th)",
+          "percentile": 90,
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "p50VILDensity",
+          "method": "percentile",
+          "name": "VIL Density (50th)",
+          "percentile": 50,
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "maxAzShearLow",
+          "method": "max",
+          "name": "AzShear Low",
+          "product": "MergedAzShear_0-2kmAGL_00.50"
+        },
+        {
+          "key": "p95AzShearLow",
+          "method": "percentile",
+          "name": "AzShear Low (95th)",
+          "percentile": 95,
+          "product": "MergedAzShear_0-2kmAGL_00.50"
+        },
+        {
+          "key": "maxAzShearMid",
+          "method": "max",
+          "name": "AzShear Mid",
+          "product": "MergedAzShear_3-6kmAGL_00.50"
+        },
+        {
+          "key": "p95AzShearMid",
+          "method": "percentile",
+          "name": "AzShear Mid (95th)",
+          "percentile": 95,
+          "product": "MergedAzShear_3-6kmAGL_00.50"
+        },
+        {
+          "key": "maxPrecipRate",
+          "method": "max",
+          "name": "PrecipRate",
+          "product": "PrecipRate_00.00"
+        },
+        {
+          "key": "maxRALA",
+          "method": "max",
+          "name": "Reflectivity at Lowest Altitude",
+          "product": "MergedReflectivityAtLowestAltitude_00.50"
+        },
+        {
+          "key": "maxVII",
+          "method": "max",
+          "name": "VII",
+          "product": "VII_00.50"
+        }
+      ]
+    },
+    "kalman": {
+      "assignment": {
+        "gating_threshold": 6.0,
+        "method": "greedy",
+        "min_gating_radius_km": 2.0,
+        "prefilter_radius_km": 16.0,
+        "weights": {
+          "position": 1.0,
+          "size_similarity": 0.5,
+          "velocity_direction": 2.0
+        }
+      },
+      "assignment_costs": {
+        "default_dt_seconds": 120.0,
+        "implied_speed_deadband_ms": 0.5,
+        "predicted_speed_deadband_ms": 1.0,
+        "reflectivity_diff_cap": 1.0,
+        "size_cost_cap": 1.0,
+        "size_ratio_log2_divisor": 2.0
+      },
+      "confidence": {
+        "factor_floor": 0.8,
+        "motion_factor_variance_denominator": 2500.0,
+        "position_decay_onset_std": 5.0,
+        "position_decay_scale": 30.0,
+        "time_penalty_weight": 0.3
+      },
+      "filter_internals": {
+        "initial_acceleration_variance": 1.0,
+        "initial_position_uncertainty_km": 1.0,
+        "initial_velocity_variance": 100.0,
+        "innovation_covariance_regularization": 1e-06,
+        "singular_retry_regularization": 0.0001
+      },
+      "kalman_filter": {
+        "measurement_noise": {
+          "position": 0.5
+        },
+        "process_noise": {
+          "acceleration": 0.1
+        }
+      },
+      "schema_version": 1,
+      "tracking": {
+        "confidence_decay_factor": 0.7,
+        "confidence_threshold": 0.4,
+        "max_prediction_time_minutes": 6.0
+      }
+    },
+    "lineage": {
+      "lineage": {
+        "bounds_prefilter_buffer_deg": 0.0,
+        "buffer": {
+          "max_pending": 100,
+          "min_confirmations": 2,
+          "prune_after_scans": 5,
+          "scan_interval_seconds": 120.0
+        },
+        "tracked_overlap_ratio": 0.1
+      },
+      "schema_version": 1
+    },
+    "metar": {
+      "metar": {
+        "accept_encoding": "gzip, deflate",
+        "cleanup_max_age_minutes": 60,
+        "conus_bounds": {
+          "lat_max": 50.0,
+          "lat_min": 24.0,
+          "lon_max": -66.0,
+          "lon_min": -125.0
+        },
+        "coordinate_decimals": 4,
+        "lookback_hours": 3,
+        "observation_timeout_seconds": 30,
+        "observation_url_pattern": "https://tgftp.nws.noaa.gov/data/observations/metar/cycles/{hour}Z.TXT",
+        "pressure_decimals": 2,
+        "station_cache_file": "stations_cache.json",
+        "station_db_url": "https://aviationweather.gov/data/cache/stations.cache.json",
+        "station_timeout_seconds": 60,
+        "verify_tls": true
+      },
+      "schema_version": 1
+    },
+    "nexrad": {
+      "buckets": {
+        "chunks": "unidata-nexrad-level2-chunks"
+      },
+      "cli": {
+        "base_dir": null,
+        "sites": null
+      },
+      "concurrency": {
+        "in_volume_prefetch": 4,
+        "max_chunk_downloads": 64,
+        "max_site_tasks": 24,
+        "parse_checkpoint_chunk_interval": 8,
+        "worker_pool_size": 4,
+        "worker_recycle_interval": 24,
+        "worker_timeout_seconds": 40.0
+      },
+      "realtime": {
+        "completion_interval_seconds": 10,
+        "max_candidate_volumes_per_site": 3,
+        "scan_interval_seconds": 20
+      },
+      "retention": {
+        "elevation_dirs_to_keep": 2,
+        "scan_dirs_to_keep": 3,
+        "stale_manifest_max_age_hours": 12
+      },
+      "schema_version": 1,
+      "selection": {
+        "allowed_vcps": [
+          12,
+          212,
+          215
+        ],
+        "canonical_elevation_bins": [
+          0.5,
+          0.9,
+          1.3,
+          1.8,
+          2.4,
+          3.1,
+          4.0
+        ],
+        "high_max_angle_deg": 4.0,
+        "min_required_volume_chunks": 25,
+        "min_sweep_angle_deg": 0.4,
+        "waveforms": {
+          "doppler": "contiguous_doppler",
+          "single_elevation": [
+            "staggered_pulse_pair",
+            "batch"
+          ],
+          "surveillance": "contiguous_surveillance"
+        }
+      },
+      "stations": {
+        "api_cache_ttl_seconds": 30,
+        "api_timeout_seconds": 15,
+        "catalog_url": "https://api.weather.gov/radar/stations"
+      },
+      "timeouts": {
+        "cancellation_grace_seconds": 2.0,
+        "chunk_list_seconds": 20.0,
+        "heartbeat_stale_seconds": 240.0,
+        "heartbeat_startup_grace_seconds": 60.0,
+        "ingest_seconds": 120.0,
+        "scan_seconds": 180.0,
+        "volume_discovery_seconds": 20.0
+      }
+    },
+    "nws": {
+      "geomapper": {
+        "geometry_precision": 4,
+        "junk_keys": [
+          "references",
+          "sender",
+          "parameters",
+          "instruction",
+          "response",
+          "scope",
+          "code",
+          "language",
+          "web",
+          "eventCode"
+        ],
+        "simplify_tolerance": 0.01
+      },
+      "nws": {
+        "active_alerts_url": "https://api.weather.gov/alerts/active",
+        "download_chunk_size_bytes": 8192,
+        "dropped_events": [
+          "Administrative Message",
+          "Freezing Spray Advisory",
+          "Low Water Advisory",
+          "High Surf Advisory",
+          "Small Craft Advisory",
+          "Brisk Wind Advisory",
+          "Practice/Demo Warning",
+          "Required Weekly Test",
+          "Required Monthly Test",
+          "Test Message",
+          "Hurricane Local Statement",
+          "Flood Statement",
+          "Flash Flood Statement",
+          "Rip Current Statement",
+          "Lakeshore Flood Statement",
+          "Hydrologic Outlook",
+          "Air Quality Alert",
+          "Air Stagnation Advisory",
+          "Beach Hazards Statement"
+        ],
+        "registry_ttl_hours": 2.0,
+        "tornado_upgrade": {
+          "event": "Tornado Warning",
+          "rules": [
+            {
+              "description_contains": "TORNADO EMERGENCY",
+              "name": "Tornado Emergency"
+            },
+            {
+              "description_contains": "PARTICULARLY DANGEROUS SITUATION",
+              "name": "PDS Tornado Warning"
+            }
+          ]
+        }
+      },
+      "schema_version": 1,
+      "zone_sync": {
+        "assets_dir": "assets/nws_zones",
+        "geometry_precision": 5,
+        "geometry_precision_max": 8,
+        "max_retries": 3,
+        "max_workers": 16,
+        "pause_seconds": 0.05,
+        "progress": true,
+        "retry_backoff_seconds": 0.25,
+        "timeout_seconds": 30,
+        "zone_catalog_url_pattern": "https://api.weather.gov/zones/{zone_type}",
+        "zone_detail_url_pattern": "https://api.weather.gov/zones/{zone_type}/{code}",
+        "zone_types": [
+          "forecast",
+          "fire",
+          "public",
+          "county",
+          "marine"
+        ]
+      }
+    },
+    "runtime": {
+      "background_intervals": {
+        "boundary_wait_interval_seconds": 1.0,
+        "ewmrs_consumer_interval_seconds": 1.0,
+        "ewmrs_consumer_seconds": 10,
+        "metar_boundary_minutes": 5,
+        "nexrad_interval_seconds": 0.2,
+        "nexrad_seconds": 5,
+        "nws_interval_seconds": 1.0,
+        "nws_seconds": 120,
+        "wpc_boundary_minutes": 15
+      },
+      "cycle": {
+        "ingest_max_entries": 10,
+        "log_drain_poll_seconds": 1,
+        "max_backlog_cycles": 10,
+        "retry": {
+          "initial_backoff_seconds": 5.0,
+          "max_attempts": 3,
+          "max_backoff_seconds": 30.0
+        },
+        "state_file": {
+          "dir": "DATA_DIR",
+          "name": "runtime/cycle_state.json"
+        }
+      },
+      "goes_coordination": {
+        "pause_ingest_during_render": false,
+        "poll_interval_seconds": 1.0,
+        "poll_seconds": 60,
+        "render_max_offset_minutes": 20.0,
+        "render_pause_poll_interval_seconds": 0.2,
+        "render_pause_poll_seconds": 1.0,
+        "render_task_max_entries": 10,
+        "render_wait_interval_floor_seconds": 0.1,
+        "render_wait_interval_seconds": 1.0,
+        "render_wait_poll_granularity_seconds": 0.2,
+        "render_wait_seconds": 30
+      },
+      "handoff": {
+        "enabled": true
+      },
+      "identity": {
+        "contact": "ewsbackend@gmail.com",
+        "weather_api_accept": "application/geo+json"
+      },
+      "nexrad_coordination": {
+        "pause_ingest_during_primary_activity": false,
+        "pause_max_wait_seconds": 30.0,
+        "pause_poll_interval_seconds": 0.5,
+        "primary_lease_ttl_seconds": 90.0
+      },
+      "profiling": {
+        "perf_tracker": null
+      },
+      "run": {
+        "ctam_module_dir": "ctam_modules",
+        "disable_ctam": false,
+        "disable_ewmrs": false,
+        "disable_goes": false,
+        "disable_metar": false,
+        "disable_nexrad": false,
+        "disable_nws": false,
+        "disable_polygon_expansion": false,
+        "disable_stormprob": false,
+        "disable_tracking": false,
+        "disable_wpc": false,
+        "lat_limits": [
+          20,
+          55
+        ],
+        "lon_limits": [
+          230,
+          300
+        ],
+        "mrms_core_only": false,
+        "profile": false
+      },
+      "schema_version": 1,
+      "supervisor": {
+        "base_backoff_seconds": 1.0,
+        "check_ticks": 30,
+        "health_file": {
+          "dir": "DATA_DIR",
+          "name": "runtime/accessory_health.json"
+        },
+        "max_backoff_seconds": 30.0,
+        "max_restarts": 5,
+        "nexrad_heartbeat_file": {
+          "dir": "DATA_DIR",
+          "name": "runtime/nexrad_ingest_heartbeat.json"
+        },
+        "restart_window_seconds": 60.0,
+        "stop_join_timeout_seconds": 5,
+        "stop_kill_join_timeout_seconds": 1,
+        "tick_seconds": 0.5
+      }
+    },
+    "scheduler": {
+      "scheduler": {
+        "modifier_lookup_max_entries": 20,
+        "s3_lookback_hours": 2,
+        "slow_check_log_threshold_ms": 2000
+      },
+      "schema_version": 1
+    },
+    "synoptic_rap": {
+      "rap": {
+        "bucket": "noaa-rap-pds",
+        "date_format": "%Y%m%d",
+        "dir_pattern": "rap.{date}",
+        "file_pattern": "rap.t{hour:02d}z.awp130pgrbf00.grib2",
+        "filename_regex": "^RAP\\.(?P<date>\\d{8})-(?P<hour>\\d{2})z\\.awp130pgrbf00\\.grib2$",
+        "local_file_pattern": "RAP.{date}-{hour:02d}z.awp130pgrbf00.grib2",
+        "lookback_step_hours": 1,
+        "max_age_minutes": 180,
+        "max_files": 3,
+        "nomads_base_url": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rap/prod",
+        "nomads_chunk_size_bytes": 1048576,
+        "nomads_timeout_seconds": 120
+      },
+      "schema_version": 1
+    },
+    "wpc": {
+      "schema_version": 1,
+      "wpc": {
+        "cleanup_glob": "wpc_sfc_*.geojson",
+        "cleanup_max_age_minutes": 360,
+        "coded_sfc_base_url": "https://ftp.wpc.ncep.noaa.gov/coded_sfc",
+        "date_format": "%Y%m%d",
+        "fallback_geojson_color": "#000000",
+        "feature_types": {
+          "COLD": {
+            "color": "#0000FF",
+            "name": "Cold Front"
+          },
+          "HIGH": {
+            "color": "#0000FF",
+            "name": "High Pressure"
+          },
+          "LOW": {
+            "color": "#FF0000",
+            "name": "Low Pressure"
+          },
+          "OCFNT": {
+            "color": "#800080",
+            "name": "Occluded Front"
+          },
+          "STNRY": {
+            "color": "#800080",
+            "name": "Stationary Front"
+          },
+          "TROF": {
+            "color": "#8B4513",
+            "name": "Trough"
+          },
+          "WARM": {
+            "color": "#FF0000",
+            "name": "Warm Front"
+          }
+        },
+        "http_timeout_seconds": 30,
+        "latest_filename": "latest.geojson",
+        "output_filename_pattern": "wpc_sfc_{date}-{hour:02d}0000.geojson",
+        "previous_analysis_lookback_hours": 3,
+        "remote_filename_pattern": "codsus{hour:02d}_hr",
+        "surface_filename_prefix": "wpc_sfc_",
+        "surface_filename_suffix": ".geojson",
+        "update_interval_hours": 3,
+        "verify_tls": true
+      }
+    }
+  },
+  "cases": [
+    {
+      "label": "empty",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [],
+      "valid": true
+    },
+    {
+      "label": "new",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_NewField_01.25"
+      ],
+      "valid": true
+    },
+    {
+      "label": "protected",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_ProbSevere"
+      ],
+      "valid": true
+    },
+    {
+      "label": "negative",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_Reflectivity_-5C_00.50"
+      ],
+      "valid": true
+    },
+    {
+      "label": "duplicate",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MESH_00.50",
+        "MRMS_MESH_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "collision",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MESH_00.50",
+        "MRMS_mesh_01.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "reserved_collision",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_PrecipFlag_01.00"
+      ],
+      "valid": false
+    },
+    {
+      "label": "prefix",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MRMS_MESH_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "traversal",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_../x_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "newline",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MESH_00.50\n"
+      ],
+      "valid": false
+    },
+    {
+      "label": "length",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "override",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        {
+          "product": "MESH_00.50",
+          "enabled": false
+        }
+      ],
+      "valid": false
+    },
+    {
+      "label": "removed_bucket",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "bucket"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_path_patterns",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "path_patterns"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_check_products",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "check_products"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_membership_lists",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "membership_lists"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_outdir",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "outdir"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_https_base_url",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "base_url"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "removed_https_probsevere_url",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "probsevere_url"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "removed_https_directory_map",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "directory_map"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "removed_https_directory_split_token",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "directory_split_token"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "zero_concurrency",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "max_concurrency"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "large_concurrency",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "max_concurrency"
+      ],
+      "value": 65,
+      "valid": false
+    },
+    {
+      "label": "fraction_concurrency",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "max_concurrency"
+      ],
+      "value": 1.5,
+      "valid": false
+    },
+    {
+      "label": "zero_deadline",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "optional_timeout_seconds"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "large_deadline",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "optional_timeout_seconds"
+      ],
+      "value": 3601,
+      "valid": false
+    },
+    {
+      "label": "zero_retention",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "cleanup_max_age_minutes"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "zero_chunk",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "decompress_chunk_size_bytes"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "integration_selector",
+      "name": "integration",
+      "path": [
+        "stats_datasets",
+        0,
+        "product"
+      ],
+      "value": "NewField_01.25",
+      "valid": true
+    },
+    {
+      "label": "integration_prefix",
+      "name": "integration",
+      "path": [
+        "stats_datasets",
+        0,
+        "product"
+      ],
+      "value": "MRMS_MESH_00.50",
+      "valid": false
+    },
+    {
+      "label": "integration_both",
+      "name": "integration",
+      "path": [
+        "stats_datasets",
+        0,
+        "filepath"
+      ],
+      "value": "MRMS_MESH_DIR",
+      "valid": false
+    },
+    {
+      "label": "ewmrs_render_selector",
+      "name": "ewmrs_render",
+      "path": [
+        "mrms_layers",
+        0,
+        "product"
+      ],
+      "value": "NewField_01.25",
+      "valid": true
+    },
+    {
+      "label": "ewmrs_render_prefix",
+      "name": "ewmrs_render",
+      "path": [
+        "mrms_layers",
+        0,
+        "product"
+      ],
+      "value": "MRMS_MESH_00.50",
+      "valid": false
+    },
+    {
+      "label": "ewmrs_render_both",
+      "name": "ewmrs_render",
+      "path": [
+        "mrms_layers",
+        0,
+        "filepath"
+      ],
+      "value": "MRMS_MESH_DIR",
+      "valid": false
+    },
+    {
+      "label": "stormprob_True",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": true,
+      "valid": true
+    },
+    {
+      "label": "stormprob_False",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": false,
+      "valid": true
+    },
+    {
+      "label": "stormprob_false",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": "false",
+      "valid": false
+    },
+    {
+      "label": "stormprob_1",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": 1,
+      "valid": false
+    }
+  ],
+  "phase6_cli_contract": [
+    {
+      "argv": [
+        "--disable-stormprob"
+      ],
+      "disable_stormprob": true
+    },
+    {
+      "argv": [
+        "--no-disable-stormprob"
+      ],
+      "disable_stormprob": false
+    }
+  ]
+}

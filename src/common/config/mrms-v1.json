@@ -1,0 +1,231 @@
+{
+  "mrms": {
+    "bucket": "noaa-mrms-pds",
+    "decompress_chunk_size_bytes": 1048576,
+    "remove_old_files": true,
+    "cleanup_max_age_minutes": 60,
+    "path_patterns": {
+      "s3_prefix": "{region}/{modifier}/{YYYYMMDD}/",
+      "s3_prefix_no_modifier": "{region}/{YYYYMMDD}/",
+      "filename_prefix": "MRMS_{modifier}_{YYYYMMDD}-{HH}",
+      "probsevere_start_after": "MRMS_PROBSEVERE_{YYYYMMDD}_{HH}",
+      "probsevere_start_after_lookback_hours": 1,
+      "filename_start_after_minute": "MRMS_{modifier}_{YYYYMMDD}-{HHMM}",
+      "probsevere_start_after_minute": "MRMS_PROBSEVERE_{YYYYMMDD}_{HHMM}"
+    },
+    "ncep_https": {
+      "base_url": "https://mrms.ncep.noaa.gov/data/2D",
+      "probsevere_url": "https://mrms.ncep.noaa.gov/data/ProbSevere",
+      "sync_timeout_seconds": 10,
+      "match_window_seconds": 120,
+      "download_chunk_size_bytes": 8192,
+      "directory_split_token": "_00.",
+      "directory_map": {
+        "EchoTop_18_00.50": "EchoTop_18",
+        "EchoTop_30_00.50": "EchoTop_30",
+        "MESH_00.50": "MESH",
+        "NLDN_CG_001min_AvgDensity_00.00": "NLDN_CG_001min_AvgDensity",
+        "PrecipRate_00.00": "PrecipRate",
+        "RadarOnly_QPE_01H_00.00": "RadarOnly_QPE_01H",
+        "MergedAzShear_0-2kmAGL_00.50": "MergedAzShear_0-2kmAGL",
+        "MergedAzShear_3-6kmAGL_00.50": "MergedAzShear_3-6kmAGL",
+        "VIL_Density_00.50": "VIL_Density",
+        "VIL_00.50": "VIL",
+        "MergedRhoHV_00.50": "MergedRhoHV",
+        "PrecipFlag_00.00": "PrecipFlag",
+        "MergedReflectivityAtLowestAltitude_00.50": "MergedReflectivityAtLowestAltitude",
+        "MergedReflectivityQCComposite_00.50": "MergedReflectivityQCComposite",
+        "VII_00.50": "VII"
+      }
+    },
+    "products": [
+      {
+        "region": "CONUS",
+        "product": "EchoTop_18_00.50",
+        "outdir": "MRMS_ECHOTOP18_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "EchoTop_30_00.50",
+        "outdir": "MRMS_ECHOTOP30_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "EchoTop_50_00.50",
+        "outdir": "MRMS_ECHOTOP50_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "RadarQualityIndex_00.00",
+        "outdir": "MRMS_RQI_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MESH_00.50",
+        "outdir": "MRMS_MESH_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "NLDN_CG_001min_AvgDensity_00.00",
+        "outdir": "MRMS_NLDN_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "PrecipRate_00.00",
+        "outdir": "MRMS_PRECIPRATE_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "RadarOnly_QPE_01H_00.00",
+        "outdir": "MRMS_QPE_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedAzShear_0-2kmAGL_00.50",
+        "outdir": "MRMS_AZSHEARLOW_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedAzShear_3-6kmAGL_00.50",
+        "outdir": "MRMS_AZSHEARMID_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "VIL_Density_00.50",
+        "outdir": "MRMS_DVIL_DIR"
+      },
+      {
+        "region": "ProbSevere",
+        "product": null,
+        "outdir": "MRMS_PROBSEVERE_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedRhoHV_00.50",
+        "outdir": "MRMS_RHOHV_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "PrecipFlag_00.00",
+        "outdir": "MRMS_PRECIPTYP_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedReflectivityAtLowestAltitude_00.50",
+        "outdir": "MRMS_RALA_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedReflectivityQCComposite_00.50",
+        "outdir": "MRMS_COMPOSITE_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "VII_00.50",
+        "outdir": "MRMS_VII_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "VIL_00.50",
+        "outdir": "MRMS_VIL_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "Reflectivity_0C_00.50",
+        "outdir": "MRMS_REF_0C_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "Reflectivity_-5C_00.50",
+        "outdir": "MRMS_REFM5C_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "Reflectivity_-15C_00.50",
+        "outdir": "MRMS_REFM15C_DIR"
+      }
+    ],
+    "check_products": [
+      {
+        "region": "CONUS",
+        "product": "EchoTop_18_00.50",
+        "outdir": "MRMS_ECHOTOP18_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "EchoTop_30_00.50",
+        "outdir": "MRMS_ECHOTOP30_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "EchoTop_50_00.50",
+        "outdir": "MRMS_ECHOTOP50_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedAzShear_0-2kmAGL_00.50",
+        "outdir": "MRMS_AZSHEARLOW_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedAzShear_3-6kmAGL_00.50",
+        "outdir": "MRMS_AZSHEARMID_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "VIL_Density_00.50",
+        "outdir": "MRMS_DVIL_DIR"
+      },
+      {
+        "region": "ProbSevere",
+        "product": null,
+        "outdir": "MRMS_PROBSEVERE_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "PrecipFlag_00.00",
+        "outdir": "MRMS_PRECIPTYP_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "MergedReflectivityQCComposite_00.50",
+        "outdir": "MRMS_COMPOSITE_DIR"
+      },
+      {
+        "region": "CONUS",
+        "product": "VII_00.50",
+        "outdir": "MRMS_VII_DIR"
+      }
+    ],
+    "membership_lists": {
+      "detection": [
+        "MergedReflectivityQCComposite_00.50",
+        "PrecipFlag_00.00",
+        null
+      ]
+    }
+  },
+  "paths": {
+    "MRMS_ECHOTOP18_DIR": "MRMS_EchoTop18",
+    "MRMS_ECHOTOP30_DIR": "MRMS_EchoTop30",
+    "MRMS_ECHOTOP50_DIR": "MRMS_EchoTop50",
+    "MRMS_RQI_DIR": "MRMS_RadarQualityIndex",
+    "MRMS_MESH_DIR": "MRMS_MESH",
+    "MRMS_NLDN_DIR": "MRMS_NLDN_CG_001min_AvgDensity",
+    "MRMS_PRECIPRATE_DIR": "MRMS_PrecipRate",
+    "MRMS_QPE_DIR": "MRMS_QPE",
+    "MRMS_AZSHEARLOW_DIR": "MRMS_MergedAzShear_0-2kmAGL",
+    "MRMS_AZSHEARMID_DIR": "MRMS_MergedAzShear_3-6kmAGL",
+    "MRMS_DVIL_DIR": "MRMS_VILDensity",
+    "MRMS_PROBSEVERE_DIR": "MRMS_ProbSevere",
+    "MRMS_RHOHV_DIR": "MRMS_MergedRhoHV",
+    "MRMS_PRECIPTYP_DIR": "MRMS_PrecipFlag",
+    "MRMS_RALA_DIR": "MRMS_ReflectivityAtLowestAltitude",
+    "MRMS_COMPOSITE_DIR": "MRMS_MergedReflectivityQC",
+    "MRMS_VII_DIR": "MRMS_VII",
+    "MRMS_VIL_DIR": "MRMS_VIL",
+    "MRMS_REF_0C_DIR": "MRMS_ReflectivityAt0C",
+    "MRMS_REFM5C_DIR": "MRMS_ReflectivityAtM5C",
+    "MRMS_REFM15C_DIR": "MRMS_ReflectivityAtM15C"
+  }
+}

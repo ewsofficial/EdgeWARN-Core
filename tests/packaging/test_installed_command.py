@@ -175,3 +175,23 @@ def test_installed_wheel_loads_and_runs_stormprob_models(installed_command):
         pytest.skip("onnxruntime is not installed in this test environment")
     assert probe.returncode == 0, probe.stderr
     assert "models/stormprob" in probe.stdout
+
+
+def test_installed_mrms_migration_uses_release_schemas(installed_command):
+    root, python, edgewarn = installed_command
+    config = root / "migration-v1-config"
+    shutil.copytree(REPO_ROOT / "config", config)
+    # Simulate an old operator tree which has no v2 schema.
+    (config / "schema/ingest.v2.schema.json").unlink()
+    before = {str(p.relative_to(config)): p.read_bytes() for p in config.rglob('*') if p.is_file()}
+    result = subprocess.run(
+        [str(edgewarn), "migrate-mrms", "--config-path", str(config),
+         "--base-dir", str(root / "migration-runtime")],
+        cwd=root, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    report = json.loads(result.stdout)
+    assert report['conflicts'] == []
+    assert sum(p['action'] == 'rename' for p in report['paths']) == 10
+    assert not (root / 'migration-runtime').exists()
+    assert before == {str(p.relative_to(config)): p.read_bytes() for p in config.rglob('*') if p.is_file()}

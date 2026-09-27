@@ -28,9 +28,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "filepath", "key", "method"],
+        "required": ["name", "key", "method"],
         "properties": {
           "name": { "type": "string" },
+          "product": { "type": "string" },
           "filepath": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
           "key": { "type": "string" },
           "method": { "type": "string", "enum": ["max", "percentile"] },

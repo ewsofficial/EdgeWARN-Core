@@ -1,3 +1,4 @@
+import { validateMrmsDocument, MIGRATION_HINT } from './mrms-products.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -294,7 +295,8 @@ function dottedPath(pathParts) {
   return parts.join('.') || null;
 }
 
-function validateDocument(name, document, schemaPath) {
+export function validateDocument(name, document, schemaPath) {
+  if (name === 'ingest' && document.schema_version === 2) schemaPath = path.join(path.dirname(schemaPath), 'ingest.v2.schema.json');
   if (!fs.existsSync(schemaPath)) {
     throw new ConfigError(`${name}.yaml`, null, `missing schema file: ${schemaPath}`);
   }
@@ -311,8 +313,10 @@ function validateDocument(name, document, schemaPath) {
       return aKey.join(' ').localeCompare(bKey.join(' '));
     });
     const [firstPath, firstMessage] = errors[0];
-    throw new ConfigError(`${name}.yaml`, dottedPath(firstPath), firstMessage);
+    throw new ConfigError(`${name}.yaml`, dottedPath(firstPath), firstMessage + (name === 'ingest' ? ` ${MIGRATION_HINT}` : ''));
   }
+  try { validateMrmsDocument(name, document); }
+  catch (error) { throw new ConfigError(`${name}.yaml`, null, error.message); }
 }
 
 export function resetCache() {

@@ -23,6 +23,7 @@
         "lat_limits": { "type": "array", "items": { "type": "number", "minimum": -90, "maximum": 90 }, "minItems": 2, "maxItems": 2 },
         "lon_limits": { "type": "array", "items": { "type": "number", "minimum": -180, "maximum": 360 }, "minItems": 2, "maxItems": 2 },
         "profile": { "type": "boolean" },
+        "disable_stormprob": { "type": "boolean", "description": "Prepared for phase 6; runtime enforcement is not yet implemented." },
         "disable_ctam": { "type": "boolean" },
         "disable_tracking": { "type": "boolean" },
         "disable_polygon_expansion": { "type": "boolean" },

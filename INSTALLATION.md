@@ -506,3 +506,11 @@ python -m pytest
 
 The default command is the deterministic offline correctness suite. Performance
 benchmarks and live compatibility probes must be selected explicitly.
+
+### Preview the future MRMS configuration migration
+
+`edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime`
+prints an offline JSON migration report without changing files. The current
+release retains its v1 default catalog; apply/resume/rollback and v2 worker
+activation are deferred. See [phase 3 migration planning](docs/core/configurable-mrms-phase3.md)
+before using converted development configurations.

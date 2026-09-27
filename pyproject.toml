@@ -53,6 +53,7 @@ namespaces = true
 
 [tool.setuptools.package-data]
 EWMRS = ["*.json"]
+"common.config" = ["mrms-v1.json"]
 "common.ingest.mrms" = ["core-contract.json"]
 
 # StormProb is intentionally kept outside the Python package in the source
@@ -60,4 +61,6 @@ EWMRS = ["*.json"]
 # existing ``models/stormprob`` layout under the active environment prefix so
 # the same artifact works from a wheel and from the container image.
 [tool.setuptools.data-files]
+"share/edgewarn/config" = ["config/*.yaml"]
+"share/edgewarn/config/schema" = ["config/schema/*.json"]
 "models/stormprob" = ["models/stormprob/*"]

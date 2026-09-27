@@ -131,6 +131,11 @@ def _find_config_root_by_walking_up() -> Path:
     )
 
 
+def release_config_root() -> Path:
+    """Locate shipped schemas for offline migration, ignoring operator overlays."""
+    return _find_config_root_by_walking_up()
+
+
 def _resolve_given_root(raw: str | os.PathLike[str], invalid_message: str) -> Path:
     """Resolve and validate an explicitly named config root.
 
@@ -417,6 +422,10 @@ def _walk(schema: dict[str, Any], value: Any, path: list[Any], errors: list[tupl
 
 
 def _validate(name: str, document: dict[str, Any], schema_path: Path) -> None:
+    from common.config.mrms_validation import MIGRATION_HINT, validate_mrms_document
+
+    if name == "ingest" and document.get("schema_version") == 2:
+        schema_path = schema_path.with_name("ingest.v2.schema.json")
     if not schema_path.is_file():
         raise ConfigError(str(schema_path), None, "schema file not found")
 
@@ -429,7 +438,13 @@ def _validate(name: str, document: dict[str, Any], schema_path: Path) -> None:
     _walk(schema, document, [], errors)
     if errors:
         first_path, first_message = min(errors, key=lambda e: (len(e[0]), [str(p) for p in e[0]]))
+        if name == "ingest":
+            first_message += " " + MIGRATION_HINT
         raise ConfigError(f"{name}.yaml", _dotted_path(first_path) or None, first_message)
+    try:
+        validate_mrms_document(name, document)
+    except ValueError as exc:
+        raise ConfigError(f"{name}.yaml", None, str(exc)) from exc
 
 
 def validate_document(

@@ -46,7 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
     from edgewarn_cli.run import add_run_parser
     from edgewarn_cli.configure import add_configure_parser
     from edgewarn_cli.nws_zones import add_nws_zones_parser
+    from edgewarn_cli.migrate_mrms import add_migrate_mrms_parser
 
+    add_migrate_mrms_parser(subparsers)
     add_run_parser(subparsers)
     add_configure_parser(subparsers)
     add_nws_zones_parser(subparsers)

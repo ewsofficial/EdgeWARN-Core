@@ -40,10 +40,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "colormap_key", "filepath", "outdir"],
+        "required": ["name", "colormap_key", "outdir"],
         "properties": {
           "name": { "type": "string" },
           "colormap_key": { "type": "string" },
+          "product": { "type": "string" },
           "filepath": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
           "outdir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
           "required": { "type": "boolean" }

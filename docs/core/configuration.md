@@ -106,3 +106,10 @@ or write/rollback failure, and `2` means usage or configuration validation
 failure. Production containers mount this directory read-only; only the
 administrative `edgewarn configure` container should mount it read-write. See
 `INSTALLATION.md` and `compose.yaml` for the complete container commands.
+
+### Configurable MRMS development schemas
+
+The phase 3 v2 validators and read-only `edgewarn migrate-mrms` report are available.
+The shipped ingest catalog remains v1 until the coordinated runtime release.
+See [phase 3 validation and migration planning](configurable-mrms-phase3.md) for
+product selectors, bounds, conversion rules, and deferred runtime behavior.

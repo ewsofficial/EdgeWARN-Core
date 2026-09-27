@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingest.yaml",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mrms",
+    "goes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "mrms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decompress_chunk_size_bytes",
+        "remove_old_files",
+        "cleanup_max_age_minutes",
+        "ncep_https",
+        "products",
+        "downloads"
+      ],
+      "properties": {
+        "decompress_chunk_size_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "remove_old_files": {
+          "type": "boolean"
+        },
+        "cleanup_max_age_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ncep_https": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sync_timeout_seconds",
+            "match_window_seconds",
+            "download_chunk_size_bytes"
+          ],
+          "properties": {
+            "sync_timeout_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "match_window_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "download_chunk_size_bytes": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "products": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "downloads": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_concurrency",
+            "optional_timeout_seconds"
+          ],
+          "properties": {
+            "max_concurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "optional_timeout_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 3600
+            }
+          }
+        }
+      }
+    },
+    "goes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bucket",
+        "abi_product",
+        "glm_product",
+        "glm_outdir",
+        "max_files_per_spec",
+        "max_entries",
+        "hour_lookback",
+        "cleanup_max_age_minutes",
+        "bucket_path_pattern",
+        "filename_matcher_template",
+        "abi_channels"
+      ],
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "abi_product": {
+          "type": "string"
+        },
+        "glm_product": {
+          "type": "string"
+        },
+        "glm_outdir": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "max_files_per_spec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_entries": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "hour_lookback": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cleanup_max_age_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bucket_path_pattern": {
+          "type": "string"
+        },
+        "filename_matcher_template": {
+          "type": "string"
+        },
+        "abi_channels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "outdir"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^C[0-9]{2}$"
+              },
+              "name": {
+                "type": "string"
+              },
+              "outdir": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
