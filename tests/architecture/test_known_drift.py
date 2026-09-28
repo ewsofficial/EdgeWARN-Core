@@ -2240,6 +2240,9 @@ async def _record_download_read_sizes(https_client, dt, outdir):
             return False
 
     class _Session:
+        def __init__(self, *, timeout):
+            assert timeout.total == https_client.ncep_sync_timeout_seconds()
+
         async def __aenter__(self):
             return self
 
@@ -2347,6 +2350,9 @@ def test_ncep_fuzzy_match_window_widens_and_narrows_with_the_catalog(tmp_path):
         requested = []
 
         class _Session:
+            def __init__(self, *, timeout):
+                assert timeout.total == https_client.ncep_sync_timeout_seconds()
+
             async def __aenter__(self):
                 return self
 

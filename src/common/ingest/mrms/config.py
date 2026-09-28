@@ -4,12 +4,30 @@ from pathlib import Path
 
 import util.file as fs
 from common.config.loader import ConfigError, load_config
+from common.config.mrms_products import parse_product_id
+from common.ingest.mrms import source
+from common.ingest.mrms.registry import build_registry
 
 _CONFIG_NAME = "ingest"
 
 
 def _catalog():
-    return load_config(_CONFIG_NAME)
+    return load_config(_CONFIG_NAME, config_dir=fs.MRMS_CONFIG_DIR)
+
+
+def get_registry():
+    """Resolve v2 explicitly; v1 remains available until the coordinated release."""
+    catalog = _catalog()
+    if catalog["schema_version"] != 2:
+        return None
+    registry = build_registry(catalog["mrms"], fs.BASE_DIR.expanduser().resolve())
+    if fs.MRMS_REGISTRY is None or fs.MRMS_REGISTRY.fingerprint != registry.fingerprint:
+        fs.bind_mrms_paths(registry)
+    return registry
+
+
+def _source(modifier):
+    return source.source_for(parse_product_id("MRMS_" + (modifier or "ProbSevere")))
 
 
 def _resolve_outdir(attribute_name):
@@ -31,6 +49,8 @@ def _resolve_outdir(attribute_name):
 
 def mrms_bucket() -> str:
     """The S3 bucket MRMS products are read from."""
+    if _catalog()["schema_version"] == 2:
+        return source.MRMS_BUCKET
     return _catalog()["mrms"]["bucket"]
 
 
@@ -82,6 +102,8 @@ def mrms_s3_prefix(dt, region, modifier) -> str:
     substituting empty would yield a doubled slash, which S3 treats as a
     different prefix and would silently match nothing.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(modifier).s3_prefix(dt)
     patterns = _path_patterns()
     if modifier is None:
         return _format_path_pattern(patterns["s3_prefix_no_modifier"], dt, region=region)
@@ -94,6 +116,8 @@ def mrms_filename_prefix(dt, modifier) -> str:
     This is the whole reason the standard products need no ``StartAfter`` marker:
     S3 prefix filtering already excludes every other hour.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(modifier).filename_prefix(dt)
     return _format_path_pattern(_path_patterns()["filename_prefix"], dt, modifier=modifier)
 
 
@@ -112,6 +136,8 @@ def mrms_probsevere_start_after(dt, *, lookback_hours=None) -> str:
     scheduler overrides it because its window is its own tunable, and passes 0
     when it has already shifted ``dt`` itself.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(None).filename_start_after(dt, lookback_hours=1 if lookback_hours is None else lookback_hours, minute=False)
     patterns = _path_patterns()
     if lookback_hours is None:
         lookback_hours = patterns["probsevere_start_after_lookback_hours"]
@@ -127,6 +153,8 @@ def mrms_filename_start_after(dt, modifier) -> str:
     resumes from a known file has to carry the minute or it would re-list the
     whole hour.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(modifier).filename_start_after(dt)
     return _format_path_pattern(
         _path_patterns()["filename_start_after_minute"], dt, modifier=modifier
     )
@@ -139,6 +167,8 @@ def mrms_probsevere_start_after_minute(dt) -> str:
     like :func:`mrms_filename_start_after` it applies no lookback -- the caller
     already has the exact timestamp it wants to resume after.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(None).filename_start_after(dt)
     return _format_path_pattern(_path_patterns()["probsevere_start_after_minute"], dt)
 
 
@@ -160,6 +190,8 @@ def ncep_base_url() -> str:
     MRMS package before ``get_args()`` exports ``EDGEWARN_CONFIG_DIR``, so a
     module-scope binding put this out of reach of ``--config-dir``.
     """
+    if _catalog()["schema_version"] == 2:
+        return source.NCEP_BASE_URL
     return _ncep_https()["base_url"]
 
 
@@ -170,6 +202,8 @@ def ncep_probsevere_url() -> str:
     a product directory inside it, so this is a separate key and not a suffix
     appended to the base URL.
     """
+    if _catalog()["schema_version"] == 2:
+        return source.NCEP_PROBSEVERE_URL
     return _ncep_https()["probsevere_url"]
 
 
@@ -202,6 +236,8 @@ def ncep_directory_split_token() -> str:
 
 def ncep_directory_map():
     """S3 modifier to NCEP directory name, for the names that do not derive."""
+    if _catalog()["schema_version"] == 2:
+        return source.HTTPS_DIRECTORY_EXCEPTIONS
     return _ncep_https()["directory_map"]
 
 
@@ -286,11 +322,17 @@ def _catalog_triples(key):
 
 def get_mrms_modifiers():
     """The full MRMS ingest catalog as (region, product, outdir) triples."""
+    registry = get_registry()
+    if registry is not None:
+        return list(registry.get_mrms_modifiers())
     return _catalog_triples("products")
 
 
 def get_check_modifiers():
     """The readiness-check subset of :func:`get_mrms_modifiers`."""
+    registry = get_registry()
+    if registry is not None:
+        return list(registry.get_check_modifiers())
     return _catalog_triples("check_products")
 
 

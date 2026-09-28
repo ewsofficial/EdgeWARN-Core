@@ -5,6 +5,52 @@ import heapq
 import asyncio
 import os
 import sys
+from types import MappingProxyType
+
+MRMS_REGISTRY = None
+MRMS_CONFIG_DIR = None
+MRMS_PATHS = MappingProxyType({})
+_MRMS_ALIASES = MappingProxyType({})
+
+
+def __getattr__(name):
+    if name in MRMS_PATHS:
+        return MRMS_PATHS[name]
+    if name in _MRMS_ALIASES:
+        return _MRMS_ALIASES[name]
+    raise AttributeError(f"util.file has no enabled path {name!r}")
+
+
+def verify_mrms_containment(registry):
+    base = registry.base_dir.resolve()
+    data = registry.base_dir / "data"
+    if not data.resolve().is_relative_to(base):
+        raise ValueError(f"MRMS data directory escapes base directory: {data}")
+    for spec in registry.products:
+        if not spec.directory.resolve().is_relative_to(data.resolve()):
+            raise ValueError(f"MRMS product directory escapes data directory: {spec.directory}")
+
+
+def bind_mrms_paths(registry, *, expected_fingerprint=None):
+    """Bind without creating directories; children may verify a parent generation."""
+    global MRMS_REGISTRY, MRMS_PATHS, _MRMS_ALIASES
+    from common.ingest.mrms.core_contract import LEGACY_ALIASES
+    if expected_fingerprint is not None and registry.fingerprint != expected_fingerprint:
+        raise ValueError("MRMS registry fingerprint differs from parent generation")
+    verify_mrms_containment(registry)
+    for name in LEGACY_ALIASES:
+        globals().pop(name, None)
+    MRMS_REGISTRY = registry
+    MRMS_PATHS = registry.paths_by_name()
+    _MRMS_ALIASES = registry.legacy_paths()
+
+
+def ensure_mrms_directories(registry):
+    """Explicit producer startup hook: call only after complete preflight."""
+    verify_mrms_containment(registry)
+    for spec in registry.products:
+        spec.directory.mkdir(parents=True, exist_ok=True)
+    verify_mrms_containment(registry)
 
 from util.file_config import cleanup_max_age_minutes, cleanup_max_files
 from util.io import IOManager
@@ -194,9 +240,27 @@ def _define_paths(base_path, config_dir=None):
     NEXRAD_LEVEL2_MANIFEST_DIR = NEXRAD_LEVEL2_DIR / "manifests"
 
 
-def initialize_filesystem(base_dir=None):
-    if base_dir:
-        _define_paths(Path(base_dir))
+def initialize_filesystem(base_dir=None, *, config_dir=None, expected_mrms_fingerprint=None):
+    """Rebind paths without creating runtime directories or starting workers."""
+    global MRMS_REGISTRY, MRMS_PATHS, _MRMS_ALIASES, MRMS_CONFIG_DIR
+    from common.config.loader import load_config
+    from common.ingest.mrms.registry import build_registry
+    catalog = load_config("ingest", config_dir=config_dir)
+    base = Path(base_dir or BASE_DIR).expanduser().resolve()
+    registry = build_registry(catalog["mrms"], base) if catalog["schema_version"] == 2 else None
+    if expected_mrms_fingerprint is not None and (
+        registry is None or registry.fingerprint != expected_mrms_fingerprint
+    ):
+        raise ValueError("MRMS registry fingerprint differs from parent generation")
+    if registry is not None:
+        verify_mrms_containment(registry)
+    _define_paths(base, config_dir=config_dir)
+    MRMS_CONFIG_DIR = config_dir
+    MRMS_REGISTRY = None
+    MRMS_PATHS = MappingProxyType({})
+    _MRMS_ALIASES = MappingProxyType({})
+    if registry is not None:
+        bind_mrms_paths(registry, expected_fingerprint=expected_mrms_fingerprint)
 
 
 # Phase one of base-directory resolution. Binding 113 path globals is a module-

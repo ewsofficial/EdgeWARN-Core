@@ -371,6 +371,17 @@ def run_primary_cycle_once(
         "errors": {},
     })
 
+    # Freeze the producer generation for a spawned Core worker. Phase 6 adds
+    # complete dependency preflight before this process orchestration begins.
+    from common.ingest.mrms.config import get_registry
+    registry = get_registry()
+    if registry is not None:
+        shared_state["mrms_registry"] = {
+            "base_dir": str(registry.base_dir),
+            "config_dir": str(config.config_dir) if config.config_dir else None,
+            "fingerprint": registry.fingerprint,
+        }
+
     # Resolved in the parent so the spawned worker inherits one frozen, already
     # validated object instead of re-reading and re-validating the YAML.
     detection_config = DetectionConfig.from_yaml(

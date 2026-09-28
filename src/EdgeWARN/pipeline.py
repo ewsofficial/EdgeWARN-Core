@@ -240,6 +240,13 @@ def edgewarn_cycle_worker(
     perf_tracker.start("Total Pipeline")
 
     try:
+        registry_generation = shared_state.get("mrms_registry")
+        if registry_generation is not None:
+            fs.initialize_filesystem(
+                registry_generation["base_dir"],
+                config_dir=registry_generation["config_dir"],
+                expected_mrms_fingerprint=registry_generation["fingerprint"],
+            )
         log(f"INFO: EdgeWARN worker waiting for detection inputs for {dt}")
         detection_ready_event.wait()
 

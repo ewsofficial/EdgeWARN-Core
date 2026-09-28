@@ -20,9 +20,10 @@ def _get_unsigned_s3_client():
     return boto3.client('s3', config=Config(signature_version=UNSIGNED))
 
 class FileFinder:
-    __slots__ = ("dt", "bucket", "max_entries", "io_manager", "client", "paginator")
+    __slots__ = ("dt", "bucket", "max_entries", "io_manager", "client", "paginator", "raise_errors")
 
-    def __init__(self, dt, bucket, max_entries, io_manager, client=None):
+    def __init__(self, dt, bucket, max_entries, io_manager, client=None, *, raise_errors=False):
+        self.raise_errors = raise_errors
         self.dt = dt
         self.bucket = bucket
         self.max_entries = max_entries  # Maximum number of entries to return
@@ -100,6 +101,8 @@ class FileFinder:
             return [(path, ts) for ts, path in top_files[:self.max_entries]]
             
         except Exception as e:
+            if self.raise_errors:
+                raise
             # Log error and return empty list
             self.io_manager.write_error(f"Error looking up files: {e}")
             return []

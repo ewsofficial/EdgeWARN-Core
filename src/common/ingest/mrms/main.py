@@ -1,5 +1,6 @@
 from common.ingest.mrms.config import (
     get_mrms_modifiers,
+    get_registry,
     get_goes_modifiers,
     mrms_cleanup_max_age_minutes,
     mrms_remove_old_files,
@@ -47,12 +48,33 @@ def _resolve_ingest_args(max_entries, remove_old_files):
 
 
 def get_detection_modifiers():
+    registry = get_registry()
+    if registry is not None:
+        return [p.source_modifier for p in registry.for_phase("detection")]
     return list(load_config("ingest")["mrms"]["membership_lists"]["detection"])
 
 
 def get_integration_modifiers():
     detection_mods = set(get_detection_modifiers())
     return [mod for _, mod, _ in get_mrms_modifiers() if mod not in detection_mods]
+
+
+def get_enrichment_modifiers():
+    """Enabled statistics inputs, separate from download-only additions."""
+    registry = get_registry()
+    if registry is None:
+        return get_integration_modifiers()
+    from common.ingest.mrms.core_contract import LEGACY_ALIASES
+    products = {
+        entry.get("product") or LEGACY_ALIASES.get(entry.get("filepath"))
+        for entry in load_config("integration", config_dir=fs.MRMS_CONFIG_DIR)["stats_datasets"]
+    }
+    return [p.source_modifier for p in registry.products if not p.protected and p.product_id in products]
+
+
+def get_other_modifiers():
+    enrichment = set(get_enrichment_modifiers())
+    return [p for p in get_integration_modifiers() if p not in enrichment]
 
 
 def get_ewmrs_modifiers():
@@ -160,13 +182,15 @@ async def download_ewmrs_files_async(dt, max_entries=None, remove_old_files=None
 
 def download_all_files(dt, max_entries=None, remove_old_files=None):
     max_entries, remove_old_files = _resolve_ingest_args(max_entries, remove_old_files)
-    run_with_async_fallback(
+    def sync_fallback():
+        result = download_all_files_sync_fallback(dt, max_entries)
+        download_all_goes_files(dt)
+        return result
+
+    return run_with_async_fallback(
         io_manager=io_manager,
         async_runner=lambda: download_all_files_async(dt, max_entries, remove_old_files),
-        sync_fallback=lambda: (
-            download_all_files_sync_fallback(dt, max_entries),
-            download_all_goes_files(dt),
-        ),
+        sync_fallback=sync_fallback,
     )
 
 

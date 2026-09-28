@@ -73,14 +73,14 @@ async def run_ingestion_pipeline(
 def run_with_async_fallback(
     *,
     io_manager,
-    async_runner: Callable[[], Awaitable[None]],
-    sync_fallback: Callable[[], None],
+    async_runner: Callable[[], Awaitable],
+    sync_fallback: Callable,
     failure_prefix: str = "Async downloads failed",
     fallback_message: str = "Falling back to synchronous downloads...",
-) -> None:
+):
     try:
-        asyncio.run(async_runner())
+        return asyncio.run(async_runner())
     except Exception as exc:
         io_manager.write_error(f"{failure_prefix}: {exc}")
         io_manager.write_info(fallback_message)
-        sync_fallback()
+        return sync_fallback()
