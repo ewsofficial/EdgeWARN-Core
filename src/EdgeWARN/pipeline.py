@@ -92,9 +92,15 @@ def _cleanup_historical_data_dirs(pipeline_io):
 
 
 def _prepare_realtime_detection_inputs(log, input_manifest=None):
+    from common.ingest.mrms.config import get_registry
+    registry = get_registry()
+    if registry is not None:
+        for product in ("MergedReflectivityQCComposite_00.50", "ProbSevere", "PrecipFlag_00.00"):
+            registry.require(product)
     if input_manifest is not None:
         def frame_pair(product):
-            records = input_manifest.records_for_product(product)
+            records = tuple(r for r in input_manifest.records_for_product(product)
+                            if r.family == "mrms" and r.validated)
             current = [record for record in records if record.role == "current"]
             previous = [record for record in records if record.role == "previous"]
             # The detector's legacy loader accepts string paths.  Keep the
@@ -103,6 +109,8 @@ def _prepare_realtime_detection_inputs(log, input_manifest=None):
             # into the loader.
             current_path = str(current[-1].local_path) if current else None
             previous_path = str(previous[-1].local_path) if previous else None
+            if current_path is None:
+                return None, None
             if previous_path is None:
                 return current_path, None
             return previous_path, current_path

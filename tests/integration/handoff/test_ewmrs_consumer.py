@@ -363,3 +363,24 @@ def test_uncommitted_phase_file_waits_quietly(tmp_path, fake_render):
     assert fake_render["rap"] == []
     assert skipped == 0
     assert consumer.checkpoint_for("rap-ready") is None
+
+
+def test_v2_paused_mrms_keeps_checkpoint_and_rap_then_recovers(tmp_path, fake_render, monkeypatch):
+    from common.ingest.mrms import config as ingest
+    from common.ingest.mrms.registry import build_registry
+    from util.runtime.mrms_registry import publish_registry
+    from util.runtime.services import ServiceHeartbeat, heartbeat_path, write_heartbeat
+    registry = build_registry({"products": []}, tmp_path)
+    monkeypatch.setattr(ingest, "get_registry", lambda: registry)
+    _commit(tmp_path, CYCLE_DT)
+    consumer = EwmrsRecordConsumer(tmp_path)
+    assert consumer.process_pending_once() == (1, 0)
+    assert not fake_render["mrms"]
+    assert consumer.checkpoint_for("mrms-ready") is None
+    assert len(fake_render["rap"]) == 1
+    publish_registry(registry, "live")
+    write_heartbeat(ServiceHeartbeat("edgewarn", 123, "live", datetime.now(timezone.utc)),
+                    heartbeat_path(tmp_path, "edgewarn"))
+    assert consumer.process_pending_once() == (1, 0)
+    assert len(fake_render["mrms"]) == 1
+    assert consumer.process_pending_once() == (0, 0)

@@ -10,8 +10,8 @@ NWS, WPC, GOES ABI) are deliberately absent: they surface as child entries
 inside their owning service's heartbeat, never as top-level names.
 
 This module is schema only. Producers write heartbeats; the unified Node API is
-the consumer that classifies them. Python services never read heartbeats for
-correctness -- correctness uses committed phase records and checkpoints.
+the consumer that classifies them. EWMRS also consults the Core heartbeat before MRMS scanning to reject stale
+producer registry descriptors; cycle correctness uses phase records/checkpoints.
 """
 
 from __future__ import annotations

@@ -141,6 +141,11 @@ def detect_cells(
 
 
 if __name__ == "__main__":
+    from common.ingest.mrms.config import get_registry
+    registry = get_registry()
+    if registry is not None:
+        for product in ("MergedReflectivityQCComposite_00.50", "ProbSevere", "PrecipFlag_00.00"):
+            registry.require(product)
     radar_path = fs.latest_files(fs.MRMS_COMPOSITE_DIR, 1)[-1]
     ps_path = fs.latest_files(fs.MRMS_PROBSEVERE_DIR, 1)[-1]
     pt_path = fs.latest_files(fs.MRMS_PRECIPTYP_DIR, 1)[-1]

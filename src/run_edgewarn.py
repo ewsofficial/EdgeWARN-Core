@@ -88,6 +88,10 @@ def main():
         print(f"[EdgeWARN] {exc}")
         sys.exit(1)
 
+    if registry is not None:
+        from util.runtime.mrms_registry import publish_registry
+        publish_registry(registry, run_id)
+
     stop_event = threading.Event()
 
     def _request_stop(signum, _frame):

@@ -34,9 +34,22 @@ def _run_step(step_name, action):
         raise
 
 
-def _selected_input_path(filepath, input_manifest):
+def _selected_input_path(filepath, input_manifest, product=None):
+    from common.ingest.mrms.config import get_registry
+    registry = get_registry()
+    if product is None:
+        from common.ingest.mrms.core_contract import LEGACY_ALIASES
+        product = next((identity for alias, identity in LEGACY_ALIASES.items()
+                        if getattr(fs, alias, None) == filepath), None)
+    if product is not None and registry is not None and not registry.is_enabled(product):
+        return None
     if input_manifest is not None:
-        record = input_manifest.latest_for_directory(filepath)
+        if product is not None:
+            records = [r for r in input_manifest.current_inputs(family="mrms")
+                       if r.product == product and r.validated]
+            record = max(records, key=lambda r: r.analysis_time, default=None)
+        else:
+            record = input_manifest.latest_for_directory(filepath)
         return record.local_path if record is not None else None
 
     latest_files = fs.latest_files(filepath, 1)
@@ -59,7 +72,7 @@ def _integrate_dataset_groups(integrator, cells, input_manifest=None):
         name_str = ", ".join(name_list)
 
         try:
-            selected_file = _selected_input_path(filepath, input_manifest)
+            selected_file = _selected_input_path(filepath, input_manifest, group_list[0].get("product"))
             if selected_file is None:
                 io_manager.write_warning(f"No files found for {name_str} at {filepath}, skipping")
                 continue
@@ -96,8 +109,15 @@ def _integrate_azshear(integrator, cells, input_manifest=None):
         return cells
 
     try:
-        low_file = _selected_input_path(fs.MRMS_AZSHEARLOW_DIR, input_manifest)
-        mid_file = _selected_input_path(fs.MRMS_AZSHEARMID_DIR, input_manifest)
+        from common.ingest.mrms.config import get_registry
+        registry = get_registry()
+        low = "MergedAzShear_0-2kmAGL_00.50"
+        mid = "MergedAzShear_3-6kmAGL_00.50"
+        if registry is not None and not all(registry.is_enabled(p) for p in (low, mid)):
+            io_manager.write_warning("AzShear support inputs disabled by ingestion configuration")
+            return cells
+        low_file = _selected_input_path(fs.MRMS_AZSHEARLOW_DIR, input_manifest, low)
+        mid_file = _selected_input_path(fs.MRMS_AZSHEARMID_DIR, input_manifest, mid)
         if low_file and mid_file:
             io_manager.write_info(f"Integrating AzShear support features for {len(cells)} cells")
             return _run_step(
@@ -121,6 +141,7 @@ def _integrate_probsevere(integrator, cells, input_manifest=None):
         selected_file = _selected_input_path(
             fs.MRMS_PROBSEVERE_DIR,
             input_manifest,
+            "ProbSevere",
         )
         if selected_file is None:
             io_manager.write_warning("No ProbSevere files found, skipping ProbSevere integration")

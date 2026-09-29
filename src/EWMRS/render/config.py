@@ -5,7 +5,7 @@ _CONFIG_NAME = "ewmrs_render"
 
 
 def _render_config():
-    return load_config(_CONFIG_NAME)
+    return load_config(_CONFIG_NAME, config_dir=fs.MRMS_CONFIG_DIR)
 
 
 def _resolve_dir(attribute_name):
@@ -134,24 +134,33 @@ def nexrad_variable_colormaps() -> dict:
     return dict(_render_config()["nexrad_gui"]["variable_colormaps"])
 
 
-def get_mrms_file_list():
-    """Return the MRMS-backed render configuration list.
+def get_mrms_file_list(*, include_inactive=False):
+    """Resolve eligible layers; diagnostic entries never resolve disabled paths."""
+    from common.ingest.mrms.config import get_registry
+    from common.ingest.mrms.core_contract import LEGACY_ALIASES
 
-    Each entry carries ``required``: a required layer whose render fails gates
-    the EWMRS MRMS stage; optional-layer failures are logged only. Defaults to
-    true so an unannotated catalog keeps the historical all-layers-required
-    gate.
-    """
-    return [
-        {
-            "name": layer["name"],
-            "colormap_key": layer["colormap_key"],
-            "filepath": _resolve_dir(layer["filepath"]),
-            "outdir": _resolve_dir(layer["outdir"]),
+    registry = get_registry()
+    result = []
+    for layer in _render_config()["mrms_layers"]:
+        product = layer.get("product") or LEGACY_ALIASES.get(layer.get("filepath"))
+        if registry is not None and product is None:
+            raise ConfigError(f"{_CONFIG_NAME}.yaml", f"mrms_layers: {layer['name']}",
+                              "requires a product identity or supported legacy filepath")
+        active = registry is None or registry.is_enabled(product)
+        if not active and not include_inactive:
+            continue
+        entry = {
+            "name": layer["name"], "colormap_key": layer["colormap_key"],
+            "filepath": (registry.path_for(product) if registry is not None
+                         else _resolve_dir(layer["filepath"])) if active else None,
+            "outdir": _resolve_dir(layer["outdir"]) if active else None,
             "required": bool(layer.get("required", True)),
         }
-        for layer in _render_config()["mrms_layers"]
-    ]
+        if registry is not None:
+            entry.update(product=product, active=active,
+                         reason=None if active else "ingestion-disabled")
+        result.append(entry)
+    return result
 
 
 def get_goes_file_list():

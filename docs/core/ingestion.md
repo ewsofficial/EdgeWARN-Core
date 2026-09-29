@@ -310,3 +310,32 @@ quarantine. The shipped v1 catalog remains in place pending the coordinated rele
 readiness from optional MRMS completion, preserves phase snapshots, and protects
 active raw inputs across processes. Historical CLI runs now use the isolated
 `<BASE_DIR>/historical` runtime root.
+
+### Configurable MRMS consumer agreement (phase 7)
+
+For development ingest v2 catalogs, integration statistics and EWMRS layers
+resolve their `product` identities through the effective registry. Legacy raw
+aliases remain accepted during the migration period. Disabled entries appear
+in `get_datasets_config(include_inactive=True)` and
+`get_mrms_file_list(include_inactive=True)` with `active: false`, an
+`ingestion-disabled` reason, and no resolved raw path. Execution lists omit
+those entries, including when an old raw directory still exists.
+
+Pinned Core MRMS inputs are selected by family, full product identity, and
+current/previous role. Missing current inputs never fall back to an arbitrary
+latest file. EWMRS continues to select each eligible layer independently and
+preserves its source timestamp, GUI identity, payload, and retained history.
+Adding raw ingestion does not register a public API product.
+
+After successful preflight and acquiring its service lock, Core atomically
+publishes `state/realtime/services/edgewarn-mrms-registry.json`. The descriptor
+contains schema/contract versions, enabled identities, registry fingerprint,
+and the Core run ID; it contains no authoritative raw paths. EWMRS checks it
+against its own registry and the existing Core heartbeat on each MRMS pass.
+Missing, mismatched, stale, or previous-run state pauses MRMS scanning and
+checkpoint advancement. RAP consumption and unrelated GOES/accessory work
+continue. Matching configuration and a live matching Core run automatically
+resume pending MRMS work. Restart services after configuration changes.
+
+The shipped v1 catalog remains in place until phase 8's coordinated migration
+and release qualification.

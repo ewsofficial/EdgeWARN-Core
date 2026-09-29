@@ -13,17 +13,19 @@ from common.config.loader import ConfigError, load_config
 from common.ingest.mrms.core_contract import LEGACY_ALIASES
 
 _CONFIG_NAME = "integration"
+_DISABLED_DIAGNOSTICS = set()
 
 
 @lru_cache(maxsize=None)
 def section(name, config_dir=None):
     """Frozen view of one top-level section of ``integration.yaml``."""
-    return load_config(_CONFIG_NAME, config_dir=config_dir)[name]
+    return load_config(_CONFIG_NAME, config_dir=config_dir or fs.MRMS_CONFIG_DIR)[name]
 
 
 def reset_cache():
     """Clear memoized sections. Intended for tests, alongside loader.reset_cache."""
     section.cache_clear()
+    _DISABLED_DIAGNOSTICS.clear()
 
 
 def output_decimals(config_dir=None):
@@ -53,7 +55,7 @@ def _resolve_dir(attribute_name):
         ) from None
 
 
-def get_datasets_config():
+def get_datasets_config(*, include_inactive=False):
     datasets = []
     ingest = load_config("ingest", config_dir=fs.MRMS_CONFIG_DIR)
     registry = None
@@ -68,9 +70,18 @@ def get_datasets_config():
                     f"{_CONFIG_NAME}.yaml", f"stats_datasets: {entry['name']}",
                     "requires an MRMS product identity or a supported legacy filepath",
                 )
-            if not registry.is_enabled(product):
-                continue
-            filepath = registry.path_for(product)
+            active = registry.is_enabled(product)
+            if not active:
+                diagnostic = (registry.fingerprint, entry["name"], product)
+                if diagnostic not in _DISABLED_DIAGNOSTICS:
+                    from util.io import IOManager
+                    IOManager("[CellIntegration]").write_warning(
+                        f"Statistic {entry['name']} inactive: {product} ingestion disabled; "
+                        f"enable MRMS_{product} in ingest.yaml mrms.products to use it")
+                    _DISABLED_DIAGNOSTICS.add(diagnostic)
+                if not include_inactive:
+                    continue
+            filepath = registry.path_for(product) if active else None
         else:
             filepath = _resolve_dir(entry["filepath"])
         dataset = {
@@ -81,6 +92,8 @@ def get_datasets_config():
         }
         if "percentile" in entry:
             dataset["percentile"] = entry["percentile"]
+        if registry is not None:
+            dataset.update(product=product, active=active, reason=None if active else "ingestion-disabled")
         datasets.append(dataset)
     return datasets
 

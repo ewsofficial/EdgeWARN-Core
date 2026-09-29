@@ -519,6 +519,11 @@ def run_mrms_render_pipeline(
     input_manifest: CycleInputManifest | None = None,
 ) -> Dict[str, RenderOutput]:
     """Run the MRMS-backed EWMRS render phase."""
+    from common.ingest.mrms.config import get_registry
+    from util.runtime.mrms_registry import require_producer_agreement
+    registry = get_registry()
+    if registry is not None:
+        require_producer_agreement(registry)
     return run_render_pipeline(
         dt,
         max_entries=max_entries,

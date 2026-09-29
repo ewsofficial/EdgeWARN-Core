@@ -94,3 +94,12 @@ ProbSevere field via `probsevere_field_map`, so it is absent from
 `stats_datasets` and carries no percentile variants.
 
 The optional AzShear support-feature integration path exists in `integrate_azshear.py` and `azshear/`, but the pipeline-level feature flag is currently disabled.
+
+For ingest v2, MRMS statistics carry a full upstream `product` identity. The
+execution catalog omits disabled products before resolving raw paths and emits
+one diagnostic per statistic and registry generation. Inspect inactive entries
+with `get_datasets_config(include_inactive=True)`; disabled entries have no raw
+path. Current MRMS manifest selection uses family/product/role, so a previous
+record or a different family's record cannot satisfy current enrichment. Missing
+pinned input skips its statistic without scanning another file. The dedicated
+StormProb gate still determines whether incomplete enrichment is fatal to Core.

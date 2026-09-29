@@ -82,6 +82,16 @@ class EwmrsRecordConsumer:
         return processed, skipped
 
     def _drain(self, phase: str, handler) -> tuple[int, int]:
+        if phase == "mrms-ready":
+            from common.ingest.mrms.config import get_registry
+            from util.runtime.mrms_registry import MrmsProducerUnavailable, require_producer_agreement
+            registry = get_registry()
+            if registry is not None:
+                try:
+                    require_producer_agreement(registry)
+                except MrmsProducerUnavailable as exc:
+                    self._log(str(exc))
+                    return 0, 0
         checkpoint_store = ConsumerCheckpointStore(
             self.base_dir, f"{CONSUMER_NAME}-{phase}"
         )

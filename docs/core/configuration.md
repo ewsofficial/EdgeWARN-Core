@@ -120,3 +120,13 @@ The phase 3 v2 validators and read-only `edgewarn migrate-mrms` report are avail
 The shipped ingest catalog remains v1 until the coordinated runtime release.
 See [phase 3 validation and migration planning](configurable-mrms-phase3.md) for
 product selectors, bounds, conversion rules, and deferred runtime behavior.
+
+With development ingest v2 catalogs, integration `stats_datasets` and EWMRS
+`mrms_layers` can reference full upstream `product` identities instead of raw
+`filepath` aliases. Raw paths come from the enabled registry; GUI output aliases
+remain unchanged. Diagnostic catalog views retain disabled entries while runtime
+execution lists omit them. Core publishes its effective registry only after
+successful startup preflight; EWMRS requires the same fingerprint and a fresh
+Core heartbeat from that publication's run before MRMS scanning. Deploy matching
+catalogs and restart both services after edits. The shipped catalog conversion
+and migration apply/rollback remain phase 8 work.
