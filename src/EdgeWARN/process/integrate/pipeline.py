@@ -560,19 +560,12 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
     filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
     repository.mark_projection_published(str(timestamp))
-    backup_started = time.perf_counter()
-    try:
-        repository.backup_if_due()
-    except Exception as exc:
-        io_manager.write_warning(f"StormProb daily backup failed: {exc}")
-    backup_seconds = time.perf_counter() - backup_started
     io_manager.write_info(
         "Publication phases "
         f"cycle_id={timestamp} cells={len(projected_cells)} "
         f"sqlite_transaction_seconds={sqlite_seconds:.6f} "
         f"filesystem_publication_seconds={filesystem_seconds:.6f} "
         f"api_index_seconds={index_seconds:.6f} "
-        f"backup_seconds={backup_seconds:.6f} "
         f"total_seconds={time.perf_counter() - publication_started:.6f}"
     )
 

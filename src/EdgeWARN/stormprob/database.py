@@ -11,10 +11,8 @@ import hashlib
 import json
 import logging
 import math
-import os
 import sqlite3
 import struct
-import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -265,46 +263,6 @@ class StormProbRepository:
                 raise RuntimeError(f"StormProb integrity check: {result}")
             if db.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("StormProb foreign key violation")
-
-    def backup(self, target: Path | str) -> Path:
-        """Make a consistent SQLite backup; caller controls retention of files."""
-        target = Path(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.part")
-        try:
-            with self.reader() as source, sqlite3.connect(temporary) as destination:
-                source.backup(destination)
-                if destination.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                    raise RuntimeError("StormProb backup integrity check failed")
-            os.replace(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
-        return target
-
-    def prune_backups(self, directory: Path | str, keep: int = 7) -> list[Path]:
-        """Only remove managed backup files in the supplied backup directory."""
-        if keep < 1:
-            raise ValueError("keep must be positive")
-        folder = Path(directory)
-        if folder.resolve() != (self.path.parent / "backups").resolve():
-            raise ValueError("backup retention is restricted to stormprob/backups")
-        files = sorted(folder.glob("stormprob-*.sqlite3"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for path in files[keep:]:
-            path.unlink()
-        return files[keep:]
-
-    def backup_if_due(self, *, now: datetime | None = None) -> Path | None:
-        """Create at most one daily online backup and retain seven copies."""
-        moment = now or datetime.now(timezone.utc)
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=timezone.utc)
-        folder = self.path.parent / "backups"
-        target = folder / f"stormprob-{moment.astimezone(timezone.utc):%Y%m%d}.sqlite3"
-        if target.exists():
-            return None
-        self.backup(target)
-        self.prune_backups(folder)
-        return target
 
     def commit_cycle(self, cycle_id: str, analysis_time: Any, cells: list[dict],
                      source_manifest: Any = None, projection_hash: str | None = None,

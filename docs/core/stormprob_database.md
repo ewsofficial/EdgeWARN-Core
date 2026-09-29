@@ -65,16 +65,11 @@ The importer reads `data/stormcells/stormcells_*.json` first and
 counts, identities, parseable timestamps, and SHA-256 hashes. Each source file
 commits atomically; identical reruns skip it, and changed source bytes fail
 closed. Legacy source files are retained. Fields absent from legacy JSON stay
-missing with the Phase 1 sentinel/quality policy. A pre-import SQLite backup is
-written under `data/stormprob/backups/` when an existing database is present;
-managed backup retention is applied by the backup path. The importer runs SQLite integrity and foreign-key checks after
-completion. To roll back the runtime, restore the previous JSON/API projection
+missing with the Phase 1 sentinel/quality policy. The importer runs SQLite
+integrity and foreign-key checks after completion. To roll back the runtime,
+restore the previous JSON/API projection
 and stop reading the new database; leave the StormProb database and model
 assets intact for investigation.
-
-Successful realtime publication also makes one online SQLite backup per UTC
-day under the same managed backup directory and retains the seven newest. A
-backup failure is logged without changing the already committed cycle.
 
 At the start of a valid detection cycle, recovery first completes prepared CTAM
 JSON journals; this is not a general service-startup recovery gate. A
