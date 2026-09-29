@@ -3,7 +3,7 @@ import copy
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
@@ -560,6 +560,22 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
     filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
     repository.mark_projection_published(str(timestamp))
+    from EdgeWARN.api_integration.config import (
+        remove_old_cells_realtime,
+        stormprob_inactive_cell_max_age_minutes,
+    )
+    prune_inactive = remove_old_cells_realtime() if remove_old_cells is None else remove_old_cells
+    if prune_inactive:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=stormprob_inactive_cell_max_age_minutes())
+        try:
+            forecasts_removed, observations_removed = repository.prune_inactive_cells(cutoff)
+            if forecasts_removed or observations_removed:
+                io_manager.write_info(
+                    "Pruned inactive StormProb data "
+                    f"forecasts={forecasts_removed} observations={observations_removed}"
+                )
+        except Exception as exc:
+            io_manager.write_warning(f"Failed to prune inactive StormProb data: {exc}")
     io_manager.write_info(
         "Publication phases "
         f"cycle_id={timestamp} cells={len(projected_cells)} "

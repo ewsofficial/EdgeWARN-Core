@@ -43,6 +43,14 @@ forecast is silently reused after input revision. Model tensors are rebuilt by
 `radial_profiles`, and observation centroids; the 30-row window is chronological
 and left-padded.
 
+Realtime publication prunes a cell's StormProb forecasts and observations once
+its newest observation is older than
+`api_index.stormprob_inactive_cell_max_age_minutes` (20 minutes by default),
+independently of compatibility cell-file retention. Feature values and radial
+profiles cascade with their observation. Historical runs do not prune. SQLite
+can reuse the freed pages, but this deletion does not shrink the database file
+on disk; cycle publication and recovery records are retained.
+
 The packaged StormProb ONNX graphs use a fixed batch size of 128. During each
 CTAM cycle, ready cells are processed in chunks of up to 128, with zero padding
 for the last chunk. Skipped or invalid cells do not occupy a model slot; each

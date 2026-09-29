@@ -264,6 +264,25 @@ class StormProbRepository:
             if db.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("StormProb foreign key violation")
 
+    def prune_inactive_cells(self, before_analysis_time: Any) -> tuple[int, int]:
+        """Remove StormProb rows for cells with no observations since the cutoff.
+
+        Observation child tables cascade from ``cell_observations``. Forecasts
+        have a cycle-level foreign key instead, so they must be deleted first.
+        Cycle publication records are retained for snapshot recovery/indexing.
+        """
+        cutoff = _time(before_analysis_time)
+        inactive_cells = """SELECT cell_id FROM cell_observations
+            GROUP BY cell_id HAVING MAX(analysis_time) < ?"""
+        with self.writer() as db:
+            forecast_cursor = db.execute(
+                f"DELETE FROM forecasts WHERE cell_id IN ({inactive_cells})", (cutoff,)
+            )
+            observation_cursor = db.execute(
+                f"DELETE FROM cell_observations WHERE cell_id IN ({inactive_cells})", (cutoff,)
+            )
+            return forecast_cursor.rowcount, observation_cursor.rowcount
+
     def commit_cycle(self, cycle_id: str, analysis_time: Any, cells: list[dict],
                      source_manifest: Any = None, projection_hash: str | None = None,
                      projection_cells: list[dict] | None = None,
