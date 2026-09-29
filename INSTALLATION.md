@@ -514,3 +514,9 @@ prints an offline JSON migration report without changing files. The current
 release retains its v1 default catalog; apply/resume/rollback and v2 worker
 activation are deferred. See [phase 3 migration planning](docs/core/configurable-mrms-phase3.md)
 before using converted development configurations.
+
+Historical processing writes its raw cache and generated artifacts beneath
+`<resolved-base-dir>/historical`. This includes stormcells, StormProb databases,
+and API indexes; realtime artifacts at the parent root are not overwritten.
+See [phase readiness and replay](docs/core/configurable-mrms-phase5.md) for
+input leases, optional-completion behavior, and immutable ingest reports.

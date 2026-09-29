@@ -1,3 +1,4 @@
+from common.ingest.replay import guard_cleanup
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -362,6 +363,7 @@ def _is_safe_directory(directory: Path, allow_logical_inside=False):
         return False
 
 
+@guard_cleanup
 def clean_old_files(directory: Path, max_age_minutes=None, max_files=_FROM_CATALOG):
     directory = Path(directory)
     base_dir = globals().get("BASE_DIR", Path("."))
@@ -401,6 +403,7 @@ def clean_old_files(directory: Path, max_age_minutes=None, max_files=_FROM_CATAL
             except Exception as e:
                 _log("write_error", f"Could not delete {file_path.name}: {e}")
 
+@guard_cleanup
 def clean_files_by_age(directory: Path, max_age_minutes=None):
     directory = Path(directory)
     base_dir = globals().get("BASE_DIR", Path("."))

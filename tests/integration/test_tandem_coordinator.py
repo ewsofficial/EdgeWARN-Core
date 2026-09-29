@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import asyncio
+import pytest
 
 from common.pipeline.coordinator import run_staged_ingest_cycle
 import common.pipeline.coordinator as coordinator
@@ -10,6 +11,10 @@ import common.ingest.synoptic.main as synoptic_main
 
 
 def _batch(tmp_path, timestamp, product):
+    if product == "Detection":
+        from common.ingest.mrms.core_contract import PROTECTED_IDS
+        records = tuple(_batch(tmp_path, timestamp, p).downloaded[0] for p in sorted(PROTECTED_IDS))
+        return DownloadBatchResult(tuple(sorted(PROTECTED_IDS)), records, ())
     path = tmp_path / product / f"MRMS_{product}_{timestamp:%Y%m%d-%H%M%S}.grib2"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"data")
@@ -198,8 +203,8 @@ def test_ewmrs_cycle_trigger_does_not_wait_for_complete_integration_batch(
 
     assert state.detection_inputs_ready is True
     assert state.ewmrs_mrms_inputs_ready is True
-    assert state.mrms_integration_inputs_ready is False
-    assert state.edgewarn_integration_inputs_ready is False
+    assert state.mrms_integration_inputs_ready is True
+    assert state.edgewarn_integration_inputs_ready is True
 
 
 def test_second_prior_rap_analysis_releases_integration(monkeypatch, tmp_path):
@@ -300,3 +305,85 @@ def test_nomads_rap_analysis_releases_integration(monkeypatch, tmp_path):
     assert state.input_manifest.latest_for_product("RAP").path == str(
         rap_dir / "RAP.20260726-13z.awp130pgrbf00.grib2"
     )
+
+
+@pytest.mark.parametrize("optional_available", [True, False])
+def test_callbacks_release_before_optional_terminal_result(
+    monkeypatch, tmp_path, optional_available,
+):
+    """Mandatory releases are independent of optional completion and failure."""
+    dt = datetime(2026, 9, 26, 13, 0, tzinfo=timezone.utc)
+    protected = ("MergedReflectivityQCComposite_00.50", "PrecipFlag_00.00", "ProbSevere")
+    detection = DownloadBatchResult(
+        attempted=protected,
+        downloaded=tuple(_batch(tmp_path, dt, product).downloaded[0] for product in protected),
+        failed=(),
+    )
+    optional = (
+        _batch(tmp_path, dt, "MESH_00.50") if optional_available else
+        DownloadBatchResult(attempted=("MESH_00.50",), downloaded=(), failed=("MESH_00.50",))
+    )
+    callbacks = []
+    snapshots = []
+    mandatory_released = asyncio.Event()
+
+    def capture(name):
+        def callback(state):
+            callbacks.append((name, state.detection_inputs_ready,
+                              state.ewmrs_mrms_inputs_ready,
+                              state.edgewarn_integration_inputs_ready))
+            snapshots.append(state.input_manifest)
+            if name == "integration":
+                mandatory_released.set()
+        return callback
+
+    async def exercise():
+        detection_done = asyncio.Event()
+        optional_started = asyncio.Event()
+        release_optional = asyncio.Event()
+
+        async def fake_detection(*_args, **_kwargs):
+            detection_done.set()
+            return detection
+
+        async def fake_optional(*_args, **_kwargs):
+            optional_started.set()
+            await release_optional.wait()
+            return optional
+
+        monkeypatch.setattr(coordinator.mrms_ingest, "download_detection_files_async", fake_detection)
+        monkeypatch.setattr(coordinator.mrms_ingest, "download_integration_files_async", fake_optional)
+        monkeypatch.setattr(coordinator.mrms_ingest, "download_integration_files", lambda *_args: optional)
+        task = asyncio.create_task(run_staged_ingest_cycle(
+            dt, lambda _msg: None, include_goes=False, include_rap=False,
+            on_detection_ready=capture("detection"),
+            on_ewmrs_mrms_ready=capture("ewmrs"),
+            on_base_integration_ready=capture("base"),
+            on_ewmrs_goes_ready=capture("goes"),
+            on_edgewarn_integration_ready=capture("integration"),
+        ))
+        try:
+            await asyncio.wait_for(detection_done.wait(), timeout=2)
+            await asyncio.wait_for(optional_started.wait(), timeout=2)
+            await asyncio.wait_for(mandatory_released.wait(), timeout=2)
+            assert not task.done()
+            assert [item[0] for item in callbacks] == ["detection", "ewmrs", "base", "goes", "integration"]
+            release_optional.set()
+            return await asyncio.wait_for(task, timeout=2)
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    state = asyncio.run(exercise())
+    assert callbacks == [
+        ("detection", True, False, False),
+        ("ewmrs", True, True, False),
+        ("base", True, True, True),
+        ("goes", True, True, True),
+        ("integration", True, True, True),
+    ]
+    assert all(snapshot is not state.input_manifest for snapshot in snapshots)
+    assert all(not snapshot.records_for_product("MESH_00.50") for snapshot in snapshots)
+    assert state.ewmrs_mrms_inputs_ready is True
+    assert state.edgewarn_integration_inputs_ready is True

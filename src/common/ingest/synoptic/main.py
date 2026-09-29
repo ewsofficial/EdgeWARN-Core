@@ -1,3 +1,4 @@
+from common.ingest.replay import guard_cleanup
 import asyncio
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -43,6 +44,7 @@ def parse_rap_analysis_time(path: Path) -> datetime | None:
         return None
 
 
+@guard_cleanup
 def clean_rap_cache(
     reference_time: datetime,
     *,

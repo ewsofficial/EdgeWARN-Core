@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 
 from common.ingest.manifest import CycleInputManifest
+from common.ingest.replay import protect_runtime_inputs, commit_ingest_report, commit_input_snapshot
 from common.pipeline.coordinator import run_staged_ingest_cycle
 from EdgeWARN.pipeline import edgewarn_cycle_worker
 from EdgeWARN.process.detect.config import DetectionConfig
@@ -334,6 +335,7 @@ class PrimaryCycleConfig:
     handoff_enabled: bool = False
 
 
+@protect_runtime_inputs
 def run_primary_cycle_once(
     dt,
     manager,
@@ -353,6 +355,7 @@ def run_primary_cycle_once(
 
     detection_ready_event = multiprocessing.Event()
     integration_ready_event = multiprocessing.Event()
+    optional_complete_event = multiprocessing.Event()
     # No worker waits on render-input readiness anymore (the EWMRS service
     # consumes durable records), but the transition keeps its own event so the
     # release/telemetry path stays uniform.
@@ -397,7 +400,7 @@ def run_primary_cycle_once(
             log_queue, shared_state, detection_ready_event, integration_ready_event,
             dt, config.lat_limits, config.lon_limits, detection_config,
             config.profile, config.disable_ctam, config.disable_ctam_modules, config.disable_tracking,
-            config.disable_polygon_expansion, config.mrms_core_only,
+            config.disable_polygon_expansion, config.mrms_core_only, optional_complete_event,
         ),
     )
     started_processes = StartedProcessRegistry()
@@ -457,12 +460,23 @@ def run_primary_cycle_once(
         except Exception as exc:
             print(f"[Handoff] Durable handoff publication failed for {phase}: {exc}")
 
+    def commit_snapshot(manifest, phase):
+        if config.base_dir:
+            path = commit_input_snapshot(config.base_dir, manifest,
+                                         registry.fingerprint if registry else None, phase)
+            return CycleInputManifest.from_dict(json.loads(path.read_text())["snapshots"][phase])
+        return manifest
+
     def publish(state, event, phase: str):
         """Write the complete snapshot before waking a worker."""
+        if phase == "detection_released" and state.detection_inputs_ready and state.input_manifest is not None:
+            state.input_manifest = commit_snapshot(state.input_manifest, "detection")
         shared_state["detection_inputs_ready"] = state.detection_inputs_ready
         shared_state["render_mrms_inputs_ready"] = state.ewmrs_mrms_inputs_ready
         if state.input_manifest is not None:
             shared_state["input_manifest"] = state.input_manifest.as_dict()
+            if phase == "detection_released":
+                shared_state["detection_manifest"] = state.input_manifest.as_dict()
         shared_state["errors"] = dict(state.errors)
         ready_key = {
             "detection_released": "detection_inputs_ready",
@@ -484,11 +498,19 @@ def run_primary_cycle_once(
             if config.goes_enabled:
                 glm_task = asyncio.create_task(asyncio.to_thread(download_glm_for_scan, dt))
             base_ready = False
+            base_terminal = False
             glm_ready = not config.goes_enabled
             glm_records = ()
+            glm_terminal = not config.goes_enabled
+            optional_state = None
 
             def publish_integration_if_ready():
-                if base_ready and glm_ready:
+                finalize_optional()
+                if base_terminal and (not base_ready or glm_terminal and not glm_ready):
+                    shared_state["edgewarn_integration_inputs_ready"] = False
+                    release(integration_ready_event, "integration_released", "unavailable")
+                    return
+                if base_ready and glm_ready and not integration_ready_event.is_set():
                     if glm_records:
                         base_manifest = CycleInputManifest.from_dict(
                             shared_state.get("input_manifest")
@@ -496,11 +518,14 @@ def run_primary_cycle_once(
                         shared_state["input_manifest"] = base_manifest.with_inputs(
                             glm_records
                         ).as_dict()
+                    frozen = commit_snapshot(CycleInputManifest.from_dict(shared_state["input_manifest"]), "integration")
+                    shared_state["integration_manifest"] = frozen.as_dict()
                     shared_state["edgewarn_integration_inputs_ready"] = True
                     release(integration_ready_event, "integration_released", "ready")
 
             def base_integration_ready(state):
-                nonlocal base_ready
+                nonlocal base_ready, base_terminal
+                base_terminal = True
                 base_ready = state.edgewarn_integration_inputs_ready
                 if state.input_manifest is not None:
                     shared_state["input_manifest"] = state.input_manifest.as_dict()
@@ -517,6 +542,28 @@ def run_primary_cycle_once(
                 )
                 publish_integration_if_ready()
 
+            def finalize_optional():
+                if optional_state is None or not glm_terminal or optional_complete_event.is_set():
+                    return
+                state = optional_state
+                final = state.ctam_manifest.with_inputs(glm_records)
+                report = dict(state.ingest_report)
+                if report:
+                    report["snapshots"] = dict(report["snapshots"])
+                    report["snapshots"]["integration"] = state.integration_manifest.with_inputs(glm_records).as_dict()
+                    report["snapshots"]["ctam"] = final.as_dict()
+                    if config.base_dir and state.edgewarn_integration_inputs_ready and glm_ready:
+                        path = commit_ingest_report(config.base_dir, report)
+                        final = CycleInputManifest.from_dict(json.loads(path.read_text())["snapshots"]["ctam"])
+                shared_state["ctam_manifest"] = final.as_dict()
+                shared_state["optional_inputs_complete"] = True
+                release(optional_complete_event, "optional_complete", "complete")
+
+            def optional_complete(state):
+                nonlocal optional_state
+                optional_state = state
+                finalize_optional()
+
             cycle_task = asyncio.create_task(run_staged_ingest_cycle(
                 dt, lambda msg: queue_log(log_queue, msg),
                 include_goes=False,
@@ -527,6 +574,7 @@ def run_primary_cycle_once(
                     publish(state, render_inputs_ready_event, "render_mrms_released"),
                 ),
                 on_base_integration_ready=base_integration_ready,
+                on_optional_complete=optional_complete,
             ))
             if glm_task is not None:
                 try:
@@ -551,12 +599,18 @@ def run_primary_cycle_once(
                 except Exception as exc:
                     queue_log(log_queue, f"WARN: Scan-time GLM ingest failed for {dt.isoformat()}: {exc}")
                     glm_ready = False
+                glm_terminal = True
                 publish_integration_if_ready()
             else:
                 queue_log(log_queue, "INFO: GOES/GLM components disabled; EdgeWARN integration will not wait for GLM inputs")
-            return await cycle_task, glm_ready
+            result = await cycle_task
+            finalize_optional()
+            return result, glm_ready
 
         cycle_state, glm_ready = asyncio.run(ingest_and_glm())
+    except (KeyboardInterrupt, SystemExit):
+        started_processes.shutdown()
+        raise
     except Exception as exc:
         print(f"[Scheduler] Primary ingest cycle failed for {dt}: {exc}")
         cycle_state = None
@@ -579,6 +633,7 @@ def run_primary_cycle_once(
     release(detection_ready_event, "detection_released", "ready" if shared_state["detection_inputs_ready"] else "unavailable")
     release(render_inputs_ready_event, "render_mrms_released", "ready" if shared_state["render_mrms_inputs_ready"] else "unavailable")
     release(integration_ready_event, "integration_released", "ready" if edgewarn_integration_ready else "unavailable")
+    release(optional_complete_event, "optional_complete", "complete" if shared_state.get("optional_inputs_complete") else "failed")
 
     try:
         while edgewarn_proc.is_alive() or not log_queue.empty():
@@ -626,7 +681,7 @@ def run_primary_cycle_once(
         stages=stages,
         retryable=retryable,
         input_manifest=CycleInputManifest.from_dict(
-            shared_state.get("input_manifest")
+            shared_state.get("ctam_manifest", shared_state.get("input_manifest"))
         ),
     )
 

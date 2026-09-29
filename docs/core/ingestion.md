@@ -6,6 +6,11 @@ consumed by the service that owns the corresponding processing or rendering
 work. Shared implementations live under `src/common/`; `src/EdgeWARN/ingest/`
 is a compatibility re-export layer.
 
+The [configurable MRMS Phase 1 contract and impact inventory](configurable-mrms-phase1.md)
+records the current 21-product baseline, proposed three-product protected set,
+raw-path migration, and implementation ownership. It characterizes the current
+runtime; the v2 configuration and behavior changes are not active yet.
+
 ## Service ownership
 
 ```text
@@ -278,3 +283,13 @@ services resolve their supported base-directory flags/environment settings
 through their service parsers. Do not introduce repository-local output paths:
 the runtime filesystem is the source of truth for staged inputs, durable
 handoff, rendered artifacts, and API visibility.
+
+The opt-in v2 acquisition and path implementation is documented in
+[Configurable MRMS phase 4](configurable-mrms-phase4.md), including explicit
+startup directory creation, bounded acquisition, staging, validation, and
+quarantine. The shipped v1 catalog remains in place pending the coordinated release.
+
+[Configurable MRMS phase 5](configurable-mrms-phase5.md) separates mandatory
+readiness from optional MRMS completion, preserves phase snapshots, and protects
+active raw inputs across processes. Historical CLI runs now use the isolated
+`<BASE_DIR>/historical` runtime root.

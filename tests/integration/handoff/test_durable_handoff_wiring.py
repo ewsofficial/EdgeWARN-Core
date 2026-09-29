@@ -31,6 +31,10 @@ DT = datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc)
 
 
 def _batch(tmp_path, timestamp, product):
+    if product == "Detection":
+        from common.ingest.mrms.core_contract import PROTECTED_IDS
+        return DownloadBatchResult(tuple(sorted(PROTECTED_IDS)), tuple(
+            _batch(tmp_path, timestamp, p).downloaded[0] for p in sorted(PROTECTED_IDS)), ())
     path = tmp_path / "staged" / product / f"MRMS_{product}_{timestamp:%Y%m%d-%H%M%S}.grib2"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"data")
@@ -52,7 +56,9 @@ def _stub_worker(log_queue, shared_state, *_args, **_kwargs):
 
 
 @pytest.fixture()
-def stubbed_workers(monkeypatch):
+def stubbed_workers(monkeypatch, tmp_path):
+    import util.file as fs
+    monkeypatch.setattr(fs, "BASE_DIR", tmp_path)
     monkeypatch.setattr(cycle_module, "edgewarn_cycle_worker", _stub_worker)
 
 
@@ -123,7 +129,9 @@ def test_cycle_publishes_mrms_and_rap_ready_records(stubbed_workers, monkeypatch
     assert mrms_record is not None and mrms_record.success
     assert rap_record is not None and rap_record.success
     products = {staged.product for staged in mrms_record.inputs}
-    assert {"Detection", "Integration"} <= products
+    from common.ingest.mrms.core_contract import PROTECTED_IDS
+    assert PROTECTED_IDS <= products
+    assert "Integration" not in products
     # The committed exact paths are the ones actually staged this cycle.
     assert shadow_validate_phase_record(mrms_record) == ()
     assert shadow_validate_phase_record(rap_record) == ()
@@ -202,7 +210,7 @@ def test_disabled_handoff_publishes_nothing(stubbed_workers, monkeypatch, tmp_pa
 
     assert iter_committed_records(tmp_path, "mrms-ready") == []
     assert iter_committed_records(tmp_path, "rap-ready") == []
-    assert not (tmp_path / "state" / "realtime").exists()
+    assert not (tmp_path / "state" / "realtime" / "cycles").exists()
 
 
 def test_mrms_core_only_publishes_no_rap_ready_record(stubbed_workers, monkeypatch, tmp_path):
@@ -226,3 +234,59 @@ def test_mrms_core_only_publishes_no_rap_ready_record(stubbed_workers, monkeypat
 def _config_with(tmp_path, **overrides):
     base = _config(tmp_path).__dict__
     return PrimaryCycleConfig(**{**base, **overrides})
+
+
+def test_failed_detection_can_recover_without_poisoned_final_report(
+    stubbed_workers, monkeypatch, tmp_path,
+):
+    _patch_downloaders(monkeypatch, tmp_path)
+    original = coordinator.mrms_ingest.download_detection_files_async
+    async def unavailable(*args):
+        return DownloadBatchResult(("ProbSevere",), (), ("ProbSevere",))
+    monkeypatch.setattr(coordinator.mrms_ingest, "download_detection_files_async", unavailable)
+    monkeypatch.setattr(coordinator.mrms_ingest, "download_detection_files", lambda *args: unavailable_result)
+    unavailable_result = DownloadBatchResult(("ProbSevere",), (), ("ProbSevere",))
+    with multiprocessing.Manager() as manager:
+        assert not _run_cycle(tmp_path, manager).completed
+        report = tmp_path / "state/realtime/ingest-reports" / f"{canonical_cycle_id(DT)}.json"
+        assert not report.exists()
+        monkeypatch.setattr(coordinator.mrms_ingest, "download_detection_files_async", original)
+        assert _run_cycle(tmp_path, manager).completed
+        assert report.exists()
+
+
+def _phased_worker(log_queue, shared, detection_event, integration_event, *args):
+    optional_event = args[-1]
+    if not detection_event.wait(2) or not integration_event.wait(2):
+        raise RuntimeError("Mandatory callbacks waited for optional completion")
+    shared["base_work_started"] = True
+    detection = shared["detection_manifest"]
+    integration = shared["integration_manifest"]
+    if not optional_event.wait(2):
+        raise RuntimeError("Optional completion never released")
+    assert detection == shared["detection_manifest"]
+    assert integration == shared["integration_manifest"]
+    assert not any(r["product"] == "Integration" for r in integration["inputs"])
+    assert any(r["product"] == "Integration" for r in shared["ctam_manifest"]["inputs"])
+    _stub_worker(log_queue, shared)
+
+
+def test_worker_starts_base_work_before_optional_and_receives_frozen_final_snapshot(
+    stubbed_workers, monkeypatch, tmp_path,
+):
+    import asyncio
+    _patch_downloaders(monkeypatch, tmp_path)
+    monkeypatch.setattr(cycle_module, "edgewarn_cycle_worker", _phased_worker)
+    with multiprocessing.Manager() as manager:
+        shared = manager.dict()
+        class SharedManager:
+            def dict(self):
+                return shared
+        async def optional(dt, *args):
+            async with asyncio.timeout(2):
+                while not shared.get("base_work_started"):
+                    await asyncio.sleep(.005)
+            return _batch(tmp_path, dt, "Integration")
+        monkeypatch.setattr(coordinator.mrms_ingest, "download_integration_files_async", optional)
+        outcome = _run_cycle(tmp_path, SharedManager())
+    assert outcome.completed

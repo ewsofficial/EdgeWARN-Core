@@ -47,9 +47,15 @@ def main():
         io_manager.write_error(f"StormProb startup validation failed: {exc}")
         sys.exit(1)
 
-    # Initialize custom filesystem if provided
+    # Historical artifacts and raw caches have a separate runtime namespace.
+    # A replay must never replace a realtime cell, database, index, or handoff.
+    import util.file as fs
+    base = Path(args.base_dir or fs.BASE_DIR).expanduser().resolve()
+    historical_base = base / "historical"
+    if not historical_base.resolve().is_relative_to(base):
+        raise ValueError("Historical runtime escapes the configured base directory")
     initialize_runtime(
-        base_dir=args.base_dir,
+        base_dir=historical_base,
         io_manager=io_manager,
         initialize_indexes=initialize_at_startup_historical(),
     )

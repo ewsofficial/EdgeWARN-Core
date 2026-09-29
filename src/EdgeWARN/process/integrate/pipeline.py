@@ -77,7 +77,7 @@ def _integrate_dataset_groups(integrator, cells, input_manifest=None):
                 f"Integration - {name_str}",
                 lambda: integrator.integrate_multi_stats(
                     str(selected_file),
-                    result_cells,
+                    copy.deepcopy(result_cells),
                     group_list,
                     cell_contexts=cell_contexts,
                 ),
@@ -628,6 +628,7 @@ def main(
     disable_ctam_modules=False,
     mrms_core_only=False,
     input_manifest: CycleInputManifest | None = None,
+    final_input_provider=None,
 ):
     handler = StatFileHandler(io_manager)
     integrator = StormCellIntegrator(io_manager)
@@ -645,6 +646,19 @@ def main(
         include_rap=not mrms_core_only,
         input_manifest=input_manifest,
     )
+    if final_input_provider is not None:
+        final_manifest = final_input_provider()
+        if final_manifest is None:
+            raise RuntimeError("Final optional-input snapshot was not published")
+        initial = set(input_manifest.inputs) if input_manifest is not None else set()
+        added = tuple(record for record in final_manifest.current_inputs()
+                      if record not in initial)
+        if added:
+            result_cells = _run_parallel_enrichment(
+                integrator, result_cells, include_glm=False, include_rap=False,
+                input_manifest=CycleInputManifest(cycle_time=final_manifest.cycle_time, inputs=added),
+            )
+        input_manifest = final_manifest
     result_cells = _run_step(
         "Integration - StormProb Inputs",
         lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),

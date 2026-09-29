@@ -1,3 +1,4 @@
+import json
 import asyncio
 import sys
 import traceback
@@ -10,6 +11,7 @@ import EdgeWARN.process.detect.main as detect
 import EdgeWARN.process.integrate.main as integration
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
+from common.ingest.replay import protect_runtime_inputs, commit_ingest_report
 from common.ingest.mrms.config import get_goes_modifiers, get_mrms_modifiers
 from common.ingest.mrms.pipeline import get_output_dirs
 from common.pipeline.coordinator import run_staged_ingest_cycle
@@ -187,12 +189,14 @@ def run_edgewarn_integration_phase(
     disable_ctam_modules=False,
     mrms_core_only=False,
     input_manifest: CycleInputManifest | None = None,
+    final_input_provider=None,
 ):
     """Run only the integration phase from an existing detection artifact."""
     if not generated_file:
         log("WARN: No detection artifact was produced; skipping integration")
         return False
 
+    extra = {"final_input_provider": final_input_provider} if final_input_provider is not None else {}
     integration.main(
         generated_file,
         remove_old_cells=remove_old_cells,
@@ -200,6 +204,7 @@ def run_edgewarn_integration_phase(
         disable_ctam_modules=disable_ctam_modules,
         mrms_core_only=mrms_core_only,
         input_manifest=input_manifest,
+        **extra,
     )
     return True
 
@@ -219,6 +224,7 @@ def edgewarn_cycle_worker(
     disable_tracking=False,
     disable_polygon_expansion=False,
     mrms_core_only=False,
+    optional_complete_event=None,
 ):
     """Process target for staged EdgeWARN execution within the tandem runner."""
     sys.stdout = QueueWriter(log_queue)
@@ -257,7 +263,7 @@ def edgewarn_cycle_worker(
             return
 
         input_manifest = CycleInputManifest.from_dict(
-            shared_state.get("input_manifest")
+            shared_state.get("detection_manifest", shared_state.get("input_manifest"))
         )
         if input_manifest is None:
             message = "Cycle input manifest was not published"
@@ -297,7 +303,7 @@ def edgewarn_cycle_worker(
             return
 
         input_manifest = CycleInputManifest.from_dict(
-            shared_state.get("input_manifest")
+            shared_state.get("integration_manifest", shared_state.get("input_manifest"))
         )
         if input_manifest is None:
             message = "Cycle input manifest was unavailable at integration release"
@@ -309,6 +315,14 @@ def edgewarn_cycle_worker(
             log(f"ERROR: {message}")
             return
 
+        def final_input_provider():
+            optional_complete_event.wait()
+            if not shared_state.get("optional_inputs_complete", False):
+                raise RuntimeError("Optional acquisition did not finish cleanly")
+            return CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
+
+        extra = ({"final_input_provider": final_input_provider}
+                 if optional_complete_event is not None else {})
         perf_tracker.start("Integration")
         integrated = run_edgewarn_integration_phase(
             log,
@@ -317,6 +331,7 @@ def edgewarn_cycle_worker(
             disable_ctam_modules=disable_ctam_modules,
             mrms_core_only=mrms_core_only,
             input_manifest=input_manifest,
+            **extra,
         )
         perf_tracker.stop("Integration")
         if not integrated or not Path(generated_file).is_file():
@@ -372,6 +387,7 @@ def _find_historical_file(directory, target_dt, io_manager):
     return str(files[-1])
 
 
+@protect_runtime_inputs
 def historical_pipeline(
     dt,
     lat_limits,
@@ -404,6 +420,11 @@ def historical_pipeline(
                 include_ewmrs=False,
             )
         )
+        if (getattr(cycle_state, "ingest_report", None)
+                and cycle_state.edgewarn_integration_inputs_ready):
+            report_path = commit_ingest_report(fs.BASE_DIR, cycle_state.ingest_report, historical=True)
+            cycle_state.input_manifest = CycleInputManifest.from_dict(
+                json.loads(report_path.read_text())["snapshots"]["ctam"])
         perf_tracker.stop("Ingestion")
 
         if not cycle_state.detection_inputs_ready:

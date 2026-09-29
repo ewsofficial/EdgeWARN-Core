@@ -8,6 +8,11 @@ from EdgeWARN.process.detect.config import DetectionConfig
 from common.ingest.manifest import CycleInputManifest
 
 
+@pytest.fixture(autouse=True)
+def runtime_base(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline.fs, "BASE_DIR", tmp_path)
+
+
 def _manifest(timestamp=None):
     return CycleInputManifest(
         cycle_time=timestamp
