@@ -11,6 +11,13 @@ installed shared config directory. Runtime base directories are independently re
 `--base-dir` / `--base_dir`, then `EDGEWARN_BASE_DIR`, then legacy `BASE_DIR`,
 then `filesystem.yaml`. All catalog edits require a process restart.
 
+`runtime.run.disable_stormprob` defaults to `false`. Direct Core and historical
+commands accept `--disable-stormprob` and `--no-disable-stormprob`; an explicit
+CLI value overrides YAML. `--disable-ctam` also disables StormProb, while
+`--disable-ctam-modules` leaves it enabled. With StormProb enabled, startup
+checks all of its configured input and model dependencies before creating
+runtime directories. The configuration editor accepts the same boolean key.
+
 The CTAM external-module discovery root (`run.ctam_module_dir` in
 `runtime.yaml`, default `ctam_modules`, resolved against the parent of the
 selected config directory) is

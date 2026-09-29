@@ -16,6 +16,7 @@ run:
 
   profile: false
   disable_ctam: false
+  disable_stormprob: false
   disable_tracking: false
   disable_polygon_expansion: false
 

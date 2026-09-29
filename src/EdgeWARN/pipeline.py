@@ -187,6 +187,8 @@ def run_edgewarn_integration_phase(
     remove_old_cells=None,
     disable_ctam=False,
     disable_ctam_modules=False,
+    disable_stormprob=False,
+    frozen_discovery=None,
     mrms_core_only=False,
     input_manifest: CycleInputManifest | None = None,
     final_input_provider=None,
@@ -202,6 +204,8 @@ def run_edgewarn_integration_phase(
         remove_old_cells=remove_old_cells,
         disable_ctam=disable_ctam,
         disable_ctam_modules=disable_ctam_modules,
+        disable_stormprob=disable_stormprob,
+        frozen_discovery=frozen_discovery,
         mrms_core_only=mrms_core_only,
         input_manifest=input_manifest,
         **extra,
@@ -225,6 +229,8 @@ def edgewarn_cycle_worker(
     disable_polygon_expansion=False,
     mrms_core_only=False,
     optional_complete_event=None,
+    disable_stormprob=False,
+    frozen_discovery=None,
 ):
     """Process target for staged EdgeWARN execution within the tandem runner."""
     sys.stdout = QueueWriter(log_queue)
@@ -318,6 +324,12 @@ def edgewarn_cycle_worker(
         def final_input_provider():
             optional_complete_event.wait()
             if not shared_state.get("optional_inputs_complete", False):
+                if not disable_ctam and not disable_stormprob:
+                    from EdgeWARN.ctam.preflight import StormProbDependencyError
+                    raise StormProbDependencyError(
+                        "WARNING: Cannot continue Core: StormProb optional input acquisition "
+                        "did not reach a final snapshot. Core is exiting nonzero."
+                    )
                 raise RuntimeError("Optional acquisition did not finish cleanly")
             return CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
 
@@ -329,6 +341,8 @@ def edgewarn_cycle_worker(
             shared_state.get("edgewarn_generated_file") or None,
             disable_ctam=disable_ctam,
             disable_ctam_modules=disable_ctam_modules,
+            disable_stormprob=disable_stormprob,
+            frozen_discovery=frozen_discovery,
             mrms_core_only=mrms_core_only,
             input_manifest=input_manifest,
             **extra,
@@ -347,6 +361,9 @@ def edgewarn_cycle_worker(
         publish_stage("completed", artifacts=(generated_file,))
         log("INFO: EdgeWARN worker completed successfully")
     except Exception as exc:
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        if isinstance(exc, StormProbDependencyError):
+            shared_state["fatal_dependency"] = str(exc)
         publish_stage("failed", errors=(str(exc),))
         log(f"ERROR: EdgeWARN tandem worker failed: {exc}")
         log(traceback.format_exc())
@@ -398,6 +415,8 @@ def historical_pipeline(
     io_manager=None,
     disable_ctam=False,
     disable_ctam_modules=False,
+    disable_stormprob=False,
+    frozen_discovery=None,
     disable_tracking=False,
     disable_polygon_expansion=False,
 ):
@@ -428,16 +447,35 @@ def historical_pipeline(
         perf_tracker.stop("Ingestion")
 
         if not cycle_state.detection_inputs_ready:
+            if not disable_ctam and not disable_stormprob:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                raise StormProbDependencyError(
+                    "WARNING: Cannot continue historical Core: StormProb protected "
+                    "MRMS detection inputs are unavailable. Core is exiting nonzero."
+                )
             pipeline_io.write_warning("Detection inputs were not staged successfully; skipping historical pipeline")
             perf_tracker.stop("Total Pipeline")
             return None, (None, None, None)
 
         input_manifest = cycle_state.input_manifest
         if input_manifest is None:
+            if not disable_ctam and not disable_stormprob:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                raise StormProbDependencyError(
+                    "WARNING: Cannot continue historical Core: StormProb final input "
+                    "snapshot is missing. Core is exiting nonzero."
+                )
             pipeline_io.write_error(
                 "Historical ingest did not publish an input manifest"
             )
             return None, (None, None, None)
+        if (not disable_ctam and not disable_stormprob
+                and not cycle_state.optional_inputs_complete):
+            from EdgeWARN.ctam.preflight import StormProbDependencyError
+            raise StormProbDependencyError(
+                "WARNING: Cannot continue historical Core: StormProb optional input "
+                "acquisition did not complete. Core is exiting nonzero."
+            )
 
         if "mrms_integration_ingest" in cycle_state.errors or "rap_ingest" in cycle_state.errors:
             pipeline_io.write_warning(
@@ -479,6 +517,8 @@ def historical_pipeline(
                 remove_old_cells=remove_old_cells_historical(),
                 disable_ctam=disable_ctam,
                 disable_ctam_modules=disable_ctam_modules,
+                disable_stormprob=disable_stormprob,
+                frozen_discovery=frozen_discovery,
                 input_manifest=input_manifest,
             )
             perf_tracker.stop("Integration")
@@ -489,6 +529,12 @@ def historical_pipeline(
                 perf_tracker.stop("Total Pipeline")
                 return None, (None, None, None)
         else:
+            if not disable_ctam and not disable_stormprob:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                raise StormProbDependencyError(
+                    "WARNING: Cannot continue historical Core: StormProb required "
+                    "RAP/integration inputs are unavailable. Core is exiting nonzero."
+                )
             pipeline_io.write_warning(
                 "Staged historical integration inputs were unavailable; "
                 "the timestamp remains incomplete"
@@ -504,6 +550,9 @@ def historical_pipeline(
 
         return generated_file, (None, None, None)
     except Exception as exc:
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        if isinstance(exc, StormProbDependencyError):
+            raise
         pipeline_io.write_error(f"Pipeline failed: {exc}")
         traceback.print_exc()
         return None, (None, None, None)

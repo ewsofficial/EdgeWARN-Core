@@ -10,6 +10,7 @@ from functools import lru_cache
 
 import util.file as fs
 from common.config.loader import ConfigError, load_config
+from common.ingest.mrms.core_contract import LEGACY_ALIASES
 
 _CONFIG_NAME = "integration"
 
@@ -54,10 +55,27 @@ def _resolve_dir(attribute_name):
 
 def get_datasets_config():
     datasets = []
+    ingest = load_config("ingest", config_dir=fs.MRMS_CONFIG_DIR)
+    registry = None
+    if ingest["schema_version"] == 2:
+        from common.ingest.mrms.config import get_registry
+        registry = fs.MRMS_REGISTRY or get_registry()
     for entry in section("stats_datasets"):
+        if registry is not None:
+            product = entry.get("product") or LEGACY_ALIASES.get(entry.get("filepath"))
+            if product is None:
+                raise ConfigError(
+                    f"{_CONFIG_NAME}.yaml", f"stats_datasets: {entry['name']}",
+                    "requires an MRMS product identity or a supported legacy filepath",
+                )
+            if not registry.is_enabled(product):
+                continue
+            filepath = registry.path_for(product)
+        else:
+            filepath = _resolve_dir(entry["filepath"])
         dataset = {
             "name": entry["name"],
-            "filepath": _resolve_dir(entry["filepath"]),
+            "filepath": filepath,
             "key": entry["key"],
             "method": entry["method"],
         }

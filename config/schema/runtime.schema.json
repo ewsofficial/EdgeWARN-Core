@@ -18,12 +18,12 @@
     "run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["lat_limits", "lon_limits", "profile", "disable_ctam", "disable_tracking", "disable_polygon_expansion", "ctam_module_dir", "disable_ewmrs", "disable_nws", "disable_metar", "disable_wpc", "disable_goes", "disable_nexrad", "mrms_core_only"],
+      "required": ["lat_limits", "lon_limits", "profile", "disable_ctam", "disable_stormprob", "disable_tracking", "disable_polygon_expansion", "ctam_module_dir", "disable_ewmrs", "disable_nws", "disable_metar", "disable_wpc", "disable_goes", "disable_nexrad", "mrms_core_only"],
       "properties": {
         "lat_limits": { "type": "array", "items": { "type": "number", "minimum": -90, "maximum": 90 }, "minItems": 2, "maxItems": 2 },
         "lon_limits": { "type": "array", "items": { "type": "number", "minimum": -180, "maximum": 360 }, "minItems": 2, "maxItems": 2 },
         "profile": { "type": "boolean" },
-        "disable_stormprob": { "type": "boolean", "description": "Prepared for phase 6; runtime enforcement is not yet implemented." },
+        "disable_stormprob": { "type": "boolean" },
         "disable_ctam": { "type": "boolean" },
         "disable_tracking": { "type": "boolean" },
         "disable_polygon_expansion": { "type": "boolean" },

@@ -433,7 +433,8 @@ def _attach_stormprob_inputs(cells, timestamp, input_manifest=None):
     return cells
 
 
-def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_manifest=None, disable_ctam_modules=False):
+def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_manifest=None,
+                         disable_ctam_modules=False, disable_stormprob=False, frozen_discovery=None):
     if disable_ctam:
         io_manager.write_info("CTAM module execution disabled via command-line flag")
         return cells, None
@@ -455,11 +456,16 @@ def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_m
                 json_path=json_path,
                 input_manifest=input_manifest,
                 disable_ctam_modules=disable_ctam_modules,
+                disable_stormprob=disable_stormprob,
+                frozen_discovery=frozen_discovery,
             ),
         )
         cells = ctam_result.cells
         io_manager.write_debug("CTAM module execution completed successfully")
     except Exception as e:
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        if isinstance(e, StormProbDependencyError):
+            raise
         io_manager.write_error(f"Failed to run CTAM modules: {e}")
 
         ctam_result = None
@@ -509,7 +515,8 @@ def _public_route_payloads(timestamp, ctam_result):
     return payloads
 
 
-def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None, ctam_result=None):
+def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None,
+                   ctam_result=None, *, disable_stormprob=False):
     """Commit StormProb inputs, then publish derived JSON and indexes."""
     from EdgeWARN.ctam.publication import CTAMPublicationCoordinator
     from EdgeWARN.stormprob.database import StormProbRepository, clean_public_projection
@@ -540,7 +547,9 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
     sqlite_started = time.perf_counter()
     repository.commit_cycle(str(timestamp), timestamp, cells, manifest_record,
                             projection_cells=projected_cells, projection_path=json_path,
-                            forecasts=forecasts or None)
+                            forecasts=forecasts or None,
+                            forecast_policy="preserve" if disable_stormprob else "invalidate",
+                            write_pending_forecasts=not disable_stormprob)
     sqlite_seconds = time.perf_counter() - sqlite_started
     coordinator = CTAMPublicationCoordinator(fs.DATA_DIR / "ctam" / "transactions")
     coordinator.recover()
@@ -626,6 +635,8 @@ def main(
     remove_old_cells=None,
     disable_ctam=False,
     disable_ctam_modules=False,
+    disable_stormprob=False,
+    frozen_discovery=None,
     mrms_core_only=False,
     input_manifest: CycleInputManifest | None = None,
     final_input_provider=None,
@@ -659,16 +670,21 @@ def main(
                 input_manifest=CycleInputManifest(cycle_time=final_manifest.cycle_time, inputs=added),
             )
         input_manifest = final_manifest
-    result_cells = _run_step(
-        "Integration - StormProb Inputs",
-        lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),
-    )
+    if not disable_ctam and not disable_stormprob:
+        result_cells = _run_step(
+            "Integration - StormProb Inputs",
+            lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),
+        )
+        from EdgeWARN.ctam.preflight import validate_stormprob_cycle
+        validate_stormprob_cycle(result_cells, input_manifest)
     # Forecast inference reads only committed database rows. Commit the input
     # side of this cycle before CTAM; publication below upgrades the pending
     # four-lead rows and publishes the derived projections afterward.
     try:
         from EdgeWARN.stormprob.database import StormProbRepository
-        StormProbRepository().commit_cycle(str(timestamp), timestamp, result_cells)
+        StormProbRepository().commit_cycle(
+            str(timestamp), timestamp, result_cells,
+            forecast_policy="preserve", write_pending_forecasts=False)
     except Exception as exc:
         io_manager.write_warning(f"StormProb input commit failed before CTAM: {exc}")
     ctam_output = _run_ctam_if_enabled(
@@ -678,6 +694,8 @@ def main(
         json_path=json_path,
         input_manifest=input_manifest,
         disable_ctam_modules=disable_ctam_modules,
+        disable_stormprob=disable_stormprob,
+        frozen_discovery=frozen_discovery,
     )
     # Preserve compatibility with tests and integrations that replace the
     # historical helper and return only the cell list.
@@ -687,7 +705,10 @@ def main(
         result_cells, ctam_result = ctam_output, None
 
     try:
-        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells, input_manifest, ctam_result))
+        _run_step("Integration - Publication", lambda: _publish_cycle(
+            handler, timestamp, result_cells, json_path, remove_old_cells,
+            input_manifest, ctam_result,
+            disable_stormprob=disable_ctam or disable_stormprob))
     except Exception as exc:
         io_manager.write_error(f"Failed to save integrated stormcells to {json_path}: {exc}")
         raise

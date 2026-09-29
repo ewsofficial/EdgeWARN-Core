@@ -44,6 +44,18 @@ def test_commit_cycle_is_atomic_idempotent_and_read_only(tmp_path):
     assert "stormprob" not in repo.legacy_history(101)[0]
 
 
+def test_disabled_stormprob_keeps_shared_history_without_new_forecast_rows(tmp_path):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    repo.commit_cycle(
+        "cycle1", cell["timestamp"], [cell],
+        forecast_policy="preserve", write_pending_forecasts=False,
+    )
+    assert len(repo.feature_history(101)) == 1
+    with repo.reader() as db:
+        assert db.execute("SELECT count(*) FROM forecasts").fetchone()[0] == 0
+
+
 def test_version_one_migration_adds_projection_indexes_idempotently(tmp_path):
     repo = StormProbRepository(tmp_path)
     with repo.writer():

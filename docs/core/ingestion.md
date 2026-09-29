@@ -7,9 +7,26 @@ work. Shared implementations live under `src/common/`; `src/EdgeWARN/ingest/`
 is a compatibility re-export layer.
 
 The [configurable MRMS Phase 1 contract and impact inventory](configurable-mrms-phase1.md)
-records the current 21-product baseline, proposed three-product protected set,
-raw-path migration, and implementation ownership. It characterizes the current
-runtime; the v2 configuration and behavior changes are not active yet.
+records the current 21-product baseline, three-product protected set,
+raw-path migration, and implementation ownership. The shipped ingest catalog
+remains v1 until the coordinated phase 8 release; v2 trees are available for
+development. Core startup now audits enabled CTAM declarations and StormProb
+dependencies before initializing the runtime filesystem.
+
+An enabled external CTAM module must write `requires = []` or declare
+`[[requires]]` selectors. Required disabled MRMS products stop Core at startup;
+enabled but unavailable products block only that module for the cycle. A
+required `previous` selector needs a retention window at least as long as its
+declared `max_age_seconds`. Changes to module declarations or ingestion
+eligibility require a restart.
+
+StormProb has a separate all-input gate after the final optional input and
+enrichment snapshot. Missing required MRMS/RAP inputs or model features stop
+the whole Core process with a nonzero status before forecast or alert
+publication. Set `runtime.run.disable_stormprob: true` or use
+`--disable-stormprob` to skip its dependency and asset checks, inference, and
+new publication while keeping external CTAM modules available. `--disable-ctam`
+disables both; `--disable-ctam-modules` disables only external modules.
 
 ## Service ownership
 

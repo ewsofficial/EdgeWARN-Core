@@ -26,10 +26,13 @@ the `/transaction` endpoints validate, seal idempotently, or abandon the
 module's private transaction. Staged work is never visible through the API or
 filesystem until the host validates and publishes the completed cycle.
 
-`GET /files` deliberately exposes metadata for every frozen catalog entry,
-including unavailable files and their reason. File bytes are narrower: a
-module may fetch content only for a file selected by its own manifest
-requirements. Content is read through the pinned descriptor, never found by a
+`GET /files` exposes only the authenticated module's declared selectors,
+including unavailable declared files and their reasons. Descriptor and content
+requests for an undeclared input return `requirement_unmet` (HTTP 403) with a
+prompt to add `[[requires]]` and restart. The runner records the contract
+violation, and the host refuses a later transaction commit from that module.
+Content is read through the pinned
+descriptor, never found by a
 fresh directory scan or newest-mtime selection. Responses support a single
 `Range: bytes=start-end` request and reject artifacts above the documented
 stream limit.

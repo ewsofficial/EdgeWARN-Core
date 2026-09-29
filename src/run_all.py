@@ -51,6 +51,8 @@ _ROUTING = {
     "--lon_limits": ("edgewarn",),
     "--profile": ("edgewarn", "ewmrs", "nexrad"),
     "--disable-ctam": ("edgewarn",),
+    "--disable-stormprob": ("edgewarn",),
+    "--disable-ctam-modules": ("edgewarn",),
     "--disable-tracking": ("edgewarn",),
     "--disable-polygon-expansion": ("edgewarn",),
     "--disable-goes": ("edgewarn", "ewmrs"),
@@ -109,7 +111,7 @@ def _parse_args(argv=None):
     parser.add_argument("--lat_limits", nargs=2, type=float, default=None)
     parser.add_argument("--lon_limits", nargs=2, type=float, default=None)
     for flag in (
-        "disable-ctam", "disable-tracking", "disable-polygon-expansion",
+        "disable-ctam", "disable-stormprob", "disable-ctam-modules", "disable-tracking", "disable-polygon-expansion",
         "disable-goes", "disable-metar", "disable-nws", "disable-wpc",
         "disable-ewmrs", "disable-nexrad",
     ):
@@ -174,7 +176,7 @@ def build_service_commands(args, services, src_root, *, service_argv=None):
         for flag, owners in _ROUTING.items():
             if service not in owners:
                 continue
-            value = getattr(args, flag.lstrip("-").replace("-", "_"))
+            value = getattr(args, flag.lstrip("-").replace("-", "_"), None)
             if value is None:
                 continue
             if value is True:
@@ -375,6 +377,20 @@ def supervise(commands, *, src_root, stop_event=None):
 
 def main(argv=None):
     args, services = _parse_args(argv)
+    if "edgewarn" in services:
+        from EdgeWARN.ctam.preflight import check_core_startup
+        from util.ctam_config import resolve_ctam_module_dir
+        run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
+        filesystem = config_loader.load_config("filesystem", config_dir=args.config_dir)
+        check_core_startup(
+            config_dir=args.config_dir,
+            base_dir=overlay.resolve_base_dir(args.base_dir, filesystem),
+            module_root=resolve_ctam_module_dir(config_dir=args.config_dir),
+            disable_ctam=overlay.resolve(args.disable_ctam, yaml_value=run_cfg["disable_ctam"]),
+            disable_ctam_modules=bool(args.disable_ctam_modules),
+            disable_stormprob=overlay.resolve(args.disable_stormprob, yaml_value=run_cfg["disable_stormprob"]),
+            mrms_core_only=args.mrms_core_only,
+        )
     src_root = os.path.dirname(os.path.abspath(__file__))
     commands = build_service_commands(args, services, src_root)
     print(

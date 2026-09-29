@@ -69,6 +69,7 @@ def _config(tmp_path, *, handoff_enabled=True):
         profile=False,
         disable_ctam=False,
         disable_ctam_modules=False,
+        disable_stormprob=True,
         disable_tracking=False,
         disable_polygon_expansion=False,
         refl_threshold=20.0,
@@ -256,7 +257,7 @@ def test_failed_detection_can_recover_without_poisoned_final_report(
 
 
 def _phased_worker(log_queue, shared, detection_event, integration_event, *args):
-    optional_event = args[-1]
+    optional_event = args[-3]
     if not detection_event.wait(2) or not integration_event.wait(2):
         raise RuntimeError("Mandatory callbacks waited for optional completion")
     shared["base_work_started"] = True

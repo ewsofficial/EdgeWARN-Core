@@ -86,6 +86,8 @@ npm run validate-config
 
 The interactive configuration editor requires a terminal. Select a file and leaf value, use `Ctrl+S` to validate and save, `Esc` to go back, and `q` to quit. A complete alternate configuration tree can be selected with `--config-dir` or `EDGEWARN_CONFIG_DIR`.
 
+To run Core without StormProb, set `runtime.run.disable_stormprob` to `true` with `edgewarn configure`, or pass `--disable-stormprob` to a direct Core command. External CTAM modules remain available. Restart after changing the setting.
+
 ### Historical reprocessing
 
 From `src/`:

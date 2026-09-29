@@ -94,14 +94,14 @@ class WorkBudget:
 _BUDGETS = {}
 _BUDGET_LOCK = threading.Lock()
 _PUBLISH_LOCK = threading.Lock()
-_PRODUCT_LOCKS = {}
+_DOWNLOAD_LOCKS = {}
 
 
 @asynccontextmanager
 async def _product_lock(registry, spec):
     key = (str(registry.base_dir), spec.product_id)
     with _BUDGET_LOCK:
-        lock = _PRODUCT_LOCKS.setdefault(key, threading.Lock())
+        lock = _DOWNLOAD_LOCKS.setdefault(key, threading.Lock())
     while not lock.acquire(blocking=False):
         await asyncio.sleep(0.01)
     try:

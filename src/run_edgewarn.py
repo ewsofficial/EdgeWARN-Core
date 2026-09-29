@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 
 from common.config import loader as config_loader
 from EdgeWARN import initialize_runtime
-from EdgeWARN.stormprob.assets import validate_assets
+from EdgeWARN.ctam.preflight import PreflightError, StormProbDependencyError, check_core_startup
 from EdgeWARN.schedule.scheduler import MRMSUpdateChecker
 from util.io import TimestampedOutput, IOManager
 from util.release import get_release_version
@@ -58,12 +58,23 @@ def main():
     args = io_manager.get_args()
 
     try:
-        validate_assets()
-    except (FileNotFoundError, RuntimeError) as exc:
-        print(f"[EdgeWARN] StormProb startup validation failed: {exc}")
+        args.ctam_discovery = check_core_startup(
+            config_dir=args.config_dir, base_dir=args.base_dir,
+            module_root=args.ctam_module_dir, disable_ctam=args.disable_ctam,
+            disable_ctam_modules=args.disable_ctam_modules,
+            disable_stormprob=args.disable_stormprob,
+            mrms_core_only=args.mrms_core_only,
+        )
+    except (PreflightError, StormProbDependencyError) as exc:
+        print(f"[EdgeWARN] {exc}")
         sys.exit(1)
 
     initialize_runtime(base_dir=args.base_dir, io_manager=io_manager)
+    from common.ingest.mrms.config import get_registry
+    import util.file as fs
+    registry = get_registry()
+    if registry is not None:
+        fs.ensure_mrms_directories(registry)
 
     print(f"Primary EdgeWARN service started (v{get_release_version()}). Press CTRL+C to exit.")
     print("[EdgeWARN] EWMRS and its accessories are owned by run_ewmrs.py; NEXRAD by run_nexrad.py.")

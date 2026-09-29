@@ -157,24 +157,43 @@ class IOManager:
 
         root = resolve_ctam_module_dir(args.ctam_module_dir, config_dir=args.config_dir)
         result = discovery.discover_modules(root)
+        preflight_error = None
+        if args.check_ctam_modules:
+            from EdgeWARN.ctam.preflight import PreflightError, check_core_startup
+            try:
+                check_core_startup(
+                    config_dir=args.config_dir, base_dir=args.base_dir,
+                    module_root=root, disable_ctam=args.disable_ctam,
+                    disable_ctam_modules=args.disable_ctam_modules,
+                    disable_stormprob=args.disable_stormprob,
+                    mrms_core_only=getattr(args, "mrms_core_only", False),
+                )
+            except PreflightError as exc:
+                preflight_error = str(exc)
 
         print(f"CTAM module root: {result.root}")
         if args.check_ctam_modules:
             # Said outright rather than implied: readiness is decided per cycle
             # against that cycle's input catalog, which does not exist outside a
             # running cycle, so this cannot and does not check it.
-            print("Checking installed manifests only; module readiness is evaluated per cycle.")
+            print("Checking installed manifests and enabled input declarations; cycle availability is evaluated per cycle.")
 
         if not result.root_present:
             print("OK   no module root; an operator who installs no modules is a supported configuration")
             print("0 CTAM module manifest(s) checked")
-            sys.exit(0)
+            if preflight_error:
+                print(preflight_error)
+            sys.exit(1 if preflight_error else 0)
 
         failures = 0
+        audit_external = not args.disable_ctam and not args.disable_ctam_modules
         for module in result.modules:
             if module.state == discovery.STATE_INVALID:
-                failures += 1
-                print(f"FAIL {module.module_id} ({module.state}) -> {module.reason}")
+                if audit_external:
+                    failures += 1
+                    print(f"FAIL {module.module_id} ({module.state}) -> {module.reason}")
+                else:
+                    print(f"SKIP {module.module_id} (external modules disabled) -> {module.reason}")
             else:
                 print(f"OK   {module.module_id} ({module.state}) -> {module.reason or 'manifest is valid'}")
                 if module.manifest is not None:
@@ -192,7 +211,9 @@ class IOManager:
             print(f"All {total} CTAM module manifest(s) passed validation")
 
         # --list is a report and succeeds whatever it found; --check is the gate.
-        sys.exit(1 if failures and args.check_ctam_modules else 0)
+        if preflight_error:
+            print(preflight_error)
+        sys.exit(1 if (failures or preflight_error) and args.check_ctam_modules else 0)
 
     @staticmethod
     def _resolve_common_processing_args(args):
@@ -203,6 +224,7 @@ class IOManager:
         run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
         args.profile = overlay.resolve(args.profile, yaml_value=run_cfg["profile"], key="run.profile")
         args.disable_ctam = overlay.resolve(args.disable_ctam, yaml_value=run_cfg["disable_ctam"], key="run.disable_ctam")
+        args.disable_stormprob = overlay.resolve(args.disable_stormprob, yaml_value=run_cfg["disable_stormprob"], key="run.disable_stormprob")
         args.disable_tracking = overlay.resolve(args.disable_tracking, yaml_value=run_cfg["disable_tracking"], key="run.disable_tracking")
         args.disable_polygon_expansion = overlay.resolve(args.disable_polygon_expansion, yaml_value=run_cfg["disable_polygon_expansion"], key="run.disable_polygon_expansion")
         # Resolved through util.ctam_config so the repo-root anchoring for a
@@ -220,7 +242,6 @@ class IOManager:
         parser = cli.build_service_parser("edgewarn")
         args = parser.parse_args()
         self._export_config_dir(args)
-        self._run_ctam_diagnostics(args)
 
         runtime_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
         args.lat_limits = overlay.resolve(args.lat_limits, yaml_value=list(runtime_cfg["lat_limits"]), key="run.lat_limits")
@@ -233,6 +254,7 @@ class IOManager:
         args.disable_nexrad = overlay.resolve(args.disable_nexrad, yaml_value=runtime_cfg["disable_nexrad"], key="run.disable_nexrad")
         args.mrms_core_only = overlay.resolve(args.mrms_core_only, yaml_value=runtime_cfg["mrms_core_only"], key="run.mrms_core_only")
         self._resolve_common_processing_args(args)
+        self._run_ctam_diagnostics(args)
 
         if len(args.lat_limits) != 2 or len(args.lon_limits) != 2:
             print("ERROR: Latitude and longitude limits must each have exactly 2 numeric values.")
@@ -254,12 +276,12 @@ class IOManager:
         self._add_common_processing_args(parser)
         args = parser.parse_args()
         self._export_config_dir(args)
-        self._run_ctam_diagnostics(args)
 
         historical_cfg = config_loader.load_config("historical", config_dir=args.config_dir)["historical"]
         args.lat = overlay.resolve(args.lat, yaml_value=list(historical_cfg["lat"]), key="historical.lat")
         args.lon = overlay.resolve(args.lon, yaml_value=list(historical_cfg["lon"]), key="historical.lon")
         self._resolve_common_processing_args(args)
+        self._run_ctam_diagnostics(args)
         self._validate_common_args(args)
         return args
 

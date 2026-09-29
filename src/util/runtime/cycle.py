@@ -333,6 +333,8 @@ class PrimaryCycleConfig:
     # consume. Publication failures never fail a cycle.
     base_dir: str | None = None
     handoff_enabled: bool = False
+    disable_stormprob: bool = False
+    ctam_discovery: object = None
 
 
 @protect_runtime_inputs
@@ -401,6 +403,7 @@ def run_primary_cycle_once(
             dt, config.lat_limits, config.lon_limits, detection_config,
             config.profile, config.disable_ctam, config.disable_ctam_modules, config.disable_tracking,
             config.disable_polygon_expansion, config.mrms_core_only, optional_complete_event,
+            config.disable_stormprob, config.ctam_discovery,
         ),
     )
     started_processes = StartedProcessRegistry()
@@ -651,6 +654,23 @@ def run_primary_cycle_once(
         worker_exit_status=edgewarn_proc.exitcode,
         fallback_error="EdgeWARN worker exited without publishing a terminal stage result",
     )
+    if shared_state.get("fatal_dependency"):
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        raise StormProbDependencyError(shared_state["fatal_dependency"])
+    if not config.disable_ctam and not config.disable_stormprob and (
+        cycle_state is None or not cycle_state.detection_inputs_ready
+        or not cycle_state.rap_inputs_ready
+    ):
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        missing = []
+        if cycle_state is None or not cycle_state.detection_inputs_ready:
+            missing.append("protected MRMS detection inputs")
+        if cycle_state is None or not cycle_state.rap_inputs_ready:
+            missing.append("RAP environment and wind fields")
+        raise StormProbDependencyError(
+            "WARNING: Cannot continue Core: StormProb required inputs are unavailable: "
+            + ", ".join(missing) + ". Core is exiting nonzero."
+        )
 
     ingest_errors = tuple(
         f"{name}: {message}"

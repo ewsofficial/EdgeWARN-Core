@@ -311,7 +311,8 @@ class StormProbRepository:
                      projection_cells: list[dict] | None = None,
                      projection_path: Path | str | None = None,
                      forecast_policy: str = "invalidate",
-                     forecasts: list[dict] | None = None) -> int:
+                     forecasts: list[dict] | None = None,
+                     write_pending_forecasts: bool = True) -> int:
         """Atomically upsert one cycle and all its current input/status rows."""
         if forecast_policy not in ("invalidate", "preserve"):
             raise ValueError("forecast_policy must be invalidate or preserve")
@@ -340,7 +341,8 @@ class StormProbRepository:
                     db.execute("""DELETE FROM forecasts WHERE cell_id=? AND analysis_time=?
                         AND model_version<>?""", (str(cell["id"]), _time(record["analysis_time"]),
                                                  PENDING_MODEL_VERSION))
-                self._upsert_observation(db, cell, record, str(cycle_id))
+                self._upsert_observation(db, cell, record, str(cycle_id),
+                                         write_pending_forecasts=write_pending_forecasts)
                 count += 1
             if forecasts:
                 forecasts = _normalize_forecasts(forecasts)
@@ -412,7 +414,8 @@ class StormProbRepository:
              threshold, _json(forecast.get("metadata", {}))))
 
     @staticmethod
-    def _upsert_observation(db: sqlite3.Connection, cell: dict, record: dict, cycle_id: str) -> None:
+    def _upsert_observation(db: sqlite3.Connection, cell: dict, record: dict, cycle_id: str,
+                            *, write_pending_forecasts: bool = True) -> None:
         cell_id = str(cell["id"])
         moment = _time(record["analysis_time"])
         schema = record["schema_version"]
@@ -452,7 +455,7 @@ class StormProbRepository:
             (*key, radii, log_area, area))
         # The actual models arrive in Phase 3/4. Record explicit status for all
         # four leads, so no committed input cycle appears to contain predictions.
-        for lead in LEADS:
+        for lead in (LEADS if write_pending_forecasts else ()):
             db.execute("""INSERT INTO forecasts
                 (cell_id,analysis_time,lead_minutes,model_version,cycle_id,status,reason,metadata_json)
                 VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(cell_id,analysis_time,lead_minutes,model_version)

@@ -212,8 +212,6 @@ def parse_selector(raw: str) -> Selector:
             f"legal product id: it must start with a letter or digit, use only "
             f"letters, digits and '. _ -', and be at most 128 characters"
         )
-    _validate_product_against_catalog(raw, family, product)
-
     return Selector(raw=raw, kind="input", family=family, product=product, role=role)
 
 
@@ -232,38 +230,17 @@ def _unknown_selector_message(raw: str) -> str:
     )
 
 
-def _validate_product_against_catalog(raw: str, family: str, product: str) -> None:
-    """Reject a product typo at discovery, using the host's existing catalogs.
-
-    The catalog accessors are imported lazily: ``parse_manifest`` must not drag
-    the ingest and integration configuration stack into every importer of this
-    module. If a catalog cannot be loaded -- a config error, a stripped test
-    environment -- the product is treated as unvalidated rather than blamed on
-    the module author, but the family and role checks still stand.
-    """
-    try:
-        known = _catalog_products(family)
-    except Exception:  # pragma: no cover - depends on host config health
-        return
-    if not known:
-        return
-    if product not in known:
-        raise ManifestError(
-            f"requires.selector {raw!r} names product {product!r}, which is not in "
-            f"the host's {family} catalog. Known {family} products include: "
-            f"{', '.join(sorted(known)[:8])}"
-            f"{' ...' if len(known) > 8 else ''}"
-        )
-
-
 def _catalog_products(family: str) -> frozenset[str]:
     if family == "mrms":
-        from common.ingest.mrms.config import get_mrms_modifiers
+        from common.ingest.mrms.config import get_mrms_modifiers, get_registry
 
-        # (region, product, outdir) triples. ProbSevere carries product None,
-        # which is not addressable by a product selector.
+        registry = get_registry()
+        if registry is not None:
+            return frozenset(spec.product_id for spec in registry.products)
+        # The v1 source modifier is null for the ProbSevere JSON adapter.
         return frozenset(
-            product for _region, product, _outdir in get_mrms_modifiers() if product
+            product or "ProbSevere"
+            for _region, product, _outdir in get_mrms_modifiers()
         )
     if family == "goes":
         from common.ingest.mrms.config import get_goes_modifiers

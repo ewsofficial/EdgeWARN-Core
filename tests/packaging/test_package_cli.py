@@ -115,3 +115,18 @@ def test_installed_nws_zone_sync_dispatches_apply(monkeypatch, tmp_path, capsys)
 
     assert calls[-1] == ("sync", False)
     assert json.loads(capsys.readouterr().out) == {"updated": 1}
+
+
+def test_run_core_preflight_failure_prevents_child_launch(monkeypatch, tmp_path):
+    import run_all
+    from EdgeWARN.ctam import preflight
+
+    launched = []
+    monkeypatch.setattr(run_all, 'supervise', lambda *_args, **_kwargs: launched.append(True))
+    monkeypatch.setattr(preflight, 'check_core_startup',
+                        lambda **_kwargs: (_ for _ in ()).throw(
+                            preflight.PreflightError('missing MRMS_MESH_00.50')))
+    with pytest.raises(SystemExit) as error:
+        cli.main(['run', 'core', '--config-path', str(REPO_ROOT / 'config')])
+    assert error.value.code == 2
+    assert launched == []

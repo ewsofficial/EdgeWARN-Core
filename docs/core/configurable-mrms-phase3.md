@@ -24,10 +24,11 @@ including elevation and without the `MRMS_` prefix, for example
 raw aliases only. GUI names, output paths, colormaps, GOES, and document versions
 other than ingest remain unchanged. Consumer activation belongs to phase 7.
 
-`runtime.run.disable_stormprob` is prepared as a boolean schema field and is added
-as `false` in converted documents. It does **not yet disable StormProb**. The shared
-fixture records the intended `--disable-stormprob` / `--no-disable-stormprob` mapping;
-CLI parsing, overlays, dependency checks, and inference bypass belong to phase 6.
+`runtime.run.disable_stormprob` is a boolean schema field, added as `false` in
+converted documents. Phase 6 wires the setting and the
+`--disable-stormprob` / `--no-disable-stormprob` flags through startup preflight,
+cycle execution, and model asset bypass. Consumer activation still belongs to
+phase 7.
 
 ## Offline migration report
 

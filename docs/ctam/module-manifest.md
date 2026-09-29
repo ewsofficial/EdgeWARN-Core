@@ -65,7 +65,7 @@ exists to remove.
 | `entrypoint` | string array | — required | Argument vector, never a shell string. Only `{python}` is expanded. Absolute paths, shell metacharacters, and paths escaping the module directory are rejected at discovery (`manifest.py:494`). |
 | `timeout_seconds` | int | `10` | Bounded 1–30 seconds (`limits.py:46`). |
 | `after` | string array | `[]` | Module ids that must run first; `stormprob` is always legal and precedes external modules. Self-dependency rejected here; cycles are detected by discovery. |
-| `[[requires]]` | table list | `[]` | Declared inputs; see below. |
+| `requires = []` or `[[requires]]` | array/table list | — required for enabled modules | Declare no host inputs explicitly, or list each input; see below. |
 | `[[writes]]` | table list | — one or more required | Declared output locations; see below. |
 | `[[public_routes]]` | table list | `[]` | Optional public JSON routes. Each requires a unique `id` and `description`; at most 16 are allowed. |
 
@@ -100,10 +100,18 @@ optional gets a blocked module rather than a silent skip.
 | `cells.history` | cell history | Existing `data/cells/<id>.json` records. `min_history_entries` (1–120, `limits.py:60`) applies. |
 | `input:<FAMILY>:<PRODUCT>:<role>` | input | Family `mrms`, `goes`, or `rap` (case-insensitive); role `current` or `previous`. `max_age_seconds` (positive) applies. |
 
-Unknown families, roles, products, and selectors are rejected at discovery —
-a typo never becomes a requirement that can never be satisfied. Product names
-are checked against the host's own ingest catalogs (`manifest.py:223`). The
+Unknown families, roles, and selector shapes are rejected at discovery.
+Product eligibility is checked at Core startup against the resolved ingest
+registry, including the special `ProbSevere` identity. A required MRMS product
+that is disabled stops Core before workers or downloads start, even when the
+module itself sets `required = false`. An optional disabled input remains
+declared but is absent from the cycle catalog. The
 `alerts.current` kind is deliberately not an admitted Phase 1 input.
+
+`--list-ctam-modules` remains a read-only discovery report. Core startup and
+`--check-ctam-modules` additionally require an explicit `requires` key for
+every enabled module and audit the raw declarations before discovery can
+discard a module for another manifest error.
 
 ## Write pointers and ownership
 

@@ -53,6 +53,7 @@ class ExternalModuleRunner:
                 if not evaluation["satisfied"]:
                     results.append(ModuleRunResult(module_id, "skipped_missing_requirements", 0, None, "", "", "declared requirements are not satisfied")); continue
                 started = time.monotonic()
+                checkpoint = self.transactions.checkpoint()
                 env = {"PATH": inherited_process_path(), "CTAM_API_URL": server.url, "CTAM_API_TOKEN": server.token_for(module_id), "CTAM_CYCLE_ID": self.catalog.cycle_id, "CTAM_MODULE_ID": module_id}
                 try:
                     process = subprocess.Popen(self._argv(manifest), cwd=manifest.directory, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -64,6 +65,15 @@ class ExternalModuleRunner:
                         except subprocess.TimeoutExpired:
                             process.kill(); stdout, stderr = process.communicate()
                         results.append(ModuleRunResult(module_id, "timed_out", time.monotonic() - started, process.returncode, self._capture(stdout), self._capture(stderr), "module exceeded manifest timeout")); continue
+                    violations = self.service.contract_violations(module_id)
+                    if violations:
+                        self.transactions.revoke_after_contract_violation(module_id, checkpoint)
+                        results.append(ModuleRunResult(
+                            module_id, "failed", time.monotonic() - started,
+                            process.returncode, self._capture(stdout), self._capture(stderr),
+                            "undeclared input access: " + ", ".join(violations)
+                            + "; add matching [[requires]] selectors and restart",
+                        )); continue
                     if process.returncode != 0:
                         results.append(ModuleRunResult(module_id, "failed", time.monotonic() - started, process.returncode, self._capture(stdout), self._capture(stderr), "module exited nonzero")); continue
                     if not self.transactions.transactions[module_id].sealed:

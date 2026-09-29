@@ -22,6 +22,9 @@ from common.config import loader as config_loader, overlay
 from common.ingest.mrms.config import get_check_modifiers
 from util.runtime.cycle import (
     CycleRetryPolicy,
+    CycleOutcome,
+    CycleStageResult,
+    CycleStatus,
     CycleStateStore,
     PrimaryCycleConfig,
     run_primary_cycle_once,
@@ -40,6 +43,8 @@ def build_cycle_config(args):
         profile=args.profile,
         disable_ctam=args.disable_ctam,
         disable_ctam_modules=args.disable_ctam_modules,
+        disable_stormprob=args.disable_stormprob,
+        ctam_discovery=getattr(args, "ctam_discovery", None),
         disable_tracking=args.disable_tracking,
         disable_polygon_expansion=args.disable_polygon_expansion,
         refl_threshold=args.refl_threshold,
@@ -286,6 +291,19 @@ def run_primary_cycle_loop(
                         manager,
                         config=cycle_config,
                     )
+                except Exception as exc:
+                    from EdgeWARN.ctam.preflight import StormProbDependencyError
+                    if isinstance(exc, StormProbDependencyError):
+                        cycle_state_store.record_outcome(
+                            CycleOutcome(
+                                dt,
+                                {"stormprob": CycleStageResult(
+                                    CycleStatus.FAILED, errors=(str(exc),))},
+                                retryable=False,
+                            ),
+                            pending_attempt_count,
+                        )
+                    raise
                 finally:
                     if primary_lease is not None:
                         primary_lease.release()

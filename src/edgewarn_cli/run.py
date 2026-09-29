@@ -213,6 +213,8 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         lat_limits=None,
         lon_limits=None,
         disable_ctam=None,
+        disable_ctam_modules=None,
+        disable_stormprob=None,
         disable_tracking=None,
         disable_polygon_expansion=None,
         disable_goes=None,
@@ -234,7 +236,23 @@ def run_from_namespace(args: argparse.Namespace) -> int:
             parse_worker_argv(args.args, services), invocation_dir
         )
         preflight_worker_argv(worker_argv)
-    except ValueError as exc:
+        if "edgewarn" in services:
+            from util.cli import build_service_parser
+            from util.ctam_config import resolve_ctam_module_dir
+            from EdgeWARN.ctam.preflight import check_core_startup
+            core_args = build_service_parser("edgewarn", add_help=False).parse_args(
+                worker_argv.get("edgewarn", ())
+            )
+            run_cfg = config_loader.load_config("runtime", config_dir=config_root)["run"]
+            check_core_startup(
+                config_dir=config_root, base_dir=launcher_args.base_dir,
+                module_root=resolve_ctam_module_dir(core_args.ctam_module_dir, config_dir=config_root),
+                disable_ctam=overlay.resolve(core_args.disable_ctam, yaml_value=run_cfg["disable_ctam"]),
+                disable_ctam_modules=core_args.disable_ctam_modules,
+                disable_stormprob=overlay.resolve(core_args.disable_stormprob, yaml_value=run_cfg["disable_stormprob"]),
+                mrms_core_only=launcher_args.mrms_core_only or bool(core_args.mrms_core_only),
+            )
+    except (ValueError, RuntimeError) as exc:
         args.parser.error(str(exc))
     src_root = str(Path(run_all.__file__).resolve().parent)
     commands = run_all.build_service_commands(

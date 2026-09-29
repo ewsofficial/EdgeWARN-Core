@@ -333,6 +333,15 @@ deploying with `edgewarn --check-ctam-modules --ctam-module-dir
 /srv/edgewarn/ctam_modules`. In Compose these are already wired: set
 `EDGEWARN_CTAM_MODULES_DIR` to choose the host directory.
 
+Enabled modules must explicitly declare `requires = []` or `[[requires]]`.
+Core startup checks required MRMS products against the effective ingest
+registry before creating runtime directories or launching workers. Enabled
+StormProb also requires its model assets and all source products. To disable
+StormProb while retaining external CTAM, set
+`edgewarn configure runtime.run.disable_stormprob true`, restart, or pass
+`--disable-stormprob` to the direct Core command (through `--args core` for
+`edgewarn run`). `--no-disable-stormprob` overrides the configured value.
+
 The image installs a built wheel. `tini` runs as PID 1 and the entrypoint pipes
 the installed `edgewarn` command through `rotatelogs` for persisted, rotated
 logs:
