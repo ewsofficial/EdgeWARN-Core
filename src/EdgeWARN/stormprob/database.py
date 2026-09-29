@@ -271,6 +271,8 @@ class StormProbRepository:
         have a cycle-level foreign key instead, so they must be deleted first.
         Published cycle projections are scrubbed of pruned IDs; old cycle rows
         are deleted when no observations or forecasts still depend on them.
+        Freed pages are returned to the filesystem with ``VACUUM`` so stale
+        cells do not keep growing the database file on disk.
         """
         cutoff = _time(before_analysis_time)
         inactive_cells = """SELECT cell_id FROM cell_observations
@@ -331,12 +333,30 @@ class StormProbRepository:
                     SELECT 1 FROM forecasts f WHERE f.cycle_id=cycles.cycle_id
                 )
                 AND (projection_json IS NULL OR projection_json='[]')""", (cutoff,))
-            return (
+            result = (
                 forecast_cursor.rowcount,
                 observation_cursor.rowcount,
                 projections_removed,
                 cycle_cursor.rowcount,
             )
+        if any(result):
+            # VACUUM must run outside the writer transaction; it rebuilds the
+            # file so deleted rows release disk space instead of leaving
+            # free pages for reuse only.
+            self.vacuum()
+        return result
+
+    def vacuum(self) -> None:
+        """Rebuild the database file to return freed pages to the filesystem."""
+        if not self.path.exists():
+            return
+        db = sqlite3.connect(self.path, timeout=30)
+        try:
+            db.execute("PRAGMA busy_timeout=30000")
+            db.execute("VACUUM")
+            db.commit()
+        finally:
+            db.close()
 
     def commit_cycle(self, cycle_id: str, analysis_time: Any, cells: list[dict],
                      source_manifest: Any = None, projection_hash: str | None = None,
