@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.2] 2026-09-28
+
+### Changed
+- Updated EdgeWARN package, API, deployment, and documentation version metadata
+  to 3.0.2.
+
 ## [3.0.1] 2026-09-25
 
 ### Added
