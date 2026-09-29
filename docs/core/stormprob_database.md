@@ -49,7 +49,9 @@ its newest observation is older than
 independently of compatibility cell-file retention. Feature values and radial
 profiles cascade with their observation. Historical runs do not prune. SQLite
 can reuse the freed pages, but this deletion does not shrink the database file
-on disk; cycle publication and recovery records are retained.
+on disk. Pruned IDs are removed from stored cycle projections, and old cycle
+rows are deleted once no retained observation or forecast references them;
+cycles shared with retained cells remain with the pruned IDs removed.
 
 The packaged StormProb ONNX graphs use a fixed batch size of 128. During each
 CTAM cycle, ready cells are processed in chunks of up to 128, with zero padding

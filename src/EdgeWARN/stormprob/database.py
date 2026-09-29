@@ -264,24 +264,79 @@ class StormProbRepository:
             if db.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("StormProb foreign key violation")
 
-    def prune_inactive_cells(self, before_analysis_time: Any) -> tuple[int, int]:
-        """Remove StormProb rows for cells with no observations since the cutoff.
+    def prune_inactive_cells(self, before_analysis_time: Any) -> tuple[int, int, int, int]:
+        """Remove inactive cells and orphaned cycle records before the cutoff.
 
         Observation child tables cascade from ``cell_observations``. Forecasts
         have a cycle-level foreign key instead, so they must be deleted first.
-        Cycle publication records are retained for snapshot recovery/indexing.
+        Published cycle projections are scrubbed of pruned IDs; old cycle rows
+        are deleted when no observations or forecasts still depend on them.
         """
         cutoff = _time(before_analysis_time)
         inactive_cells = """SELECT cell_id FROM cell_observations
             GROUP BY cell_id HAVING MAX(analysis_time) < ?"""
         with self.writer() as db:
+            inactive_ids = {
+                str(row[0])
+                for row in db.execute(inactive_cells, (cutoff,)).fetchall()
+            }
+            projections_removed = 0
+            if inactive_ids:
+                # Scrub every saved cycle projection, including older replayed
+                # snapshots whose observation row was later upserted elsewhere.
+                last_cycle_id = None
+                while True:
+                    if last_cycle_id is None:
+                        rows = db.execute("""SELECT cycle_id,projection_json FROM cycles
+                            WHERE projection_json IS NOT NULL ORDER BY cycle_id LIMIT 100""").fetchall()
+                    else:
+                        rows = db.execute("""SELECT cycle_id,projection_json FROM cycles
+                            WHERE projection_json IS NOT NULL AND cycle_id > ?
+                            ORDER BY cycle_id LIMIT 100""", (last_cycle_id,)).fetchall()
+                    if not rows:
+                        break
+                    last_cycle_id = rows[-1]["cycle_id"]
+                    for row in rows:
+                        try:
+                            projection = json.loads(row["projection_json"])
+                        except (TypeError, ValueError):
+                            continue
+                        if not isinstance(projection, list):
+                            continue
+                        retained = [
+                            cell for cell in projection
+                            if not isinstance(cell, dict)
+                            or str(cell.get("id")) not in inactive_ids
+                        ]
+                        if len(retained) == len(projection):
+                            continue
+                        db.execute(
+                            "UPDATE cycles SET projection_json=?,projection_hash=NULL WHERE cycle_id=?",
+                            (_json(retained), row["cycle_id"]),
+                        )
+                        projections_removed += 1
+
             forecast_cursor = db.execute(
                 f"DELETE FROM forecasts WHERE cell_id IN ({inactive_cells})", (cutoff,)
             )
             observation_cursor = db.execute(
                 f"DELETE FROM cell_observations WHERE cell_id IN ({inactive_cells})", (cutoff,)
             )
-            return forecast_cursor.rowcount, observation_cursor.rowcount
+            cycle_cursor = db.execute("""DELETE FROM cycles
+                WHERE analysis_time < ? AND projection_state IN ('published','none')
+                AND NOT EXISTS (
+                    SELECT 1 FROM cell_observations o WHERE o.cycle_id=cycles.cycle_id
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM forecasts f WHERE f.cycle_id=cycles.cycle_id
+                )
+                AND (projection_json IS NULL OR projection_json='[]')""", (cutoff,))
+            return (
+                forecast_cursor.rowcount,
+                observation_cursor.rowcount,
+                projections_removed,
+                cycle_cursor.rowcount,
+            )
 
     def commit_cycle(self, cycle_id: str, analysis_time: Any, cells: list[dict],
                      source_manifest: Any = None, projection_hash: str | None = None,

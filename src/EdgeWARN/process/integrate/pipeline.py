@@ -568,12 +568,19 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
     if prune_inactive:
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=stormprob_inactive_cell_max_age_minutes())
         try:
-            forecasts_removed, observations_removed = repository.prune_inactive_cells(cutoff)
-            if forecasts_removed or observations_removed:
+            (
+                forecasts_removed,
+                observations_removed,
+                projections_scrubbed,
+                cycles_removed,
+            ) = repository.prune_inactive_cells(cutoff)
+            if forecasts_removed or observations_removed or projections_scrubbed or cycles_removed:
                 io_manager.write_info(
                     "Pruned inactive StormProb data "
-                    f"forecasts={forecasts_removed} observations={observations_removed}"
+                    f"forecasts={forecasts_removed} observations={observations_removed} "
+                    f"cycle_projections={projections_scrubbed} cycles={cycles_removed}"
                 )
+                _update_api_indexes(projected_cells, remove_old_cells, timestamp)
         except Exception as exc:
             io_manager.write_warning(f"Failed to prune inactive StormProb data: {exc}")
     io_manager.write_info(
