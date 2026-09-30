@@ -411,6 +411,27 @@ class IngestHandoff:
                     raise IngestRecordError('Cannot pin an unknown input')
             return self._write('pin', key, {'input_ids': list(input_ids)}, mutable=True)
 
+    def pin_phase(self, owner, record):
+        """Verify and pin one phase's exact selections under a single lease.
+
+        A consumer must re-check the committed bytes and take its reference in
+        one critical section, otherwise retention could delete a file between
+        the check and the pin. Nesting :meth:`pin` inside the lease would try to
+        take the same advisory lock twice, so both steps share one acquisition.
+        """
+        if record.fingerprint != self.fingerprint or record.to_manifest() is None:
+            raise IngestRecordError('Phase agreement mismatch')
+        key = hashlib.sha256(owner.encode()).hexdigest()
+        with input_lock(self.base_dir):
+            staged = record.to_manifest().inputs
+            for identity, selection in zip(record.data['input_ids'], staged):
+                source = self.read('input', identity)
+                if source is None or source.data['input'] != {**selection.as_dict(), 'role': 'current'}:
+                    raise IngestRecordError('Phase input identity mismatch')
+                self.verify_input(source)
+            return self._write('pin', key, {'input_ids': list(record.data['input_ids'])},
+                               mutable=True)
+
     def release_pin(self, owner):
         with input_lock(self.base_dir):
             self.path('pin', hashlib.sha256(owner.encode()).hexdigest()).unlink(missing_ok=True)

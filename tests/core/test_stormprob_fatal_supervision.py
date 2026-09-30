@@ -1,4 +1,9 @@
-"""A fatal dependency is recorded and propagated through the Core loop."""
+"""A fatal dependency is recorded and propagated through the Core loop.
+
+Core selects scans from durable local readiness records, so the loop is driven
+here through a stubbed reader and a stubbed producer agreement. No source
+acquisition and no remote listing is involved.
+"""
 
 from datetime import datetime, timezone
 
@@ -25,16 +30,25 @@ def test_primary_loop_records_fatal_cycle_and_exits(tmp_path, monkeypatch):
                         lambda _path: (None, 'no previous cycle'))
     monkeypatch.setattr(primary_service, 'resolve_file', lambda *_args: state_path)
     monkeypatch.setattr(primary_service, 'report_effective_config', lambda *_args: None)
-    monkeypatch.setattr(primary_service, 'get_check_modifiers', lambda: ())
+    monkeypatch.setattr(primary_service, 'require_ingest_producer',
+                        lambda *_args, **_kwargs: True)
+
+    class Reader:
+        def __init__(self, **_kwargs):
+            self.skipped = []
+
+        def pending_scans(self):
+            return (cycle_time,)
+
+        def skip(self, scan, reason):
+            self.skipped.append((scan, reason))
+
+    monkeypatch.setattr(primary_service, 'LocalReadinessReader', Reader)
 
     def fatal(*_args, **_kwargs):
         raise StormProbDependencyError('WARNING: required MRMS_Reflectivity_0C_00.50 unavailable')
 
     monkeypatch.setattr(primary_service, 'run_primary_cycle_once', fatal)
-
-    class Checker:
-        def latest_common_minute_1h(self, *_args, **_kwargs):
-            return cycle_time
 
     config = PrimaryCycleConfig(
         lat_limits=(20, 55), lon_limits=(230, 300), profile=False,
@@ -42,12 +56,19 @@ def test_primary_loop_records_fatal_cycle_and_exits(tmp_path, monkeypatch):
         disable_tracking=False, disable_polygon_expansion=False,
         refl_threshold=35, min_seed_percentage=0.1, drop_offset=10,
         config_dir='config', goes_enabled=False, mrms_core_only=False,
-        base_dir=str(tmp_path), disable_stormprob=False,
+        base_dir=str(tmp_path), disable_stormprob=False, handoff_enabled=True,
+        dependencies=SimpleDependencies(),
     )
     with pytest.raises(StormProbDependencyError, match='MRMS_Reflectivity_0C_00.50'):
-        primary_service.run_primary_cycle_loop(checker=Checker(), cycle_config=config)
+        primary_service.run_primary_cycle_loop(cycle_config=config)
     state = CycleStateStore(state_path).load()
     assert state.outcome['completed'] is False
     assert state.outcome['retryable'] is False
     assert 'MRMS_Reflectivity_0C_00.50' in state.outcome['errors'][0]
     assert manager.stopped
+
+
+class SimpleDependencies:
+    """Only the fingerprint is read on this path."""
+
+    fingerprint = 'a' * 64
