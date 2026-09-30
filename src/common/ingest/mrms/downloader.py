@@ -522,7 +522,7 @@ def download_modifier_sync(region, modifier, outdir, dt, max_entries):
 
 # ==================== GOES-19 Download Functions ====================
 
-def download_goes_product(goes_spec, dt, hour_lookback=None, preloaded_files=None):
+def download_goes_product(goes_spec, dt, hour_lookback=None, preloaded_files=None, *, cleanup=True):
     """
     Download a specific GOES-19 product.
 
@@ -610,7 +610,7 @@ def download_goes_product(goes_spec, dt, hour_lookback=None, preloaded_files=Non
                         merged_ds.close()
                         
                         # Delete individual files after successful merge
-                        for f in processed_files:
+                        for f in (processed_files if cleanup else ()):
                             try:
                                 f.unlink()
                             except Exception as del_e:

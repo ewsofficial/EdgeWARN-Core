@@ -787,6 +787,13 @@
         },
         "psutil_fallback_max": 2,
         "worker_memory_cap": 384
+      },
+      "input_jobs": {
+        "pending_max_jobs": 4096,
+        "max_age_minutes": 120,
+        "retry_max_attempts": 3,
+        "retry_initial_seconds": 5,
+        "retry_max_seconds": 30
       }
     },
     "ewmrs_render": {
@@ -2092,13 +2099,39 @@
         "stop_join_timeout_seconds": 5,
         "stop_kill_join_timeout_seconds": 1,
         "tick_seconds": 0.5
+      },
+      "ingest": {
+        "listing_concurrency": null,
+        "download_concurrency": null,
+        "decode_concurrency": 2,
+        "auxiliary_concurrency": 2,
+        "listing_timeout_seconds": null,
+        "download_timeout_seconds": null,
+        "auxiliary_timeout_seconds": null,
+        "listing_page_size": 1000,
+        "listing_max_pages": 100,
+        "listing_max_objects": 4096,
+        "pending_max_jobs": 4096,
+        "retry_max_attempts": 3,
+        "retry_initial_seconds": 5,
+        "retry_max_seconds": 30,
+        "scan_deadline_seconds": 180,
+        "reconcile_interval_seconds": 10,
+        "retention_minutes": null,
+        "disk_budget_mb": 8192,
+        "shutdown_timeout_seconds": 30
+      },
+      "consumers": {
+        "core_readiness_seconds": 1.0,
+        "ewmrs_notification_seconds": 1.0
       }
     },
     "scheduler": {
       "scheduler": {
         "modifier_lookup_max_entries": 20,
         "s3_lookback_hours": 2,
-        "slow_check_log_threshold_ms": 2000
+        "slow_check_log_threshold_ms": 2000,
+        "ingest_poll_seconds": 10
       },
       "schema_version": 1
     },
@@ -2590,6 +2623,66 @@
         "disable_stormprob"
       ],
       "value": 1,
+      "valid": false
+    },
+    {
+      "label": "independent_ingest_poll_seconds_0",
+      "name": "scheduler",
+      "path": [
+        "scheduler",
+        "ingest_poll_seconds"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "independent_ingest_poll_seconds_10",
+      "name": "scheduler",
+      "path": [
+        "scheduler",
+        "ingest_poll_seconds"
+      ],
+      "value": 10,
+      "valid": true
+    },
+    {
+      "label": "independent_download_concurrency_None",
+      "name": "runtime",
+      "path": [
+        "ingest",
+        "download_concurrency"
+      ],
+      "value": null,
+      "valid": true
+    },
+    {
+      "label": "independent_download_concurrency_65",
+      "name": "runtime",
+      "path": [
+        "ingest",
+        "download_concurrency"
+      ],
+      "value": 65,
+      "valid": false
+    },
+    {
+      "label": "independent_core_readiness_seconds_2",
+      "name": "runtime",
+      "path": [
+        "consumers",
+        "core_readiness_seconds"
+      ],
+      "value": 2,
+      "valid": false
+    },
+    {
+      "label": "independent_pending_max_jobs_0",
+      "name": "ewmrs_pipeline",
+      "path": [
+        "input_jobs",
+        "pending_max_jobs"
+      ],
+      "value": 0,
       "valid": false
     }
   ],

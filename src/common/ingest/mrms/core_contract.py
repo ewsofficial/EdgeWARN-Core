@@ -81,3 +81,76 @@ def contract_json():
 if __name__ == "__main__":
     # Explicit generation only: redirect stdout to core-contract.json.
     print(contract_json(), end="")
+
+
+@dataclass(frozen=True)
+class IngestDependencies:
+    """Frozen producer/consumer agreement; IDs are full manifest identities.
+
+    Optional completion is a terminal acquisition boundary, not an all-success
+    gate. The final CTAM snapshot extends the pinned integration snapshot with
+    aligned optional current inputs and validated previous history. It never
+    reselects detection. StormProb's fatal input checks still run on that snapshot.
+    """
+    check: tuple[str, ...]
+    detection: tuple[str, ...]
+    mandatory_integration: tuple[str, ...]
+    optional: tuple[str, ...]
+    enrichment: tuple[str, ...]
+    previous_detection: tuple[str, ...]
+    previous_optional: tuple[str, ...]
+    rap_enabled: bool
+    glm_enabled: bool
+    optional_timeout_seconds: float
+    registry_fingerprint: str
+    auxiliary_settings_json: str = "{}"
+    final_snapshot: str = "pinned-integration-plus-terminal-optional-and-history"
+    history_policy: str = "latest-valid-strictly-earlier-if-available"
+    stormprob_missing_inputs: str = "fatal-when-ctam-and-stormprob-enabled"
+
+    @property
+    def fingerprint(self):
+        import hashlib
+        return hashlib.sha256(json.dumps(asdict(self), sort_keys=True,
+                                         separators=(",", ":")).encode()).hexdigest()
+
+
+def resolve_dependencies(registry, *, check=None, detection=None,
+                         mandatory_integration=None, enrichment=(),
+                         include_rap=True, include_glm=True, mrms_core_only=False,
+                         disable_goes=False, auxiliary_settings=None):
+    """Pure preflight, also usable with explicit future dependency selections."""
+    enabled = {p.product_id for p in registry.products}
+    def canonical(values):
+        # Only the legacy null ProbSevere modifier is normalized. Short product
+        # aliases must not accidentally match a different elevation.
+        return tuple(sorted({"ProbSevere" if p is None else p for p in values}))
+    check = canonical(check if check is not None else
+                      (p.product_id for p in registry.products if p.discovery))
+    detection = canonical(detection if detection is not None else
+                          (p.product_id for p in registry.for_phase("detection")))
+    mandatory = canonical(mandatory_integration if mandatory_integration is not None else
+                          (p.product_id for p in registry.for_phase("integration") if p.required))
+    enrichment = canonical(enrichment)
+    validate_dependency_sets(enabled, check, detection, mandatory, enrichment)
+    optional = tuple(sorted(enabled - set(detection) - set(mandatory)))
+    settings = json.loads(registry.normalized_config_json)
+    return IngestDependencies(check, detection, mandatory, optional, enrichment,
+                              detection, optional,
+                              bool(include_rap and not mrms_core_only),
+                              bool(include_glm and not mrms_core_only and not disable_goes),
+                              settings['downloads']['optional_timeout_seconds'],
+                              registry.fingerprint,
+                              json.dumps(auxiliary_settings or {}, sort_keys=True,
+                                         separators=(",", ":")))
+
+
+def validate_dependency_sets(enabled, check, detection, mandatory=(), enrichment=()):
+    """Validate membership without requiring resource configuration or I/O."""
+    if not check:
+        raise ValueError("Ingest check set must not be empty")
+    missing = (set(check) | set(detection) | set(mandatory) | set(enrichment)) - enabled
+    if missing:
+        raise ValueError(f"Ingest dependencies are disabled: {sorted(missing)}")
+    if not set(detection) <= set(check):
+        raise ValueError("Detection products must be included in the ingest check set")

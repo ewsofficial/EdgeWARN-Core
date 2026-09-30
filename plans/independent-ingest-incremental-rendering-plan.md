@@ -1,6 +1,7 @@
 # Independent ingest polling and incremental EWMRS rendering
 
-Status: proposed implementation. This document changes no runtime behavior.
+Status: phases 1 and 2 implemented and verified; phases 3–8 remain pending.
+The independent realtime service and consumer cutover are not yet enabled.
 
 ## 1. Required outcome
 
@@ -441,3 +442,273 @@ requirement, wait/expiry diagnostics, and the coordinated rollback procedure.
 Done when ingest continues acquiring throughout a long Core cycle, Core starts
 on locally complete check modifiers, and EWMRS publishes each arriving layer
 without waiting for aggregate Core readiness or losing arrivals after restart.
+
+## 10. Concrete implementation checklist
+
+Execute the phases below in order. Each checkbox describes an implementation
+task; each phase ends with a behavior that must be demonstrated before marking
+it complete. New filenames and callable names below are proposed interfaces.
+Phases 1–4 establish the producer contract; phases 5–6 replace its consumers;
+phase 7 connects the deployment; phase 8 qualifies the coordinated release.
+
+**Current-tree baseline:** the configurable MRMS registry has now landed.
+`config/ingest.yaml` uses schema version 2, and `MrmsRegistry.get_check_modifiers()`
+currently returns the three protected discovery products. The earlier references
+to ten `check_products` entries and an all-products integration barrier describe
+the older catalog. Use the effective registry and current mandatory/optional
+semantics when implementing these steps, as permitted in sections 1 and 5.
+The required behavior remains: every effective check modifier must be locally
+valid before Core detection, and every renderable committed input must produce
+independent EWMRS work.
+
+### Phase 1 — Freeze the effective dependencies and configuration
+
+**Files:** `src/common/ingest/mrms/{registry,core_contract,config}.py`,
+`src/common/pipeline/coordinator.py`, `config/{scheduler,runtime,ewmrs_pipeline}.yaml`,
+their corresponding schemas, and `tests/config_baseline/`.
+
+- [x] Build a dependency fixture from the effective registry: normalized check
+  products, detection products, mandatory integration dependencies, optional
+  enrichment inputs, previous-history requirements, and enabled RAP/GLM sources.
+  Resolve ProbSevere to `ProbSevere` even though its source modifier is null.
+- [x] Encode startup rejection for an empty check set, disabled dependencies,
+  or detection products outside the check set. Use full canonical product IDs
+  in readiness comparisons and fingerprints.
+- [x] Record the current optional-completion behavior required by CTAM and
+  StormProb. Specify which immutable final input snapshot the new producer must
+  deliver; preserve optional acquisition deadlines and fatal StormProb checks.
+- [x] Add `scheduler.ingest_poll_seconds: 10` and schema-backed Core/EWMRS
+  consumer intervals defaulting to one second. Add the `runtime.ingest` listing,
+  download, queue, retry, scan-deadline, reconciliation, and retention controls
+  described in section 6. Give every control an explicit unit, default, and bound;
+  derive resource defaults from existing MRMS/RAP limits rather than duplicating
+  unexplained constants in the service.
+- [x] Update configuration baseline fixtures and Python/Node catalog validation.
+  Add deterministic source-arrival fixtures for scans T and T+2 minutes with a
+  missing check, a delayed optional layer, a reused RAP analysis, and disabled GLM.
+
+**Completion check:** both configuration validators pass; fixtures distinguish
+check readiness from optional completion and reject each invalid dependency set.
+
+### Phase 2 — Expose per-object acquisition and completion
+
+**Files:** `src/common/ingest/mrms/{acquisition,source,s3_async,s3_sync,https_client,main}.py`,
+`src/common/ingest/synoptic/`, and `src/util/runtime/goes.py`.
+
+- [x] Define an immutable discovered-object descriptor containing canonical
+  product ID, encoded observation time, source locator, and remote version when
+  supplied. Add a bounded listing entry point returning every eligible object
+  within the lookback window, including late objects and paginated results.
+- [x] Extract a public per-object acquisition entry point from `acquisition.py`.
+  Reuse its payload validation, quarantine, staging, and atomic publication;
+  return a structured committed-input result only after the final file is usable.
+- [x] Keep S3/HTTPS logical identity and timestamp selection consistent. Preserve
+  ProbSevere JSON validation and synchronous source fallback, with the same
+  completion result for both transports.
+- [x] Retain `acquire_batch`, `acquire_batch_sync`, and historical wrappers by
+  composing the extracted primitives. Make source cleanup ownership explicit so
+  realtime calls can defer deletion to inventory maintenance while historical
+  callers retain their existing isolated cleanup behavior.
+- [x] Wrap existing RAP and scan-time GLM acquisition with the same committed-input
+  interface. Report RAP's analysis time and GLM's validated scan alignment;
+  deduplicate local RAP reuse without emitting another render event.
+- [x] Extend `tests/core/ingest/mrms/test_acquisition.py` and source fallback
+  coverage with a delayed sibling, duplicate S3/HTTPS observations, multiple new
+  objects in one listing, and a corrupt payload.
+
+**Completion check:** the first valid object yields a completion result while a
+sibling remains blocked; a corrupt or partial file never yields that result.
+
+**Phase 1–2 verification (2026-09-30):** the focused MRMS, RAP, GLM,
+coordinator, configuration, and complete architecture selection passed 638
+Python tests in the `EdgeWARN` environment. The final RAP containment check
+and its full module suite passed 17 tests. Shared configuration-loader and
+MRMS/catalog parity suites passed 65 Node tests. Both configuration validators
+passed all 18 catalogs, and `git diff --check` passed. Async executor tests ran
+outside the sandbox because sandboxed executor shutdown hangs independently of
+these changes; test runtime roots remained temporary.
+
+Implementation adds `common.ingest.mrms.discovery` and
+`common.ingest.objects` alongside the listed files. Stable committed IDs and
+`reused` evidence provide the deduplication seam; durable inventory/outbox
+publication and render-event delivery remain phase 3 work. The existing realtime
+service topology and staged callbacks remain in use until the later cutover.
+
+### Phase 3 — Implement inventory, durable notifications, and readiness
+
+**New files:** `src/common/ingest/inventory.py`,
+`src/common/pipeline/readiness.py`, and `src/util/runtime/ingest_handoff.py`.
+**Reuse:** `src/common/ingest/{manifest,replay}.py`, `src/util/atomic.py`, and
+the locking/strict-validation patterns in `src/util/runtime/handoff.py`.
+
+- [ ] Define versioned record models and strict readers/writers for the namespace
+  in section 5. Include immutable input IDs, fingerprints, validation evidence,
+  contained paths, source times, and producer identity. Reject incompatible
+  existing records instead of overwriting their selections.
+- [ ] Implement `commit_input(...)` and `publish_render_ready(...)` as separate
+  recoverable operations. Key render records by input identity so two products
+  or two arrival times for one scan cannot collapse into one cycle checkpoint.
+- [ ] Implement pure `evaluate_scan(...)` over the inventory. Compute start
+  readiness as all valid current inputs in the effective check set; resolve and
+  pin previous detection history separately. Compute integration readiness from
+  the dependency fixture in phase 1.
+- [ ] Publish start and integration manifests once, retaining identical detection
+  selections. Persist the bounded optional-completion snapshot required by the
+  current CTAM/StormProb flow without mutating an earlier phase record.
+- [ ] Add per-scan terminal records, persisted Core consumption state, and
+  per-input/per-layer EWMRS acknowledgment records. Include retry eligibility,
+  explicit expiry reasons, and the render configuration fingerprint.
+- [ ] Implement `reconcile(...)` for valid files without inventory, inventory
+  without notifications, and notifications without acknowledgments. Acquire
+  the shared retention lock when selecting/pinning inputs and deleting eligible
+  unreferenced files; integrate with existing replay protection.
+- [ ] Add focused tests under `tests/integration/handoff/` for every crash window,
+  timestamp mismatch, fingerprint mismatch, path escape, late same-scan arrival,
+  and cleanup racing a new pin.
+
+**Completion check:** restart recovers missing notifications; every missing
+check blocks Core; two late same-scan inputs remain independently consumable.
+
+### Phase 4 — Build the independently supervised ingest service
+
+**New files:** `src/run_ingest.py` and `src/util/runtime/ingest_service.py`.
+**Related files:** `src/util/runtime/{services,processes,mrms_registry}.py`.
+
+- [ ] Add a side-effect-free entry point with full configuration preflight,
+  resolved runtime root, ingest service lock, signal handlers, logging, and
+  independent heartbeat refresh. Reconcile durable state before the first poll.
+- [ ] Implement a monotonic deadline scheduler that dispatches discovery at
+  0/10/20/30 seconds. Keep listing and download work outside the timer path;
+  track one active listing per product and coalesce missed refreshes.
+- [ ] Maintain bounded pending/in-flight/completed identities and separate
+  capacity for MRMS and RAP/GLM. Prioritize missing check inputs while reserving
+  capacity for other enabled products. Persist failure/backoff state without
+  advancing successful acquisition cursors.
+- [ ] Route every acquisition completion directly through inventory commit,
+  render notification publication, and affected-scan readiness evaluation.
+  Handle completion after its originating poll ends through the same path.
+- [ ] Add incomplete-scan expiry, reconciliation, and retention maintenance.
+  Make the RAP retention cap yield to active references; report disk/backlog
+  pressure before expiring work and releasing pins.
+- [ ] Transfer registry descriptor publication to the ingest service and bind
+  its producer agreement to the ingest run ID/heartbeat. Define the new
+  descriptor contract explicitly so old Core descriptors cannot satisfy it.
+- [ ] Add fixed-clock service tests and shutdown tests under `tests/util/` and
+  `tests/integration/processes/`. Stop and join owned download/decode workers
+  within the configured termination bound.
+
+**Completion check:** a blocked Core and a slow source do not stop scheduled
+polls or unrelated input publication; duplicate discoveries create no extra jobs.
+
+### Phase 5 — Convert Core into a local readiness consumer
+
+**Files:** `src/run_edgewarn.py`, `src/util/runtime/{primary_service,cycle}.py`,
+and `src/EdgeWARN/pipeline.py`.
+
+- [ ] Replace realtime `MRMSUpdateChecker` selection with a local readiness
+  reader. Select pending scans in timestamp order within the backlog/deadline
+  policy and preserve `CycleStateStore` success, retry, and abandonment cursors.
+- [ ] Validate the complete start record and pinned inputs before spawning the
+  scan worker. Start exactly one worker when the effective check set is ready
+  and Core is idle; persist late-scan skips instead of rewinding tracking.
+- [ ] Remove realtime MRMS, RAP, and GLM download calls from
+  `run_primary_cycle_once`. Pass the pinned detection manifest into the worker;
+  preserve historical callers of the staged coordinator.
+- [ ] Add a local watcher for integration readiness and the final optional-input
+  snapshot. Install each validated immutable snapshot before releasing its
+  corresponding worker barrier. Wake waits on terminal expiry and shutdown;
+  waiting for data must not spend an analysis retry.
+- [ ] Preserve downstream CTAM readiness, StormProb input validation, tracking
+  gap resets, alerts, artifact checks, and truthful `CycleOutcome` handling.
+  Stop publishing realtime EWMRS cycle triggers or the old producer descriptor.
+- [ ] Extend Core/handoff tests with every check missing in turn, remote-only
+  availability, delayed integration, worker restart, and an older late scan.
+  Stub source clients to fail if realtime Core attempts acquisition.
+
+**Completion check:** Core makes zero source-acquisition calls, starts detection
+only with all local checks valid, and waits locally for later prerequisites.
+
+### Phase 6 — Convert EWMRS to independent jobs for each input and layer
+
+**Files:** `src/util/runtime/{ewmrs_consumer,ewmrs_service,mrms_registry}.py`,
+`src/EWMRS/pipeline.py`, and `src/EWMRS/rap/uint16_pipeline.py`.
+
+- [ ] Replace realtime MRMS/RAP cycle draining with the new input notification
+  reader and acknowledgment store. Validate agreement with the ingestor so a
+  stopped Core does not pause EWMRS rendering.
+- [ ] Resolve each committed product to its enabled layer definitions. Persist
+  jobs keyed by input ID, layer ID, and render fingerprint; acknowledge inputs
+  with no mapping explicitly. Preserve the notified source path and timestamp.
+- [ ] Extract the selected-layer submission path around `_render_layer` into a
+  persistent bounded executor owned by the consumer. Continue accepting jobs
+  while renders run, within queue limits, and preserve worker recovery/shutdown.
+- [ ] Add selection of individual RAP layers to the Uint16 conversion path so
+  successful RAP layers can be acknowledged separately and only failed layers
+  retried. Reuse the pinned raw analysis across those jobs.
+- [ ] Treat exceptions, `None`, missing chunks, missing metadata, and incomplete
+  indexes as failed jobs. Serialize shared product-index updates where needed,
+  prevent older completion from moving latest backward, and acknowledge only
+  after output publication is complete.
+- [ ] Persist per-layer retry/backoff/expiry; reuse validated complete outputs
+  after restart. Release an input's render reference only once all mapped jobs
+  have a durable successful or explicit terminal disposition.
+- [ ] Extend `tests/integration/handoff/test_ewmrs_consumer.py` and rendering
+  tests for non-check arrival before Core readiness, two arrivals for scan T,
+  a T+2-minute input during a render, partial RAP success, and acknowledgment loss.
+
+**Completion check:** each newly committed renderable input creates work without
+waiting for Core or poll completion; unrelated layers advance during a failure.
+
+### Phase 7 — Wire commands, containers, and service discovery
+
+**Files:** `src/run_all.py`, `src/edgewarn_cli/{main,run}.py`, `src/util/cli.py`,
+`src/util/runtime/services.py`, `pyproject.toml`, `Dockerfile`, `compose.yaml`,
+`docker/edgewarn-entrypoint.sh`, `src/api/services/serviceRegistry.js`, and
+`src/api/openapi/v3.yaml`.
+
+- [ ] Add the `ingest` worker and `edgewarn run ingest` mode. Implement each
+  topology in section 6 and forward repeatable `--args ingest` arrays without
+  shell parsing. Ensure MRMS-only filtering retains its required producer.
+- [ ] Assign acquisition flags to ingest; propagate shared dependency options
+  to Core and ingest. Reject conflicting roots, incompatible fingerprints,
+  duplicate producer topology, and disabled durable handoff before startup.
+- [ ] Install `run_ingest` with the Python package and update container entry
+  points and Compose configuration. Preserve complete config-tree deployment
+  and preflight before runtime filesystem initialization.
+- [ ] Add ingest to Python/Node heartbeat discovery and its public schema/docs.
+  Preserve route ownership and existing artifact serving when ingest is down.
+- [ ] Update CLI ownership, launcher, installed-command, container, and API
+  service-registry tests. Include direct ingest + EWMRS with Core stopped and
+  signal forwarding that leaves no child process behind.
+
+**Completion check:** every documented command launches the intended service
+set with one acquisition owner, and both runtimes agree on service discovery.
+
+### Phase 8 — Qualify recovery, cut over, and finish operator documentation
+
+**Files:** focused suites named above, `tests/integration/handoff/`,
+`tests/integration/processes/`, `docs/core/{ingestion,configuration}.md`,
+`docs/api/unified_v3.md`, `README.md`, and `INSTALLATION.md`.
+
+- [ ] Implement the section 8 acceptance timeline as one deterministic test
+  using fake sources, a controllable clock, temporary runtime roots, and bounded
+  render workers. Assert both Core start timing and every expected layer job.
+- [ ] Exercise restart at each publication boundary, input retention during
+  long waits, incomplete-scan expiry, stale producer identity, rendering while
+  Core is stopped, and shutdown during active acquisition/rendering.
+- [ ] Verify existing float16, RAP Uint16, indexes, timestamps, API contracts,
+  historical processing, GOES ABI, accessories, and NEXRAD remain compatible.
+  Record poll lag, readiness pickup, queue depth, and publication latency.
+- [ ] Run the focused tests as each phase lands. For the coordinated release,
+  activate `EdgeWARN`, run the complete Python and Node suites, and run both
+  configuration validators listed in section 8. Record commands and outcomes.
+- [ ] Document executable stop/drain/start/rollback procedures from section 9,
+  including prior Core cursors, old checkpoint retention, new-state adoption,
+  and the direct-service requirement to launch ingest separately.
+- [ ] Remove obsolete realtime producer wiring after the new path passes.
+  Retain historical batch entry points and the explicit old-record drain path.
+  Update this document's status and checklist only for completed, verified work.
+
+**Completion check:** the acceptance timeline, recovery cases, and compatibility
+checks pass, and an operator can perform the coordinated deployment and rollback
+using the documented commands.

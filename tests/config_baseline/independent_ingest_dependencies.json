@@ -1,0 +1,96 @@
+{
+  "check": {
+    "@tuple": [
+      "MergedReflectivityQCComposite_00.50",
+      "PrecipFlag_00.00",
+      "ProbSevere"
+    ]
+  },
+  "detection": {
+    "@tuple": [
+      "MergedReflectivityQCComposite_00.50",
+      "PrecipFlag_00.00",
+      "ProbSevere"
+    ]
+  },
+  "mandatory_integration": {
+    "@tuple": []
+  },
+  "optional": {
+    "@tuple": [
+      "EchoTop_18_00.50",
+      "EchoTop_30_00.50",
+      "EchoTop_50_00.50",
+      "MESH_00.50",
+      "MergedAzShear_0-2kmAGL_00.50",
+      "MergedAzShear_3-6kmAGL_00.50",
+      "MergedReflectivityAtLowestAltitude_00.50",
+      "MergedRhoHV_00.50",
+      "NLDN_CG_001min_AvgDensity_00.00",
+      "PrecipRate_00.00",
+      "RadarOnly_QPE_01H_00.00",
+      "RadarQualityIndex_00.00",
+      "Reflectivity_-15C_00.50",
+      "Reflectivity_-5C_00.50",
+      "Reflectivity_0C_00.50",
+      "VII_00.50",
+      "VIL_00.50",
+      "VIL_Density_00.50"
+    ]
+  },
+  "enrichment": {
+    "@tuple": [
+      "EchoTop_18_00.50",
+      "EchoTop_30_00.50",
+      "EchoTop_50_00.50",
+      "MergedAzShear_0-2kmAGL_00.50",
+      "MergedAzShear_3-6kmAGL_00.50",
+      "MergedReflectivityAtLowestAltitude_00.50",
+      "NLDN_CG_001min_AvgDensity_00.00",
+      "PrecipRate_00.00",
+      "Reflectivity_-15C_00.50",
+      "Reflectivity_-5C_00.50",
+      "Reflectivity_0C_00.50",
+      "VII_00.50",
+      "VIL_00.50",
+      "VIL_Density_00.50"
+    ]
+  },
+  "previous_detection": {
+    "@tuple": [
+      "MergedReflectivityQCComposite_00.50",
+      "PrecipFlag_00.00",
+      "ProbSevere"
+    ]
+  },
+  "previous_optional": {
+    "@tuple": [
+      "EchoTop_18_00.50",
+      "EchoTop_30_00.50",
+      "EchoTop_50_00.50",
+      "MESH_00.50",
+      "MergedAzShear_0-2kmAGL_00.50",
+      "MergedAzShear_3-6kmAGL_00.50",
+      "MergedReflectivityAtLowestAltitude_00.50",
+      "MergedRhoHV_00.50",
+      "NLDN_CG_001min_AvgDensity_00.00",
+      "PrecipRate_00.00",
+      "RadarOnly_QPE_01H_00.00",
+      "RadarQualityIndex_00.00",
+      "Reflectivity_-15C_00.50",
+      "Reflectivity_-5C_00.50",
+      "Reflectivity_0C_00.50",
+      "VII_00.50",
+      "VIL_00.50",
+      "VIL_Density_00.50"
+    ]
+  },
+  "rap_enabled": true,
+  "glm_enabled": true,
+  "optional_timeout_seconds": 30,
+  "registry_fingerprint": "dc72b066e1a5aab80d9513c56b4a6f3541cbb060bb383e505c0b77a02587c82f",
+  "auxiliary_settings_json": "{\"glm\":{\"bucket\":\"noaa-goes19\",\"bucket_path_pattern\":\"{product}/{YYYY}/{DDD}/{HH}/\",\"glm_outdir\":\"GOES_GLM_DIR\",\"glm_product\":\"GLM-L2-LCFA\",\"hour_lookback\":3,\"max_entries\":96},\"rap\":{\"bucket\":\"noaa-rap-pds\",\"date_format\":\"%Y%m%d\",\"dir_pattern\":\"rap.{date}\",\"file_pattern\":\"rap.t{hour:02d}z.awp130pgrbf00.grib2\",\"filename_regex\":\"^RAP\\\\.(?P<date>\\\\d{8})-(?P<hour>\\\\d{2})z\\\\.awp130pgrbf00\\\\.grib2$\",\"local_file_pattern\":\"RAP.{date}-{hour:02d}z.awp130pgrbf00.grib2\",\"lookback_step_hours\":1,\"max_age_minutes\":180,\"max_files\":3,\"nomads_base_url\":\"https://nomads.ncep.noaa.gov/pub/data/nccf/com/rap/prod\",\"nomads_chunk_size_bytes\":1048576,\"nomads_timeout_seconds\":120}}",
+  "final_snapshot": "pinned-integration-plus-terminal-optional-and-history",
+  "history_policy": "latest-valid-strictly-earlier-if-available",
+  "stormprob_missing_inputs": "fatal-when-ctam-and-stormprob-enabled"
+}

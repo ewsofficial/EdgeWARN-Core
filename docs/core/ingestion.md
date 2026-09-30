@@ -343,3 +343,64 @@ continue. Matching configuration and a live matching Core run automatically
 resume pending MRMS work. Restart services after configuration changes.
 
 See [Phase 8 migration and qualification](configurable-mrms-phase8.md) for upgrade, rollback, and offline resource measurements.
+
+## Independent ingest foundations (phases 1–2)
+
+The current services still use the staged cycle coordinator. The independent
+service, inventory/outbox, and per-layer consumer cutover are later phases of
+`plans/independent-ingest-incremental-rendering-plan.md`.
+
+`resolve_dependencies()` in `common.ingest.mrms.core_contract` freezes the
+registry's full manifest IDs and dependency policy. The default check and
+detection sets are composite reflectivity, PrecipFlag, and `ProbSevere` (the
+legacy null modifier). Empty checks, disabled references, and detection outside
+the check set fail preflight. There are currently no additional mandatory MRMS
+integration products. Enabled RAP and scan-time GLM remain separate integration
+requirements; `mrms_core_only` disables both and `disable_goes` disables GLM.
+Previous detection history is the latest validated strictly earlier observation,
+when available; it is pinned independently from current checks.
+
+Optional MRMS acquisition still has the configured 30-second default deadline;
+the staged coordinator retains its additional single HTTPS-timeout teardown
+allowance (10 seconds by default). CTAM receives a distinct immutable final
+snapshot: the unchanged detection/history and integration selections, plus
+aligned successful optional current inputs and validated optional history.
+Every optional product has a terminal outcome, including unavailable/expired
+ones. Late arrivals after that boundary must not revise this snapshot. They can
+still supply independent rendering in the later inventory phase. StormProb's
+existing preflight and fatal per-cycle source/feature checks remain authoritative;
+an optional acquisition failure does not make a required StormProb feature
+optional. Missing final optional completion is also fatal when both CTAM and
+StormProb are enabled.
+
+`discover_objects()` and `discover_objects_sync()` in
+`common.ingest.mrms.discovery` list a bounded observation-time window across day
+boundaries and all S3 pages. They return immutable descriptors with exact source
+locators, encoded times and remote versions/ETags when available. S3 acquisition uses `VersionId` for
+versions and `IfMatch` for ETags. HTTPS fallback
+uses the same product/time identity. Object/page limits raise
+`ListingLimitExceeded`; consumers must apply backpressure or subdivide the
+window, never advance a completed cursor from an incomplete result. Sync callers
+must supply an S3 client with bounded connection/read timeouts.
+
+`acquire_object()` / `acquire_object_sync()` in `common.ingest.mrms.acquisition`
+acquire an exact descriptor and use exact-time mirror fallback, existing payload
+validation, quarantine and atomic publication. They return `CommittedInput`
+only after the final file is usable. Its `input_id` derives from family, full
+product ID, observation time and validated content digest, so mirror reuse has
+one identity. Corrected content cannot replace an existing published file.
+`acquire_batch()` and its sync counterpart keep historical behavior and can
+report each completion through `on_committed` before the batch finishes.
+Notification failures do not undo files already committed; recovery must retry
+notification delivery rather than assume the source download failed.
+
+`acquire_rap_input()` preserves analysis-hour selection and validates the returned
+GRIB and age. Requests for different scans that reuse one analysis return the
+same identity. `acquire_glm_inputs_for_scan()` isolates source/merge work in
+staging, validates NetCDF variables and scan alignment, then publishes without
+replacing existing bytes. Neither completion wrapper owns source retention.
+Realtime RAP acquisition also preserves invalid existing observations for
+inventory repair instead of deleting or replacing potentially referenced files.
+The future inventory owns deduplication and durable notifications, including
+avoiding a second render event on RAP reuse. Existing historical wrappers retain
+their cleanup defaults; realtime callers must use the no-cleanup object APIs.

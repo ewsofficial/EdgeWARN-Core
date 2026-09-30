@@ -131,4 +131,12 @@ def build_registry(mrms_config: Mapping, base_dir: Path) -> MrmsRegistry:
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()
-    return MrmsRegistry(base_dir, tuple(specs), config_json, fingerprint)
+    registry = MrmsRegistry(base_dir, tuple(specs), config_json, fingerprint)
+    from common.ingest.mrms.core_contract import validate_dependency_sets
+    validate_dependency_sets(
+        {p.product_id for p in registry.products},
+        {p.product_id for p in registry.products if p.discovery},
+        {p.product_id for p in registry.for_phase("detection")},
+        {p.product_id for p in registry.for_phase("integration") if p.required},
+    )
+    return registry

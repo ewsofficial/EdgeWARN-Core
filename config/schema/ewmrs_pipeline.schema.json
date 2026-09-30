@@ -3,8 +3,20 @@
   "title": "ewmrs_pipeline.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "render", "nexrad_gui", "workers", "render_threads", "caches", "rap_uint16"],
+  "required": ["schema_version", "render", "nexrad_gui", "workers", "render_threads", "caches", "rap_uint16", "input_jobs"],
   "properties": {
+    "input_jobs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pending_max_jobs", "max_age_minutes", "retry_max_attempts", "retry_initial_seconds", "retry_max_seconds"],
+      "properties": {
+        "pending_max_jobs": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum pending input/layer jobs."},
+        "max_age_minutes": {"type": "integer", "minimum": 1, "maximum": 10080, "description": "Maximum pending job age in minutes, matching GUI retention default."},
+        "retry_max_attempts": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum attempts per input/layer job."},
+        "retry_initial_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "description": "Initial retry delay in seconds."},
+        "retry_max_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Maximum retry delay in seconds."}
+      }
+    },
     "schema_version": { "const": 1 },
     "rap_uint16": {
       "type": "object",

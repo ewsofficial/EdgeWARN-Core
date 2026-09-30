@@ -1,0 +1,85 @@
+{
+  "disable_goes": true,
+  "optional_completion_seconds": 30,
+  "arrivals": [
+    {
+      "at_seconds": 0,
+      "scan": "2026-01-01T00:00:00Z",
+      "product": "MergedReflectivityQCComposite_00.50",
+      "check_ready": false
+    },
+    {
+      "at_seconds": 1,
+      "scan": "2026-01-01T00:00:00Z",
+      "product": "ProbSevere",
+      "check_ready": false
+    },
+    {
+      "at_seconds": 2,
+      "scan": "2026-01-01T00:00:00Z",
+      "product": "RAP",
+      "input_id": "rap-20260101T000000",
+      "check_ready": false
+    },
+    {
+      "at_seconds": 10,
+      "scan": "2026-01-01T00:00:00Z",
+      "product": "PrecipFlag_00.00",
+      "check_ready": true
+    },
+    {
+      "at_seconds": 120,
+      "scan": "2026-01-01T00:02:00Z",
+      "product": "MergedReflectivityQCComposite_00.50",
+      "check_ready": false
+    },
+    {
+      "at_seconds": 121,
+      "scan": "2026-01-01T00:02:00Z",
+      "product": "PrecipFlag_00.00",
+      "check_ready": false
+    },
+    {
+      "at_seconds": 122,
+      "scan": "2026-01-01T00:02:00Z",
+      "product": "ProbSevere",
+      "check_ready": true
+    },
+    {
+      "at_seconds": 123,
+      "scan": "2026-01-01T00:02:00Z",
+      "product": "RAP",
+      "input_id": "rap-20260101T000000",
+      "check_ready": true
+    },
+    {
+      "at_seconds": 125,
+      "scan": "2026-01-01T00:00:00Z",
+      "product": "PrecipRate_00.00",
+      "check_ready": true
+    }
+  ],
+  "snapshots": [
+    {
+      "scan": "2026-01-01T00:00:00Z",
+      "at_seconds": 10,
+      "check_ready": true,
+      "optional_complete": false,
+      "optional_inputs": []
+    },
+    {
+      "scan": "2026-01-01T00:00:00Z",
+      "at_seconds": 30,
+      "check_ready": true,
+      "optional_complete": true,
+      "optional_inputs": []
+    },
+    {
+      "scan": "2026-01-01T00:02:00Z",
+      "at_seconds": 124,
+      "check_ready": true,
+      "optional_complete": false,
+      "optional_inputs": []
+    }
+  ]
+}
