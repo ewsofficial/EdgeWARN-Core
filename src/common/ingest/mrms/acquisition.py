@@ -21,6 +21,7 @@ import uuid
 
 import aioboto3
 import aiohttp
+import eccodes
 from botocore import UNSIGNED
 from botocore.client import Config
 
@@ -135,8 +136,9 @@ def _contained_state(registry, name):
 
 
 def validate_payload(path, spec):
-    """Validate JSON shape or every GRIB2 envelope including encoded length/EOF."""
-    if spec.adapter == 'probsevere_json':
+    """Validate JSON shape or every GRIB2 message through value decoding."""
+    adapter = spec if isinstance(spec, str) else spec.adapter
+    if adapter == 'probsevere_json':
         with path.open() as handle:
             data = json.load(handle)
         if not isinstance(data, dict) or data.get('type') != 'FeatureCollection' or not isinstance(data.get('features'), list):
@@ -146,7 +148,9 @@ def validate_payload(path, spec):
     else:
         size = path.stat().st_size
         offset = 0
-        with path.open('rb') as handle:
+        # ecCodes tracks its own stream position; use a separate handle from
+        # the one used for random-access framing checks.
+        with path.open('rb') as handle, path.open('rb') as decoder:
             while offset < size:
                 head = handle.read(16)
                 if len(head) != 16 or head[:4] != b'GRIB' or head[7] != 2:
@@ -171,6 +175,21 @@ def validate_payload(path, spec):
                 handle.seek(end)
                 if handle.read(4) != b'7777':
                     raise ValueError('Missing GRIB2 terminator')
+                gid = None
+                try:
+                    gid = eccodes.codes_grib_new_from_file(decoder)
+                    if gid is None or decoder.tell() != offset + length:
+                        raise ValueError('GRIB2 message could not be decoded')
+                    if eccodes.codes_get_long(gid, 'numberOfValues') < 1:
+                        raise ValueError('GRIB2 message has no values')
+                    # This computed key unpacks the data section without
+                    # materializing the full grid as a Python array.
+                    eccodes.codes_get_double(gid, 'min')
+                except Exception as exc:
+                    raise ValueError(f'Undecodable GRIB2 message at byte {offset}: {exc}') from exc
+                finally:
+                    if gid is not None:
+                        eccodes.codes_release(gid)
                 offset += length
             if offset == 0:
                 raise ValueError('Empty GRIB2 payload')

@@ -17,6 +17,7 @@ from common.ingest.manifest import (
     staged_input_from_path,
 )
 import common.ingest.mrms.main as mrms_ingest
+from common.ingest.mrms.acquisition import validate_payload
 from common.ingest.mrms.downloader import (
     DownloadBatchResult,
     download_all_goes_files,
@@ -310,15 +311,18 @@ def _previous_detection_records(
 
         if not candidates:
             continue
-        analysis_time, path = max(candidates, key=lambda item: (item[0], str(item[1])))
-        previous.append(
-            staged_input_from_path(
-                current.product,
-                path,
-                source="local-history",
-                family=current.family,
-                analysis_time=analysis_time,
-                role="previous",
-            )
-        )
+        # A filename is only a candidate: local history may have been left by
+        # an older producer or corrupted after publication. Try older files
+        # when the newest one cannot be decoded.
+        adapter = 'probsevere_json' if current.product == 'ProbSevere' else 'conus_grib2'
+        for analysis_time, path in sorted(candidates, key=lambda item: (item[0], str(item[1])), reverse=True):
+            try:
+                validate_payload(path, adapter)
+            except (OSError, ValueError):
+                continue
+            previous.append(staged_input_from_path(
+                current.product, path, source="local-history", family=current.family,
+                analysis_time=analysis_time, role="previous",
+            ))
+            break
     return tuple(previous)

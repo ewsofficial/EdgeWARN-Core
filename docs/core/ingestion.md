@@ -151,6 +151,12 @@ error triggers an HTTPS lookup/download for the requested timestamp before
 that product is reported unavailable. The HTTPS matcher accepts the exact
 minute or the configured narrow timestamp window; it does not substitute an
 arbitrarily newer file. Both source paths stage files atomically.
+GRIB2 acquisition validates every message's framing and decodes its values
+with ecCodes before publication; undecodable downloads are quarantined and
+the source fallback remains eligible. The coordinator applies the same
+validation to local previous observations, trying older history when the
+newest prior file is corrupt. Unusable history is omitted from the CTAM
+manifest rather than reported ready.
 `max_entries` and `remove_old_files` default to the runtime/catalog settings,
 so configuration remains the source of truth unless a caller explicitly
 overrides them. Cleanup is restricted to configured runtime directories.

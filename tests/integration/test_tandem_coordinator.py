@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 import asyncio
+import base64
+from pathlib import Path
 import pytest
 
 from common.pipeline.coordinator import run_staged_ingest_cycle
@@ -8,6 +10,7 @@ from common.ingest.manifest import staged_input_from_path
 from common.ingest.mrms.downloader import DownloadBatchResult
 import common.ingest.synoptic.downloader as synoptic_downloader
 import common.ingest.synoptic.main as synoptic_main
+from EdgeWARN.ctam import readiness as ctam_readiness
 
 
 def _batch(tmp_path, timestamp, product):
@@ -30,6 +33,48 @@ def _batch(tmp_path, timestamp, product):
         ),
         failed=(),
     )
+
+
+def test_previous_mrms_history_skips_corrupt_observation_for_ctam(tmp_path):
+    product = 'MergedReflectivityQCComposite_00.50'
+    folder = tmp_path / product
+    folder.mkdir()
+    fixture = Path(__file__).parents[1] / 'fixtures/weather/rap.grib2.b64'
+    sample = base64.b64decode(fixture.read_text())
+    sample = sample[:int.from_bytes(sample[8:16], 'big')]
+    older = folder / f'MRMS_{product}_20260317-195600.grib2'
+    corrupt = folder / f'MRMS_{product}_20260317-195800.grib2'
+    current = folder / f'MRMS_{product}_20260317-200000.grib2'
+    older.write_bytes(sample)
+    corrupt.write_text('not GRIB data')
+    current.write_bytes(sample)
+    record = staged_input_from_path(product, current, source='test', family='mrms')
+
+    selected = coordinator._previous_detection_records((record,))
+    assert len(selected) == 1
+    assert selected[0].local_path == older
+    assert selected[0].validated
+
+    manifest = coordinator.CycleInputManifest(
+        cycle_time=record.analysis_time, inputs=(record, *selected))
+    catalog = ctam_readiness.build_catalog(
+        cells=[], timestamp='20260317-200000', stormcell_path=None,
+        input_manifest=manifest, now=record.analysis_time,
+    )
+    previous = [entry for entry in catalog.files if entry.kind == ctam_readiness.KIND_INPUT and entry.role == 'previous']
+    assert len(previous) == 1
+    assert previous[0].readiness == 'ready'
+
+    older.unlink()
+    remaining = coordinator._previous_detection_records((record,))
+    assert remaining == ()
+    no_history = coordinator.CycleInputManifest(
+        cycle_time=record.analysis_time, inputs=(record, *remaining))
+    catalog = ctam_readiness.build_catalog(
+        cells=[], timestamp='20260317-200000', stormcell_path=None,
+        input_manifest=no_history, now=record.analysis_time,
+    )
+    assert not [entry for entry in catalog.files if entry.role == 'previous']
 
 
 def test_run_staged_ingest_cycle_preserves_staged_readiness(monkeypatch, tmp_path):

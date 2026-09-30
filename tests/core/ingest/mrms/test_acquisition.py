@@ -1,5 +1,6 @@
 """Phase 4 fixture acquisition; no live upstream services."""
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import gzip
@@ -17,6 +18,12 @@ NAME = 'MRMS_NewProduct_01.25_20260101-000000.grib2.gz'
 
 
 def grib():
+    fixture = Path(__file__).parents[3] / 'fixtures/weather/rap.grib2.b64'
+    data = base64.b64decode(fixture.read_text())
+    return data[:int.from_bytes(data[8:16], 'big')]
+
+
+def framed_but_undecodable():
     sections = b''.join((5).to_bytes(4, 'big') + bytes([n]) for n in (1, 3, 4, 5, 6, 7))
     size = 20 + len(sections)
     return b'GRIB\0\0\0\2' + size.to_bytes(8, 'big') + sections + b'7777'
@@ -148,13 +155,48 @@ def test_quarantine_is_bounded(registry):
 def test_payload_validation(registry, tmp_path):
     path = tmp_path / 'payload'
     spec = registry.require('NewProduct_01.25')
-    for data in (b'', b'GRIB', grib()[:-1], grib() + b'junk'):
+    for data in (b'', b'GRIB', grib()[:-1], grib() + b'junk',
+                 framed_but_undecodable(), grib() + framed_but_undecodable()):
         path.write_bytes(data)
         with pytest.raises(ValueError): a.validate_payload(path, spec)
     path.write_text('{"type":"FeatureCollection","features":[]}')
     assert a.validate_payload(path, registry.require('ProbSevere'))
     path.write_text('{}')
     with pytest.raises(ValueError): a.validate_payload(path, registry.require('ProbSevere'))
+
+
+def test_undecodable_s3_payload_falls_back_to_https(registry, transport, monkeypatch):
+    bad = gzip.compress(framed_but_undecodable())
+    good = gzip.compress(grib())
+
+    async def bad_s3(self, **kwargs):
+        return {'Body': Body(bad), 'ContentLength': len(bad)}
+
+    class Response:
+        content_length = len(good)
+        def __init__(self): self.content = self
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def raise_for_status(self): pass
+        async def iter_chunked(self, *args): yield good
+
+    class Http:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def get(self, *args): return Response()
+
+    async def https(*args):
+        return ['https://mrms.ncep.noaa.gov/data/2D/NewProduct/' + NAME]
+
+    monkeypatch.setattr(S3, 'get_object', bad_s3)
+    monkeypatch.setattr(a.HttpsFileFinder, 'find_files', https)
+    monkeypatch.setattr(a.aiohttp, 'ClientSession', Http)
+    batch = asyncio.run(a.acquire_batch(registry, DT, 10, ['NewProduct_01.25'], MagicMock()))
+    assert batch.successful
+    assert batch.downloaded[0].source == 'https'
+    assert Path(batch.downloaded[0].path).read_bytes() == grib()
+    assert len(list((registry.base_dir / 'state/mrms/quarantine').glob('*.json'))) == 1
 
 
 def test_new_product_sync(registry, monkeypatch):

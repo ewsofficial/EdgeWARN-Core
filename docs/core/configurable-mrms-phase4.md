@@ -79,9 +79,10 @@ remaining work and batch elapsed time separately from per-product durations.
 Each attempt writes under a unique `<BASE_DIR>/state/mrms/staging/` directory,
 outside consumer product globs. Complete response lengths and gzip CRC/EOF are
 checked before validating the decoded content. GRIB2 validation checks every
-message length, edition, section framing, required sections and terminator;
+message length, edition, section framing, required sections and terminator,
+then uses ecCodes to decode the values in each message;
 ProbSevere validates the GeoJSON collection/feature structure. These checks do
-not replace downstream scientific decoding or feature validation.
+not replace downstream scientific interpretation or feature validation.
 
 A validated file is atomically linked into its generated directory without
 replacing existing content. Existing local files must pass validation before
