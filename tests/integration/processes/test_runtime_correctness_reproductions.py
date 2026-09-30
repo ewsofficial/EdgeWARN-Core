@@ -207,6 +207,7 @@ def test_mrms_batch_fails_when_decompression_returns_none(monkeypatch, tmp_path)
         def decompress_file(self, _path):
             return None
 
+    monkeypatch.setattr(downloader, "get_registry", lambda: None)
     monkeypatch.setattr(downloader, "FileFinder", Finder)
     monkeypatch.setattr(downloader, "FileDownloader", Download)
     monkeypatch.setattr(
@@ -325,6 +326,9 @@ def test_mrms_https_disconnect_leaves_no_final_filename(monkeypatch, tmp_path):
             return False
 
     class Session:
+        def __init__(self, *, timeout):
+            assert timeout.total > 0
+
         async def __aenter__(self):
             return self
 
@@ -386,6 +390,9 @@ def _historical_args(tmp_path, start, end):
         lon=[-130, -60],
         base_dir=tmp_path,
         profile=False,
+        ctam_module_dir=None,
+        disable_ctam_modules=False,
+        disable_stormprob=None,
         disable_ctam=False,
         disable_tracking=False,
         disable_polygon_expansion=False,
@@ -418,6 +425,7 @@ def test_historical_failed_timestamp_is_retried(monkeypatch, tmp_path, failure_m
         return None
 
     monkeypatch.setattr(process_historical.io_manager, "get_historical_args", lambda: _historical_args(tmp_path, start, end))
+    monkeypatch.setattr(process_historical, "check_core_startup", lambda **_kwargs: None)
     monkeypatch.setattr(process_historical, "initialize_runtime", lambda **_kwargs: None)
     monkeypatch.setattr(process_historical, "MRMSUpdateChecker", Checker)
     monkeypatch.setattr(process_historical, "historical_pipeline", pipeline)

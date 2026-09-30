@@ -25,6 +25,18 @@ from util.runtime.ewmrs_consumer import EwmrsRecordConsumer
 CYCLE_DT = datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def matching_producer(tmp_path):
+    import util.file as fs
+    from common.ingest.mrms.config import get_registry
+    from util.runtime.mrms_registry import publish_registry
+    from util.runtime.services import ServiceHeartbeat, heartbeat_path, write_heartbeat
+    fs.initialize_filesystem(tmp_path)
+    publish_registry(get_registry(), "test-producer")
+    write_heartbeat(ServiceHeartbeat("edgewarn", 123, "test-producer", datetime.now(timezone.utc)),
+                    heartbeat_path(tmp_path, "edgewarn"))
+
+
 @pytest.fixture()
 def fake_render(tmp_path, monkeypatch):
     calls = {"mrms": [], "rap": []}

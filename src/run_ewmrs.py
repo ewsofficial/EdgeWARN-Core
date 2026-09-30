@@ -101,6 +101,8 @@ def main():
 
     io_manager = IOManager("[EWMRS]")
     args = _parse_args()
+    from util.runtime.mrms_migration import require_completed_migration
+    require_completed_migration(args.config_dir)
     if args.mrms_core_only:
         print("[EWMRS] mrms-core-only is enabled; EWMRS/accessory service will not start.")
         return

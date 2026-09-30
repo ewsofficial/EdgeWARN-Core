@@ -1,4 +1,4 @@
-"""Phase 1 baseline. Target v2 membership is data, not a runtime assertion."""
+"""Shipped v2 membership, canonical paths, and retained source grammars."""
 
 from datetime import datetime, timezone
 import importlib
@@ -22,19 +22,20 @@ TARGET = CONTRACT["v2_target"]
 PRODUCTS = BASELINE["products"]
 
 
-def test_current_catalog_and_discovery_are_exact_v1_baseline():
-    assert load_config("ingest")["schema_version"] == BASELINE["ingest_schema_version"]
-    assert config.get_mrms_modifiers() == [
+def test_current_catalog_and_discovery_are_exact_v2_contract():
+    assert load_config("ingest")["schema_version"] == 2
+    assert set(load_config("ingest")["mrms"]["products"]) == set(TARGET["default_additions"])
+    assert set(config.get_mrms_modifiers()) == {
         (item["region"], item["source_modifier"], getattr(fs, item["legacy_alias"]))
         for item in PRODUCTS
-    ]
-    assert [_mrms_modifier_label(mod) for _, mod, _ in config.get_check_modifiers()] == BASELINE["discovery_ids"]
+    }
+    assert [_mrms_modifier_label(mod) for _, mod, _ in config.get_check_modifiers()] == sorted(TARGET["discovery_ids"])
     assert len(PRODUCTS) == 21
     assert len(BASELINE["discovery_ids"]) == 10
 
 
 def test_target_contract_is_three_reserved_plus_eighteen_additions():
-    """Pin design intent without pretending runtime protection exists yet."""
+    """The shipped registry protects discovery and enables all additions."""
     reserved = {"MergedReflectivityQCComposite_00.50", "PrecipFlag_00.00", "ProbSevere"}
     assert set(TARGET["reserved_ids"]) == reserved
     assert TARGET["discovery_ids"] == TARGET["reserved_ids"]
@@ -45,8 +46,7 @@ def test_target_contract_is_three_reserved_plus_eighteen_additions():
     assert not reserved & optional_ids
     assert reserved | optional_ids == {item["product_id"] for item in PRODUCTS}
     assert {_mrms_modifier_label(mod) for mod in get_detection_modifiers()} == reserved
-    # Current integration gating includes even non-statistic products. Phase 5
-    # deliberately replaces this baseline with phase-specific required inputs.
+    # Download additions remain distinct from the protected discovery set.
     assert {_mrms_modifier_label(mod) for mod in get_integration_modifiers()} == optional_ids
     assert set(BASELINE["discovery_ids"]) - reserved == {
         "EchoTop_18_00.50", "EchoTop_30_00.50", "EchoTop_50_00.50",
@@ -58,7 +58,7 @@ def test_target_contract_is_three_reserved_plus_eighteen_additions():
 @pytest.mark.parametrize("item", PRODUCTS, ids=lambda item: item["product_id"])
 def test_legacy_alias_paths_and_source_grammars(item):
     """No network calls or operational directory creation are needed."""
-    assert getattr(fs, item["legacy_alias"]) == fs.BASE_DIR / "data" / item["raw_basename_v1"]
+    assert getattr(fs, item["legacy_alias"]) == fs.BASE_DIR / "data" / item["raw_basename_v2"]
     dt = datetime(2026, 9, 26, 0, 6, tzinfo=timezone.utc)
     modifier = item["source_modifier"]
     if modifier is None:

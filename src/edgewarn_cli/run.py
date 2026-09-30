@@ -188,9 +188,12 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         config_loader.reset_cache()
         config_root = resolve_config_root(args.config_path)
         config_loader.export_config_root(config_root)
+        from util.runtime.mrms_migration import require_completed_migration
+        require_completed_migration(config_root)
         config_loader.validate_all_configs(config_dir=config_root)
     except (
         config_loader.ConfigError,
+        RuntimeError,
         json.JSONDecodeError,
         OSError,
         UnicodeError,

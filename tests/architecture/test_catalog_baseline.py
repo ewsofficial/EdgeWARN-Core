@@ -40,7 +40,7 @@ def test_mrms_readiness_catalog_baseline():
 def test_mrms_readiness_catalog_length():
     from common.ingest.mrms.config import get_check_modifiers
 
-    assert len(get_check_modifiers()) == 10
+    assert len(get_check_modifiers()) == 3
 
 
 def test_rala_remains_ingested_but_is_not_a_readiness_check():

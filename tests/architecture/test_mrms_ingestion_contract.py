@@ -14,7 +14,7 @@ BASELINE = json.loads((ROOT / "tests/fixtures/config/mrms_ingestion_contract.jso
 
 
 def test_source_and_retention_settings_remain_v1_operator_owned():
-    mrms = yaml.safe_load((ROOT / "config/ingest.yaml").read_text())["mrms"]
+    mrms = json.loads((ROOT / "src/common/config/mrms-v1.json").read_text())["mrms"]
     assert {key: mrms[key] for key in BASELINE["source"]} == BASELINE["source"]
     assert {key: mrms[key] for key in BASELINE["retention"]} == BASELINE["retention"]
     assert load_config("filesystem")["cleanup_defaults"]["max_files"] == BASELINE["cleanup_max_files"]
@@ -22,7 +22,11 @@ def test_source_and_retention_settings_remain_v1_operator_owned():
 
 def test_fourteen_optional_statistic_products_and_twenty_five_statistics():
     expected = [stat for item in BASELINE["products"] for stat in item["stats"]]
+    from common.ingest.mrms.core_contract import LEGACY_ALIASES
+    aliases = {product: alias for alias, product in LEGACY_ALIASES.items()}
     actual = [dict(stat) for stat in load_config("integration")["stats_datasets"]]
+    for stat in actual:
+        stat["filepath"] = aliases[stat.pop("product")]
     assert sorted(actual, key=lambda item: item["key"]) == sorted(expected, key=lambda item: item["key"])
     assert len(actual) == 25
     assert len({item["filepath"] for item in actual}) == 14
@@ -40,7 +44,10 @@ def test_render_api_identities_and_wire_format_are_independent_of_raw_renames():
     api_mrms = {item["id"]: item for item in api_products if item["id"].startswith("MRMS_")}
     assert set(api_mrms) == set(by_name)
     for layer in expected:
-        assert by_name[layer["name"]] == {key: value for key, value in layer.items() if key != "gui_basename"}
+        from common.ingest.mrms.core_contract import LEGACY_ALIASES
+        candidate = {key: value for key, value in layer.items() if key not in {"gui_basename", "filepath"}}
+        candidate["product"] = LEGACY_ALIASES[layer["filepath"]]
+        assert by_name[layer["name"]] == candidate
         assert getattr(fs, layer["outdir"]) == fs.BASE_DIR / "gui" / layer["gui_basename"]
         assert api_mrms[layer["name"]]["storageDirectory"] == layer["gui_basename"]
         assert api_mrms[layer["name"]]["legacyFilePrefix"] == layer["name"]
@@ -52,6 +59,6 @@ def test_stormprob_mesh_is_probsevere_derived_and_not_the_raw_mesh_product():
     integration = load_config("integration")
     assert "MESH" in IMPORTANT_SCALAR_PROPERTY_FEATURES
     assert integration["probsevere_field_map"]["MESH"] == "MESH"
-    assert not any(stat["filepath"] == "MRMS_MESH_DIR" for stat in integration["stats_datasets"])
+    assert not any(stat["product"] == "MESH_00.50" for stat in integration["stats_datasets"])
     # Lightning enrichment is supported but is not a trained property feature.
     assert "maxCGFlashDensity" not in IMPORTANT_SCALAR_PROPERTY_FEATURES

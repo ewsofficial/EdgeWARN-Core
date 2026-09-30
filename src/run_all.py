@@ -377,6 +377,8 @@ def supervise(commands, *, src_root, stop_event=None):
 
 def main(argv=None):
     args, services = _parse_args(argv)
+    from util.runtime.mrms_migration import require_completed_migration
+    require_completed_migration(args.config_dir)
     if "edgewarn" in services:
         from EdgeWARN.ctam.preflight import check_core_startup
         from util.ctam_config import resolve_ctam_module_dir

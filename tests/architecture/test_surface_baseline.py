@@ -29,6 +29,7 @@ CLI_MODULES = [
     "edgewarn_cli/run.py",
     "edgewarn_cli/configure.py",
     "edgewarn_cli/nws_zones.py",
+    "edgewarn_cli/migrate_mrms.py",
     "util/cli.py",
     "util/io.py",
     "common/ingest/nexrad/main.py",
@@ -45,11 +46,16 @@ CLI_MODULES = [
 def _path_attributes() -> dict[str, PurePath]:
     import util.file as fs
 
-    return {
+    from common.ingest.mrms.core_contract import LEGACY_ALIASES
+    attributes = {
         name: value
         for name, value in vars(fs).items()
         if not name.startswith("_") and isinstance(value, PurePath)
     }
+    # V2 paths are lazy attributes backed by the active registry.
+    attributes.update({name: getattr(fs, name) for name in LEGACY_ALIASES
+                       if hasattr(fs, name)})
+    return attributes
 
 
 def test_derived_directory_names_baseline():
@@ -73,7 +79,7 @@ def test_derived_directory_names_baseline():
 
 
 def test_path_attribute_count_and_uniqueness():
-    """113 names, no two pointing at the same directory.
+    """111 active legacy path names, no two pointing at the same directory.
 
     Uniqueness is what makes the snapshot harness able to render a path back to
     its attribute name unambiguously; a duplicate would silently alias two

@@ -2,113 +2,161 @@
   {
     "name": "MRMS_MergedReflectivityQC",
     "colormap_key": "NWS_Reflectivity",
-    "filepath": "fs:MRMS_COMPOSITE_DIR",
+    "filepath": "base:data/MRMS_MergedReflectivityQCComposite",
     "outdir": "fs:GUI_COMPOSITE_DIR",
-    "required": true
+    "required": true,
+    "product": "MergedReflectivityQCComposite_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_EchoTop18",
     "colormap_key": "EnhancedEchoTop",
-    "filepath": "fs:MRMS_ECHOTOP18_DIR",
+    "filepath": "base:data/MRMS_EchoTop_18",
     "outdir": "fs:GUI_ECHOTOP18_DIR",
-    "required": true
+    "required": true,
+    "product": "EchoTop_18_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_EchoTop30",
     "colormap_key": "EnhancedEchoTop",
-    "filepath": "fs:MRMS_ECHOTOP30_DIR",
+    "filepath": "base:data/MRMS_EchoTop_30",
     "outdir": "fs:GUI_ECHOTOP30_DIR",
-    "required": true
+    "required": true,
+    "product": "EchoTop_30_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_ReflectivityAtLowestAltitude",
     "colormap_key": "NWS_Reflectivity",
-    "filepath": "fs:MRMS_RALA_DIR",
+    "filepath": "base:data/MRMS_MergedReflectivityAtLowestAltitude",
     "outdir": "fs:GUI_RALA_DIR",
-    "required": true
+    "required": true,
+    "product": "MergedReflectivityAtLowestAltitude_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_ReflectivityAt0C",
     "colormap_key": "NWS_Reflectivity",
-    "filepath": "fs:MRMS_REF_0C_DIR",
+    "filepath": "base:data/MRMS_Reflectivity_0C",
     "outdir": "fs:GUI_REF_0C_DIR",
-    "required": true
+    "required": true,
+    "product": "Reflectivity_0C_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_ReflectivityAtM5C",
     "colormap_key": "NWS_Reflectivity",
-    "filepath": "fs:MRMS_REFM5C_DIR",
+    "filepath": "base:data/MRMS_Reflectivity_-5C",
     "outdir": "fs:GUI_REFM5C_DIR",
-    "required": true
+    "required": true,
+    "product": "Reflectivity_-5C_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_ReflectivityAtM15C",
     "colormap_key": "NWS_Reflectivity",
-    "filepath": "fs:MRMS_REFM15C_DIR",
+    "filepath": "base:data/MRMS_Reflectivity_-15C",
     "outdir": "fs:GUI_REFM15C_DIR",
-    "required": true
+    "required": true,
+    "product": "Reflectivity_-15C_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_PrecipRate",
     "colormap_key": "PrecipRate",
-    "filepath": "fs:MRMS_PRECIPRATE_DIR",
+    "filepath": "base:data/MRMS_PrecipRate",
     "outdir": "fs:GUI_PRECIPRATE_DIR",
-    "required": true
+    "required": true,
+    "product": "PrecipRate_00.00",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_VILDensity",
     "colormap_key": "VILDensity",
-    "filepath": "fs:MRMS_DVIL_DIR",
+    "filepath": "base:data/MRMS_VIL_Density",
     "outdir": "fs:GUI_VILD_DIR",
-    "required": true
+    "required": true,
+    "product": "VIL_Density_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_QPE",
     "colormap_key": "QPE_01H",
-    "filepath": "fs:MRMS_QPE_DIR",
+    "filepath": "base:data/MRMS_RadarOnly_QPE_01H",
     "outdir": "fs:GUI_QPE_DIR",
-    "required": true
+    "required": true,
+    "product": "RadarOnly_QPE_01H_00.00",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_VIL",
     "colormap_key": "VIL",
-    "filepath": "fs:MRMS_VIL_DIR",
+    "filepath": "base:data/MRMS_VIL",
     "outdir": "fs:GUI_VIL_DIR",
-    "required": true
+    "required": true,
+    "product": "VIL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_VII",
     "colormap_key": "VIL",
-    "filepath": "fs:MRMS_VII_DIR",
+    "filepath": "base:data/MRMS_VII",
     "outdir": "fs:GUI_VII_DIR",
-    "required": true
+    "required": true,
+    "product": "VII_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_MergedAzShear_0-2kmAGL",
     "colormap_key": "AzShear",
-    "filepath": "fs:MRMS_AZSHEARLOW_DIR",
+    "filepath": "base:data/MRMS_MergedAzShear_0-2kmAGL",
     "outdir": "fs:GUI_AZSHEARLOW_DIR",
-    "required": true
+    "required": true,
+    "product": "MergedAzShear_0-2kmAGL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_MergedAzShear_3-6kmAGL",
     "colormap_key": "AzShear",
-    "filepath": "fs:MRMS_AZSHEARMID_DIR",
+    "filepath": "base:data/MRMS_MergedAzShear_3-6kmAGL",
     "outdir": "fs:GUI_AZSHEARMID_DIR",
-    "required": true
+    "required": true,
+    "product": "MergedAzShear_3-6kmAGL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_MESH",
     "colormap_key": "MESH",
-    "filepath": "fs:MRMS_MESH_DIR",
+    "filepath": "base:data/MRMS_MESH",
     "outdir": "fs:GUI_MESH_DIR",
-    "required": true
+    "required": true,
+    "product": "MESH_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "MRMS_NLDN_CG_001min_AvgDensity",
     "colormap_key": "VILDensity",
-    "filepath": "fs:MRMS_NLDN_DIR",
+    "filepath": "base:data/MRMS_NLDN_CG_001min_AvgDensity",
     "outdir": "fs:GUI_NLDN_DIR",
-    "required": true
+    "required": true,
+    "product": "NLDN_CG_001min_AvgDensity_00.00",
+    "active": true,
+    "reason": null
   }
 ]

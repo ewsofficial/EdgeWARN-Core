@@ -36,5 +36,7 @@ def test_get_mrms_modifiers_includes_echotop50():
     assert ("CONUS", "EchoTop_50_00.50", fs.MRMS_ECHOTOP50_DIR) in get_mrms_modifiers()
 
 
-def test_get_check_modifiers_includes_echotop50():
-    assert ("CONUS", "EchoTop_50_00.50", fs.MRMS_ECHOTOP50_DIR) in get_check_modifiers()
+def test_get_check_modifiers_contains_only_protected_inputs():
+    assert {modifier for _, modifier, _ in get_check_modifiers()} == {
+        "MergedReflectivityQCComposite_00.50", "PrecipFlag_00.00", None,
+    }

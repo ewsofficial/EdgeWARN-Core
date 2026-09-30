@@ -23,22 +23,22 @@ chunk_format:
   grid_origin: bottom_left
 # Required layer catalog. Each source and output directory must exist in ingest configuration.
 mrms_layers:
-  - {name: MRMS_MergedReflectivityQC,         colormap_key: NWS_Reflectivity, filepath: MRMS_COMPOSITE_DIR,   outdir: GUI_COMPOSITE_DIR,   required: true}
-  - {name: MRMS_EchoTop18,                    colormap_key: EnhancedEchoTop,  filepath: MRMS_ECHOTOP18_DIR,   outdir: GUI_ECHOTOP18_DIR,   required: true}
-  - {name: MRMS_EchoTop30,                    colormap_key: EnhancedEchoTop,  filepath: MRMS_ECHOTOP30_DIR,   outdir: GUI_ECHOTOP30_DIR,   required: true}
-  - {name: MRMS_ReflectivityAtLowestAltitude, colormap_key: NWS_Reflectivity, filepath: MRMS_RALA_DIR,        outdir: GUI_RALA_DIR,        required: true}
-  - {name: MRMS_ReflectivityAt0C,             colormap_key: NWS_Reflectivity, filepath: MRMS_REF_0C_DIR,      outdir: GUI_REF_0C_DIR,      required: true}
-  - {name: MRMS_ReflectivityAtM5C,            colormap_key: NWS_Reflectivity, filepath: MRMS_REFM5C_DIR,      outdir: GUI_REFM5C_DIR,      required: true}
-  - {name: MRMS_ReflectivityAtM15C,           colormap_key: NWS_Reflectivity, filepath: MRMS_REFM15C_DIR,     outdir: GUI_REFM15C_DIR,     required: true}
-  - {name: MRMS_PrecipRate,                   colormap_key: PrecipRate,       filepath: MRMS_PRECIPRATE_DIR,  outdir: GUI_PRECIPRATE_DIR,  required: true}
-  - {name: MRMS_VILDensity,                   colormap_key: VILDensity,       filepath: MRMS_DVIL_DIR,        outdir: GUI_VILD_DIR,        required: true}
-  - {name: MRMS_QPE,                          colormap_key: QPE_01H,          filepath: MRMS_QPE_DIR,         outdir: GUI_QPE_DIR,         required: true}
-  - {name: MRMS_VIL,                          colormap_key: VIL,              filepath: MRMS_VIL_DIR,         outdir: GUI_VIL_DIR,         required: true}
-  - {name: MRMS_VII,                          colormap_key: VIL,              filepath: MRMS_VII_DIR,         outdir: GUI_VII_DIR,         required: true}
-  - {name: MRMS_MergedAzShear_0-2kmAGL,       colormap_key: AzShear,          filepath: MRMS_AZSHEARLOW_DIR,  outdir: GUI_AZSHEARLOW_DIR,  required: true}
-  - {name: MRMS_MergedAzShear_3-6kmAGL,       colormap_key: AzShear,          filepath: MRMS_AZSHEARMID_DIR,  outdir: GUI_AZSHEARMID_DIR,  required: true}
-  - {name: MRMS_MESH,                         colormap_key: MESH,             filepath: MRMS_MESH_DIR,        outdir: GUI_MESH_DIR,        required: true}
-  - {name: MRMS_NLDN_CG_001min_AvgDensity,       colormap_key: VILDensity,       filepath: MRMS_NLDN_DIR,        outdir: GUI_NLDN_DIR,        required: true}
+  - {name: MRMS_MergedReflectivityQC,         colormap_key: NWS_Reflectivity, product: MergedReflectivityQCComposite_00.50,   outdir: GUI_COMPOSITE_DIR,   required: true}
+  - {name: MRMS_EchoTop18,                    colormap_key: EnhancedEchoTop,  product: EchoTop_18_00.50,   outdir: GUI_ECHOTOP18_DIR,   required: true}
+  - {name: MRMS_EchoTop30,                    colormap_key: EnhancedEchoTop,  product: EchoTop_30_00.50,   outdir: GUI_ECHOTOP30_DIR,   required: true}
+  - {name: MRMS_ReflectivityAtLowestAltitude, colormap_key: NWS_Reflectivity, product: MergedReflectivityAtLowestAltitude_00.50,        outdir: GUI_RALA_DIR,        required: true}
+  - {name: MRMS_ReflectivityAt0C,             colormap_key: NWS_Reflectivity, product: Reflectivity_0C_00.50,      outdir: GUI_REF_0C_DIR,      required: true}
+  - {name: MRMS_ReflectivityAtM5C,            colormap_key: NWS_Reflectivity, product: Reflectivity_-5C_00.50,      outdir: GUI_REFM5C_DIR,      required: true}
+  - {name: MRMS_ReflectivityAtM15C,           colormap_key: NWS_Reflectivity, product: Reflectivity_-15C_00.50,     outdir: GUI_REFM15C_DIR,     required: true}
+  - {name: MRMS_PrecipRate,                   colormap_key: PrecipRate,       product: PrecipRate_00.00,  outdir: GUI_PRECIPRATE_DIR,  required: true}
+  - {name: MRMS_VILDensity,                   colormap_key: VILDensity,       product: VIL_Density_00.50,        outdir: GUI_VILD_DIR,        required: true}
+  - {name: MRMS_QPE,                          colormap_key: QPE_01H,          product: RadarOnly_QPE_01H_00.00,         outdir: GUI_QPE_DIR,         required: true}
+  - {name: MRMS_VIL,                          colormap_key: VIL,              product: VIL_00.50,         outdir: GUI_VIL_DIR,         required: true}
+  - {name: MRMS_VII,                          colormap_key: VIL,              product: VII_00.50,         outdir: GUI_VII_DIR,         required: true}
+  - {name: MRMS_MergedAzShear_0-2kmAGL,       colormap_key: AzShear,          product: MergedAzShear_0-2kmAGL_00.50,  outdir: GUI_AZSHEARLOW_DIR,  required: true}
+  - {name: MRMS_MergedAzShear_3-6kmAGL,       colormap_key: AzShear,          product: MergedAzShear_3-6kmAGL_00.50,  outdir: GUI_AZSHEARMID_DIR,  required: true}
+  - {name: MRMS_MESH,                         colormap_key: MESH,             product: MESH_00.50,        outdir: GUI_MESH_DIR,        required: true}
+  - {name: MRMS_NLDN_CG_001min_AvgDensity,       colormap_key: VILDensity,       product: NLDN_CG_001min_AvgDensity_00.00,        outdir: GUI_NLDN_DIR,        required: true}
 
 # GOES layer catalog. Channel IDs and physical transforms must match ABI metadata.
 goes_layers:

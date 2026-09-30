@@ -164,6 +164,9 @@ def test_datasets_config_includes_p90_echotop30():
 
     assert {
         "name": "EchoTop30 (90th)",
+        "product": "EchoTop_30_00.50",
+        "active": True,
+        "reason": None,
         "filepath": fs.MRMS_ECHOTOP30_DIR,
         "key": "p90EchoTop30",
         "method": "percentile",
@@ -176,6 +179,9 @@ def test_datasets_config_includes_p90_echotop50_only():
 
     assert {
         "name": "EchoTop50 (90th)",
+        "product": "EchoTop_50_00.50",
+        "active": True,
+        "reason": None,
         "filepath": fs.MRMS_ECHOTOP50_DIR,
         "key": "p90EchoTop50",
         "method": "percentile",

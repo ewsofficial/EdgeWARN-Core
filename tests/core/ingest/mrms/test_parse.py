@@ -7,33 +7,32 @@ from EdgeWARN.ingest.mrms.parse import parse_mrms_bucket_path, parse_goes_bucket
 def test_parse_mrms_bucket_path_standard():
     """Test standard MRMS bucket path generation."""
     dt = datetime(2023, 10, 15, 12, 30, tzinfo=timezone.utc)
-    result = parse_mrms_bucket_path(dt, "CONUS", "MergedReflectivity")
+    result = parse_mrms_bucket_path(dt, "CONUS", "MergedReflectivityQCComposite_00.50")
     
-    assert result == "CONUS/MergedReflectivity/20231015/"
+    assert result == "CONUS/MergedReflectivityQCComposite_00.50/20231015/"
 
 def test_parse_mrms_bucket_path_no_modifier():
     """Test path generation when modifier is None."""
     dt = datetime(2023, 10, 15, 12, 30, tzinfo=timezone.utc)
     result = parse_mrms_bucket_path(dt, "CONUS", None)
     
-    assert result == "CONUS/20231015/"
+    assert result == "ProbSevere/20231015/"
 
 def test_parse_mrms_bucket_path_year_boundary():
     """Test path generation around New Year."""
     dt = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
     result = parse_mrms_bucket_path(dt, "CONUS", "ProbSevere")
     
-    assert result == "CONUS/ProbSevere/20240101/"
+    assert result == "ProbSevere/20240101/"
 
-def test_parse_mrms_bucket_path_different_regions():
-    """Test path generation for different regions."""
+def test_parse_mrms_bucket_path_uses_code_owned_region():
+    """Caller-supplied regions cannot alter the v2 CONUS source grammar."""
     dt = datetime(2023, 7, 4, 18, 0, tzinfo=timezone.utc)
-    
-    result_conus = parse_mrms_bucket_path(dt, "CONUS", "Reflectivity")
-    result_alaska = parse_mrms_bucket_path(dt, "ALASKA", "Reflectivity")
-    
-    assert result_conus == "CONUS/Reflectivity/20230704/"
-    assert result_alaska == "ALASKA/Reflectivity/20230704/"
+    modifier = "MergedReflectivityQCComposite_00.50"
+    assert parse_mrms_bucket_path(dt, "CONUS", modifier) == \
+        "CONUS/MergedReflectivityQCComposite_00.50/20230704/"
+    assert parse_mrms_bucket_path(dt, "ALASKA", modifier) == \
+        "CONUS/MergedReflectivityQCComposite_00.50/20230704/"
 
 # === Tests for parse_goes_bucket_path ===
 

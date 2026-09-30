@@ -95,6 +95,8 @@ def main():
 
     io_manager = IOManager("[NEXRAD]")
     args = _parse_args()
+    from util.runtime.mrms_migration import require_completed_migration
+    require_completed_migration(args.config_dir)
     if args.mrms_core_only:
         print("[NEXRAD] mrms-core-only is enabled; NEXRAD service will not start.")
         return

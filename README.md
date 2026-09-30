@@ -111,3 +111,8 @@ python -m pytest
 ```
 
 **Version 3.0.1** · [Installation](INSTALLATION.md) · [Configuration](docs/core/configuration.md) · [Changelog](CHANGELOG.md)
+
+The shipped MRMS ingest catalog uses schema version 2: `mrms.products` lists
+18 optional additions alongside three always enabled protected inputs. Existing
+v1 deployments must stop services and [migrate the complete catalog and runtime](docs/core/configurable-mrms-phase8.md)
+before restart. Raw directory names change; GUI products and API v3 contracts remain stable.

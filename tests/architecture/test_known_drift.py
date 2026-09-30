@@ -2165,7 +2165,7 @@ def test_config_dir_reaches_mrms_values_after_the_module_is_already_imported(tmp
     previous = os.environ.get("EDGEWARN_CONFIG_DIR")
     try:
         loader.export_config_root(config_dir)
-        assert mrms_config.mrms_bucket() == "override-mrms"
+        assert mrms_config.mrms_bucket() == "noaa-mrms-pds"
         assert mrms_config.goes_bucket() == "override-goes"
     finally:
         if previous is None:
@@ -2294,7 +2294,7 @@ def test_config_dir_reaches_the_ncep_https_values_after_import(tmp_path):
         loader.export_config_root(config_dir)
 
         finder = https_client.HttpsFileFinder(dt)
-        assert finder.construct_url("CONUS", "MESH_00.50") == "https://example.invalid/2D/MESH_OVERRIDE"
+        assert finder.construct_url("CONUS", "MESH_00.50") == "https://mrms.ncep.noaa.gov/data/2D/MESH"
 
         def _fake_get(url, timeout=None):
             timeouts.append(timeout)

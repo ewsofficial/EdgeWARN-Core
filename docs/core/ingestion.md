@@ -9,8 +9,7 @@ is a compatibility re-export layer.
 The [configurable MRMS Phase 1 contract and impact inventory](configurable-mrms-phase1.md)
 records the current 21-product baseline, three-product protected set,
 raw-path migration, and implementation ownership. The shipped ingest catalog
-remains v1 until the coordinated phase 8 release; v2 trees are available for
-development. Core startup now audits enabled CTAM declarations and StormProb
+uses version 2 with 18 optional additions and three code-owned protected inputs. Core startup now audits enabled CTAM declarations and StormProb
 dependencies before initializing the runtime filesystem.
 
 An enabled external CTAM module must write `requires = []` or declare
@@ -301,10 +300,10 @@ through their service parsers. Do not introduce repository-local output paths:
 the runtime filesystem is the source of truth for staged inputs, durable
 handoff, rendered artifacts, and API visibility.
 
-The opt-in v2 acquisition and path implementation is documented in
+The registry acquisition and path implementation is documented in
 [Configurable MRMS phase 4](configurable-mrms-phase4.md), including explicit
 startup directory creation, bounded acquisition, staging, validation, and
-quarantine. The shipped v1 catalog remains in place pending the coordinated release.
+quarantine. The shipped catalog activates this implementation.
 
 [Configurable MRMS phase 5](configurable-mrms-phase5.md) separates mandatory
 readiness from optional MRMS completion, preserves phase snapshots, and protects
@@ -337,5 +336,4 @@ checkpoint advancement. RAP consumption and unrelated GOES/accessory work
 continue. Matching configuration and a live matching Core run automatically
 resume pending MRMS work. Restart services after configuration changes.
 
-The shipped v1 catalog remains in place until phase 8's coordinated migration
-and release qualification.
+See [Phase 8 migration and qualification](configurable-mrms-phase8.md) for upgrade, rollback, and offline resource measurements.

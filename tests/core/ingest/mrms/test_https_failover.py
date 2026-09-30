@@ -12,6 +12,13 @@ from common.ingest.mrms.https_client import HttpsFileDownloader
 TARGET = datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def legacy_download_adapter(monkeypatch):
+    # Exercise the retained v1 transport adapter with its arbitrary test
+    # product. V2 failover is covered by test_acquisition.py.
+    monkeypatch.setattr(downloader, "get_registry", lambda: None)
+
+
 @pytest.mark.parametrize("s3_files", [[], [("remote.gz", TARGET)]])
 def test_async_s3_miss_or_failed_fetch_uses_https(monkeypatch, tmp_path, s3_files):
     source = tmp_path / "MRMS_Test_20260317-200000.grib2"

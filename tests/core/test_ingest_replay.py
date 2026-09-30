@@ -65,6 +65,15 @@ def test_optional_deadline_and_cancellation_join_owned_tasks(monkeypatch, tmp_pa
             return {**result, "mrms": {**result["mrms"], "downloads": {"optional_timeout_seconds": .03}}}
         return result
     monkeypatch.setattr(coordinator, "load_config", settings)
+    # V2 takes the deadline from its frozen registry configuration.
+    from dataclasses import replace
+    import json
+    registry = coordinator.mrms_ingest.get_registry()
+    normalized = json.loads(registry.normalized_config_json)
+    normalized["downloads"]["optional_timeout_seconds"] = .03
+    normalized["ncep_https"]["sync_timeout_seconds"] = .03
+    monkeypatch.setattr(coordinator.mrms_ingest, "get_registry", lambda: replace(
+        registry, normalized_config_json=json.dumps(normalized)))
     async def run():
         entered = asyncio.Event()
         stopped = asyncio.Event()

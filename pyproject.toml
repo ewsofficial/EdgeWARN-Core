@@ -61,6 +61,10 @@ EWMRS = ["*.json"]
 # existing ``models/stormprob`` layout under the active environment prefix so
 # the same artifact works from a wheel and from the container image.
 [tool.setuptools.data-files]
+"share/edgewarn" = ["package.json", "package-lock.json"]
+"share/edgewarn/scripts" = ["scripts/validate-config.js"]
+"share/edgewarn/src/config" = ["src/config/loader.js", "src/config/mrms-products.js"]
+"share/edgewarn/src/common/ingest/mrms" = ["src/common/ingest/mrms/core-contract.json"]
 "share/edgewarn/config" = ["config/*.yaml"]
 "share/edgewarn/config/schema" = ["config/schema/*.json"]
 "models/stormprob" = ["models/stormprob/*"]

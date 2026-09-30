@@ -40,6 +40,8 @@ def _validated_historical_output(path: Path, requested_time: datetime) -> bool:
 def main():
     """Historical scheduler: iterate through time range and process each available timestamp."""
     args = io_manager.get_historical_args()
+    from util.runtime.mrms_migration import require_completed_migration
+    require_completed_migration(args.config_dir)
 
     # Historical artifacts and raw caches have a separate runtime namespace.
     # A replay must never replace a realtime cell, database, index, or handoff.

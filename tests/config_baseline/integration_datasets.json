@@ -1,164 +1,239 @@
 [
   {
     "name": "Ref0",
-    "filepath": "fs:MRMS_REF_0C_DIR",
+    "filepath": "base:data/MRMS_Reflectivity_0C",
     "key": "Ref0",
-    "method": "max"
+    "method": "max",
+    "product": "Reflectivity_0C_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "Ref5",
-    "filepath": "fs:MRMS_REFM5C_DIR",
+    "filepath": "base:data/MRMS_Reflectivity_-5C",
     "key": "Ref5",
-    "method": "max"
+    "method": "max",
+    "product": "Reflectivity_-5C_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "Ref15",
-    "filepath": "fs:MRMS_REFM15C_DIR",
+    "filepath": "base:data/MRMS_Reflectivity_-15C",
     "key": "Ref15",
-    "method": "max"
+    "method": "max",
+    "product": "Reflectivity_-15C_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "NLDN",
-    "filepath": "fs:MRMS_NLDN_DIR",
+    "filepath": "base:data/MRMS_NLDN_CG_001min_AvgDensity",
     "key": "maxCGFlashDensity",
-    "method": "max"
+    "method": "max",
+    "product": "NLDN_CG_001min_AvgDensity_00.00",
+    "active": true,
+    "reason": null
   },
   {
     "name": "EchoTop18",
-    "filepath": "fs:MRMS_ECHOTOP18_DIR",
+    "filepath": "base:data/MRMS_EchoTop_18",
     "key": "maxEchoTop18",
-    "method": "max"
+    "method": "max",
+    "product": "EchoTop_18_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "EchoTop18 (95th)",
-    "filepath": "fs:MRMS_ECHOTOP18_DIR",
+    "filepath": "base:data/MRMS_EchoTop_18",
     "key": "p95EchoTop18",
     "method": "percentile",
-    "percentile": 95
+    "percentile": 95,
+    "product": "EchoTop_18_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "EchoTop18 (90th)",
-    "filepath": "fs:MRMS_ECHOTOP18_DIR",
+    "filepath": "base:data/MRMS_EchoTop_18",
     "key": "p90EchoTop18",
     "method": "percentile",
-    "percentile": 90
+    "percentile": 90,
+    "product": "EchoTop_18_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "EchoTop30",
-    "filepath": "fs:MRMS_ECHOTOP30_DIR",
+    "filepath": "base:data/MRMS_EchoTop_30",
     "key": "maxEchoTop30",
-    "method": "max"
+    "method": "max",
+    "product": "EchoTop_30_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "EchoTop30 (90th)",
-    "filepath": "fs:MRMS_ECHOTOP30_DIR",
+    "filepath": "base:data/MRMS_EchoTop_30",
     "key": "p90EchoTop30",
     "method": "percentile",
-    "percentile": 90
+    "percentile": 90,
+    "product": "EchoTop_30_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "EchoTop50 (90th)",
-    "filepath": "fs:MRMS_ECHOTOP50_DIR",
+    "filepath": "base:data/MRMS_EchoTop_50",
     "key": "p90EchoTop50",
     "method": "percentile",
-    "percentile": 90
+    "percentile": 90,
+    "product": "EchoTop_50_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL",
-    "filepath": "fs:MRMS_VIL_DIR",
+    "filepath": "base:data/MRMS_VIL",
     "key": "maxVIL",
-    "method": "max"
+    "method": "max",
+    "product": "VIL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL (95th)",
-    "filepath": "fs:MRMS_VIL_DIR",
+    "filepath": "base:data/MRMS_VIL",
     "key": "p95VIL",
     "method": "percentile",
-    "percentile": 95
+    "percentile": 95,
+    "product": "VIL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL (90th)",
-    "filepath": "fs:MRMS_VIL_DIR",
+    "filepath": "base:data/MRMS_VIL",
     "key": "p90VIL",
     "method": "percentile",
-    "percentile": 90
+    "percentile": 90,
+    "product": "VIL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL (50th)",
-    "filepath": "fs:MRMS_VIL_DIR",
+    "filepath": "base:data/MRMS_VIL",
     "key": "p50VIL",
     "method": "percentile",
-    "percentile": 50
+    "percentile": 50,
+    "product": "VIL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL Density",
-    "filepath": "fs:MRMS_DVIL_DIR",
+    "filepath": "base:data/MRMS_VIL_Density",
     "key": "maxVILDensity",
-    "method": "max"
+    "method": "max",
+    "product": "VIL_Density_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL Density (95th)",
-    "filepath": "fs:MRMS_DVIL_DIR",
+    "filepath": "base:data/MRMS_VIL_Density",
     "key": "p95VILDensity",
     "method": "percentile",
-    "percentile": 95
+    "percentile": 95,
+    "product": "VIL_Density_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL Density (90th)",
-    "filepath": "fs:MRMS_DVIL_DIR",
+    "filepath": "base:data/MRMS_VIL_Density",
     "key": "p90VILDensity",
     "method": "percentile",
-    "percentile": 90
+    "percentile": 90,
+    "product": "VIL_Density_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VIL Density (50th)",
-    "filepath": "fs:MRMS_DVIL_DIR",
+    "filepath": "base:data/MRMS_VIL_Density",
     "key": "p50VILDensity",
     "method": "percentile",
-    "percentile": 50
+    "percentile": 50,
+    "product": "VIL_Density_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "AzShear Low",
-    "filepath": "fs:MRMS_AZSHEARLOW_DIR",
+    "filepath": "base:data/MRMS_MergedAzShear_0-2kmAGL",
     "key": "maxAzShearLow",
-    "method": "max"
+    "method": "max",
+    "product": "MergedAzShear_0-2kmAGL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "AzShear Low (95th)",
-    "filepath": "fs:MRMS_AZSHEARLOW_DIR",
+    "filepath": "base:data/MRMS_MergedAzShear_0-2kmAGL",
     "key": "p95AzShearLow",
     "method": "percentile",
-    "percentile": 95
+    "percentile": 95,
+    "product": "MergedAzShear_0-2kmAGL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "AzShear Mid",
-    "filepath": "fs:MRMS_AZSHEARMID_DIR",
+    "filepath": "base:data/MRMS_MergedAzShear_3-6kmAGL",
     "key": "maxAzShearMid",
-    "method": "max"
+    "method": "max",
+    "product": "MergedAzShear_3-6kmAGL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "AzShear Mid (95th)",
-    "filepath": "fs:MRMS_AZSHEARMID_DIR",
+    "filepath": "base:data/MRMS_MergedAzShear_3-6kmAGL",
     "key": "p95AzShearMid",
     "method": "percentile",
-    "percentile": 95
+    "percentile": 95,
+    "product": "MergedAzShear_3-6kmAGL_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "PrecipRate",
-    "filepath": "fs:MRMS_PRECIPRATE_DIR",
+    "filepath": "base:data/MRMS_PrecipRate",
     "key": "maxPrecipRate",
-    "method": "max"
+    "method": "max",
+    "product": "PrecipRate_00.00",
+    "active": true,
+    "reason": null
   },
   {
     "name": "Reflectivity at Lowest Altitude",
-    "filepath": "fs:MRMS_RALA_DIR",
+    "filepath": "base:data/MRMS_MergedReflectivityAtLowestAltitude",
     "key": "maxRALA",
-    "method": "max"
+    "method": "max",
+    "product": "MergedReflectivityAtLowestAltitude_00.50",
+    "active": true,
+    "reason": null
   },
   {
     "name": "VII",
-    "filepath": "fs:MRMS_VII_DIR",
+    "filepath": "base:data/MRMS_VII",
     "key": "maxVII",
-    "method": "max"
+    "method": "max",
+    "product": "VII_00.50",
+    "active": true,
+    "reason": null
   }
 ]

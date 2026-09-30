@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createConfig } from './config/index.js';
+import { requireCompletedMigration } from '../config/mrms-migration.js';
 import { createCors } from './middleware/cors.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { createRateLimiters } from './middleware/rateLimit.js';
@@ -21,6 +22,7 @@ export async function createApp(options = {}) {
   const apiDirectory = path.dirname(fileURLToPath(import.meta.url));
   const packageManifest = JSON.parse(await fs.readFile(path.join(apiDirectory, '..', '..', 'package.json'), 'utf8'));
   const config = options.config || createConfig({ ...options, packageVersion: packageManifest.version });
+  requireCompletedMigration(config.configDir);
   const openApi = await fs.readFile(config.openApiPath, 'utf8');
   const routeTemplates = Object.keys(JSON.parse(openApi).paths);
   const repository = new ArtifactRepository(

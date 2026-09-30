@@ -1,0 +1,11 @@
+{
+  "shadows_yaml": [],
+  "can_be_unset": [
+    "--apply",
+    "--base-dir",
+    "--config-path",
+    "--dry-run",
+    "--resume",
+    "--rollback"
+  ]
+}

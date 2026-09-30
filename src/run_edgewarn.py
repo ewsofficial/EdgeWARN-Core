@@ -58,6 +58,8 @@ def main():
     args = io_manager.get_args()
 
     try:
+        from util.runtime.mrms_migration import require_completed_migration
+        require_completed_migration(args.config_dir)
         args.ctam_discovery = check_core_startup(
             config_dir=args.config_dir, base_dir=args.base_dir,
             module_root=args.ctam_module_dir, disable_ctam=args.disable_ctam,
@@ -65,7 +67,7 @@ def main():
             disable_stormprob=args.disable_stormprob,
             mrms_core_only=args.mrms_core_only,
         )
-    except (PreflightError, StormProbDependencyError) as exc:
+    except (PreflightError, StormProbDependencyError, RuntimeError) as exc:
         print(f"[EdgeWARN] {exc}")
         sys.exit(1)
 

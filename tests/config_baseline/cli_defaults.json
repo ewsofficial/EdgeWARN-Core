@@ -1,8 +1,17 @@
 {
   "EdgeWARN/stormprob/audit.py": {
-    "--base-dir": {"default": null, "action": null},
-    "--cycles": {"default": 20, "action": null},
-    "--maximum-missing-fraction": {"default": 0.5, "action": null}
+    "--base-dir": {
+      "default": null,
+      "action": null
+    },
+    "--cycles": {
+      "default": 20,
+      "action": null
+    },
+    "--maximum-missing-fraction": {
+      "default": 0.5,
+      "action": null
+    }
   },
   "EdgeWARN/stormprob/migrate.py": {
     "--base-dir": {
@@ -92,6 +101,32 @@
       "action": null
     }
   },
+  "edgewarn_cli/migrate_mrms.py": {
+    "--config-path": {
+      "default": null,
+      "action": null
+    },
+    "--base-dir": {
+      "default": null,
+      "action": null
+    },
+    "--dry-run": {
+      "default": false,
+      "action": "store_true"
+    },
+    "--apply": {
+      "default": false,
+      "action": "store_true"
+    },
+    "--resume": {
+      "default": false,
+      "action": "store_true"
+    },
+    "--rollback": {
+      "default": false,
+      "action": "store_true"
+    }
+  },
   "util/cli.py": {
     "--base_dir": {
       "default": null,
@@ -116,6 +151,12 @@
       }
     },
     "--disable-ctam": {
+      "default": null,
+      "action": {
+        "@repr": "<not a literal>"
+      }
+    },
+    "--disable-stormprob": {
       "default": null,
       "action": {
         "@repr": "<not a literal>"

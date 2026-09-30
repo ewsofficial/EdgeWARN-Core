@@ -516,13 +516,18 @@ python -m pytest
 The default command is the deterministic offline correctness suite. Performance
 benchmarks and live compatibility probes must be selected explicitly.
 
-### Preview the future MRMS configuration migration
+### Upgrade the MRMS configuration
 
-`edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime`
-prints an offline JSON migration report without changing files. The current
-release retains its v1 default catalog; apply/resume/rollback and v2 worker
-activation are deferred. See [phase 3 migration planning](docs/core/configurable-mrms-phase3.md)
-before using converted development configurations.
+The shipped ingest catalog uses schema version 2. Stop all Python services and
+the API, drain the consumer backlog, and use the complete release checkout with
+Node dependencies installed for migration. Wheel installations include validator
+assets under `<python-prefix>/share/edgewarn`; run
+`npm ci --omit=dev --prefix <python-prefix>/share/edgewarn` there. Preview with
+`edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime`.
+Add `--apply` to execute, `--resume` after interruption, or `--rollback` to restore
+the journaled original configuration and directory names. Keep services stopped
+until both runtime validators pass. See [migration and qualification](docs/core/configurable-mrms-phase8.md)
+for interlocks, backup location, and offline evidence.
 
 Historical processing writes its raw cache and generated artifacts beneath
 `<resolved-base-dir>/historical`. This includes stormcells, StormProb databases,

@@ -68,6 +68,7 @@ def test_historical_pipeline_preserves_cell_and_stormcell_dirs(tmp_path):
             "run_staged_ingest_cycle",
             return_value=SimpleNamespace(
                 detection_inputs_ready=True,
+                optional_inputs_complete=True,
                 errors={},
                 input_manifest=_manifest(
                     pipeline.datetime(

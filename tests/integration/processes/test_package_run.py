@@ -168,7 +168,18 @@ def test_dispatch_validates_before_building_and_scopes_worker_argv(monkeypatch, 
         "validate_all_configs",
         lambda **kwargs: events.append(("validate", kwargs["config_dir"])),
     )
-    monkeypatch.setattr(config_loader, "load_config", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        config_loader, "load_config",
+        lambda *args, **kwargs: {"run": {
+            "disable_ctam": False, "disable_stormprob": False,
+            "ctam_module_dir": "modules",
+        }},
+    )
+    monkeypatch.setattr("EdgeWARN.ctam.preflight.check_core_startup", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "util.ctam_config.resolve_ctam_module_dir",
+        lambda *args, **kwargs: tmp_path / "modules",
+    )
     monkeypatch.setattr(
         "common.config.overlay.resolve_base_dir", lambda *_args, **_kwargs: tmp_path / "runtime"
     )
@@ -227,7 +238,18 @@ def test_dispatch_resolves_persisted_topology_before_building(monkeypatch, tmp_p
     monkeypatch.setattr(config_loader, "reset_cache", lambda: None)
     monkeypatch.setattr(config_loader, "export_config_root", lambda _path: None)
     monkeypatch.setattr(config_loader, "validate_all_configs", lambda **_kwargs: None)
-    monkeypatch.setattr(config_loader, "load_config", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        config_loader, "load_config",
+        lambda *args, **kwargs: {"run": {
+            "disable_ctam": False, "disable_stormprob": False,
+            "ctam_module_dir": "modules",
+        }},
+    )
+    monkeypatch.setattr("EdgeWARN.ctam.preflight.check_core_startup", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "util.ctam_config.resolve_ctam_module_dir",
+        lambda *args, **kwargs: tmp_path / "modules",
+    )
     monkeypatch.setattr(
         "common.config.overlay.resolve_base_dir", lambda *_args, **_kwargs: tmp_path / "runtime"
     )

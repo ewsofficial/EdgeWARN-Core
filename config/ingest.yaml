@@ -1,93 +1,36 @@
-# Operational ingest defaults. Product identifiers and source path formats must match upstream providers.
+# MRMS optional additions; the three protected inputs and source adapters are code-owned.
+schema_version: 2
 
-schema_version: 1
-
-# MRMS source and retention settings. Keep identifiers and templates aligned with NOAA naming.
 mrms:
-  bucket: noaa-mrms-pds
-  # 1 MiB is a balanced local decompression buffer; larger values rarely improve throughput.
   decompress_chunk_size_bytes: 1048576
-
-
   remove_old_files: true
   cleanup_max_age_minutes: 60
-  # S3 key templates; do not edit unless the upstream layout changes.
-  path_patterns:
-    s3_prefix: '{region}/{modifier}/{YYYYMMDD}/'
-    s3_prefix_no_modifier: '{region}/{YYYYMMDD}/'
-    filename_prefix: 'MRMS_{modifier}_{YYYYMMDD}-{HH}'
-    probsevere_start_after: 'MRMS_PROBSEVERE_{YYYYMMDD}_{HH}'
-    probsevere_start_after_lookback_hours: 1
-    filename_start_after_minute: 'MRMS_{modifier}_{YYYYMMDD}-{HHMM}'
-    probsevere_start_after_minute: 'MRMS_PROBSEVERE_{YYYYMMDD}_{HHMM}' # mrms_probsevere_start_after_minute
-
-  # Fallback source used when S3 lookup misses; keep endpoints and directory mappings intact.
+  products:
+  - MRMS_EchoTop_18_00.50
+  - MRMS_EchoTop_30_00.50
+  - MRMS_EchoTop_50_00.50
+  - MRMS_RadarQualityIndex_00.00
+  - MRMS_MESH_00.50
+  - MRMS_NLDN_CG_001min_AvgDensity_00.00
+  - MRMS_PrecipRate_00.00
+  - MRMS_RadarOnly_QPE_01H_00.00
+  - MRMS_MergedAzShear_0-2kmAGL_00.50
+  - MRMS_MergedAzShear_3-6kmAGL_00.50
+  - MRMS_VIL_Density_00.50
+  - MRMS_MergedRhoHV_00.50
+  - MRMS_MergedReflectivityAtLowestAltitude_00.50
+  - MRMS_VII_00.50
+  - MRMS_VIL_00.50
+  - MRMS_Reflectivity_0C_00.50
+  - MRMS_Reflectivity_-5C_00.50
+  - MRMS_Reflectivity_-15C_00.50
   ncep_https:
-    base_url: https://mrms.ncep.noaa.gov/data/2D
-    probsevere_url: https://mrms.ncep.noaa.gov/data/ProbSevere
     sync_timeout_seconds: 10
-    # Permitted timestamp mismatch after an exact match fails; widening can select stale data.
     match_window_seconds: 120
     download_chunk_size_bytes: 8192
-    directory_split_token: '_00.'
-    # Product-to-directory exceptions; preserve exact upstream spelling.
-    directory_map:
-      EchoTop_18_00.50: EchoTop_18
-      EchoTop_30_00.50: EchoTop_30
-      MESH_00.50: MESH
-      NLDN_CG_001min_AvgDensity_00.00: NLDN_CG_001min_AvgDensity
-      PrecipRate_00.00: PrecipRate
-      RadarOnly_QPE_01H_00.00: RadarOnly_QPE_01H
-      MergedAzShear_0-2kmAGL_00.50: MergedAzShear_0-2kmAGL
-      MergedAzShear_3-6kmAGL_00.50: MergedAzShear_3-6kmAGL
-      VIL_Density_00.50: VIL_Density
-      VIL_00.50: VIL
-      MergedRhoHV_00.50: MergedRhoHV
-      PrecipFlag_00.00: PrecipFlag
-      MergedReflectivityAtLowestAltitude_00.50: MergedReflectivityAtLowestAltitude
-      MergedReflectivityQCComposite_00.50: MergedReflectivityQCComposite
-      VII_00.50: VII
-
-  # Full ingest catalog. Each outdir is a runtime contract used by downstream processing.
-  products:
-    - {region: CONUS, product: EchoTop_18_00.50,                     outdir: MRMS_ECHOTOP18_DIR}
-    - {region: CONUS, product: EchoTop_30_00.50,                     outdir: MRMS_ECHOTOP30_DIR}
-    - {region: CONUS, product: EchoTop_50_00.50,                     outdir: MRMS_ECHOTOP50_DIR}
-    - {region: CONUS, product: RadarQualityIndex_00.00,              outdir: MRMS_RQI_DIR}
-    - {region: CONUS, product: MESH_00.50,                           outdir: MRMS_MESH_DIR}
-    - {region: CONUS, product: NLDN_CG_001min_AvgDensity_00.00,      outdir: MRMS_NLDN_DIR}
-    - {region: CONUS, product: PrecipRate_00.00,                     outdir: MRMS_PRECIPRATE_DIR}
-    - {region: CONUS, product: RadarOnly_QPE_01H_00.00,              outdir: MRMS_QPE_DIR}
-    - {region: CONUS, product: MergedAzShear_0-2kmAGL_00.50,         outdir: MRMS_AZSHEARLOW_DIR}
-    - {region: CONUS, product: MergedAzShear_3-6kmAGL_00.50,         outdir: MRMS_AZSHEARMID_DIR}
-    - {region: CONUS, product: VIL_Density_00.50,                    outdir: MRMS_DVIL_DIR}
-    - {region: ProbSevere, product: null,                            outdir: MRMS_PROBSEVERE_DIR}
-    - {region: CONUS, product: MergedRhoHV_00.50,                    outdir: MRMS_RHOHV_DIR}
-    - {region: CONUS, product: PrecipFlag_00.00,                     outdir: MRMS_PRECIPTYP_DIR}
-    - {region: CONUS, product: MergedReflectivityAtLowestAltitude_00.50, outdir: MRMS_RALA_DIR}
-    - {region: CONUS, product: MergedReflectivityQCComposite_00.50,  outdir: MRMS_COMPOSITE_DIR}
-    - {region: CONUS, product: VII_00.50,                            outdir: MRMS_VII_DIR}
-    - {region: CONUS, product: VIL_00.50,                            outdir: MRMS_VIL_DIR}
-    - {region: CONUS, product: Reflectivity_0C_00.50,                outdir: MRMS_REF_0C_DIR}
-    - {region: CONUS, product: Reflectivity_-5C_00.50,               outdir: MRMS_REFM5C_DIR}
-    - {region: CONUS, product: Reflectivity_-15C_00.50,              outdir: MRMS_REFM15C_DIR}
-
-  # Readiness subset of products; keep it consistent with critical pipeline inputs.
-  check_products:
-    - {region: CONUS, product: EchoTop_18_00.50,                     outdir: MRMS_ECHOTOP18_DIR}
-    - {region: CONUS, product: EchoTop_30_00.50,                     outdir: MRMS_ECHOTOP30_DIR}
-    - {region: CONUS, product: EchoTop_50_00.50,                     outdir: MRMS_ECHOTOP50_DIR}
-    - {region: CONUS, product: MergedAzShear_0-2kmAGL_00.50,         outdir: MRMS_AZSHEARLOW_DIR}
-    - {region: CONUS, product: MergedAzShear_3-6kmAGL_00.50,         outdir: MRMS_AZSHEARMID_DIR}
-    - {region: CONUS, product: VIL_Density_00.50,                    outdir: MRMS_DVIL_DIR}
-    - {region: ProbSevere, product: null,                            outdir: MRMS_PROBSEVERE_DIR}
-    - {region: CONUS, product: PrecipFlag_00.00,                     outdir: MRMS_PRECIPTYP_DIR}
-    - {region: CONUS, product: MergedReflectivityQCComposite_00.50,  outdir: MRMS_COMPOSITE_DIR}
-    - {region: CONUS, product: VII_00.50,                            outdir: MRMS_VII_DIR}
-
-  # Detection inputs; edit only when changing the detection pipeline.
-  membership_lists:
-    detection: [MergedReflectivityQCComposite_00.50, PrecipFlag_00.00, null]
+  downloads:
+    max_concurrency: 8
+    optional_timeout_seconds: 30
 
 # GOES source defaults. Keep product names and channel catalog matched to NOAA.
 goes:

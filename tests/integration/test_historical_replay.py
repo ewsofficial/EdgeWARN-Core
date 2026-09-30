@@ -59,6 +59,8 @@ def make_args(**overrides):
         base_dir="/tmp/edgewarn-historical-test",
         config_dir="config",
         profile=False,
+        ctam_module_dir=None,
+        disable_stormprob=None,
         disable_ctam=False,
         disable_ctam_modules=False,
         disable_tracking=False,
@@ -133,6 +135,7 @@ class ReplayHarness:
         self.monkeypatch.setattr(ph, "io_manager", self.io)
         self.monkeypatch.setattr(ph, "MRMSUpdateChecker", self._checker())
         self.monkeypatch.setattr(ph, "historical_pipeline", self._pipeline())
+        self.monkeypatch.setattr(ph, "check_core_startup", lambda **k: None)
         self.monkeypatch.setattr(ph, "initialize_runtime", lambda **k: None)
         self.monkeypatch.setattr(ph, "initialize_at_startup_historical", lambda: None)
         self.monkeypatch.setattr(

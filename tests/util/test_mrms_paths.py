@@ -72,7 +72,7 @@ def test_config_and_base_rebinding(tmp_path):
     assert not (tmp_path / 'runtime').exists()
     fs.initialize_filesystem(tmp_path / 'legacy', config_dir=ROOT / 'config')
     assert not hasattr(fs, 'MRMS_NewProduct')
-    assert fs.MRMS_COMPOSITE_DIR == tmp_path / 'legacy/data/MRMS_MergedReflectivityQC'
+    assert fs.MRMS_COMPOSITE_DIR == tmp_path / 'legacy/data/MRMS_MergedReflectivityQCComposite'
 
 
 def test_fresh_process_rebuilds_and_rejects_changed_config(tmp_path):

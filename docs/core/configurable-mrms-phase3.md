@@ -1,5 +1,8 @@
 # Configurable MRMS phase 3
 
+> Historical implementation checkpoint. Phase 8 now ships the v2 catalog and
+> implements apply/resume/rollback. See [current migration and qualification](configurable-mrms-phase8.md).
+
 Phase 3 prepares validation and offline conversion. The shipped catalog remains
 v1 until phase 8 coordinates the runtime, consumer, and migration release.
 `ingest.v2.schema.json` validates development v2 catalogs; both Python and Node
@@ -50,7 +53,8 @@ are reported as conflicts; candidate documents with conflicts must not be applie
 Existing cycle, checkpoint, lease, and service records are listed conservatively;
 this is not proof that services are stopped or a backlog is drained. Apply, backups,
 journaling, resume, liveness/pin interlocks, and rollback belong to phase 8.
-`--apply` is currently rejected.
+At this historical checkpoint `--apply` was rejected; Phase 8 now implements it
+along with resume and rollback.
 
 Regression coverage uses `tests/fixtures/config/mrms_v2_validation.json` in both
 Python and Node. Tests compare the actual converter output to that fixture,

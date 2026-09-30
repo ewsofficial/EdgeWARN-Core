@@ -28,10 +28,10 @@ from tests.architecture.baseline import requires
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_every_catalog_declares_schema_version_one():
-    """Phase 5 acceptance criterion: all shipped catalogs use schema v1."""
+def test_every_catalog_declares_its_supported_schema_version():
+    """Only the ingest document advances to version 2."""
     for name in loader.CONFIG_NAMES:
-        assert loader.load_config(name)["schema_version"] == 1
+        assert loader.load_config(name)["schema_version"] == (2 if name == "ingest" else 1)
 
 
 def duplicates(values):
@@ -113,47 +113,38 @@ def test_waveform_names_are_distinct(nexrad):
 
 # --- MRMS ingest and readiness --------------------------------------------
 
+def _registry(mrms_goes):
+    from common.ingest.mrms.registry import build_registry
+    return build_registry(mrms_goes["mrms"], fs.BASE_DIR)
+
+
 def test_mrms_products_are_unique(mrms_goes):
     products = mrms_goes["mrms"]["products"]
-    assert len(products) == 21
-    assert duplicates([(p["region"], p["product"]) for p in products]) == {}
+    assert len(products) == 18
+    assert duplicates(products) == {}
+    assert len(_registry(mrms_goes).products) == 21
 
 
 def test_mrms_product_outdirs_are_unique(mrms_goes):
-    """Two products sharing an output directory would interleave their files."""
-    outdirs = [p["outdir"] for p in mrms_goes["mrms"]["products"]]
-    assert duplicates(outdirs) == {}
+    registry = _registry(mrms_goes)
+    assert duplicates([p.path_name.casefold() for p in registry.products]) == {}
 
 
 def test_mrms_readiness_is_a_subset_of_ingest(mrms_goes):
-    """A readiness check on an un-ingested product would never be satisfied."""
-    mrms = mrms_goes["mrms"]
-    assert len(mrms["check_products"]) == 10
-
-    ingested = {(p["region"], p["product"]) for p in mrms["products"]}
-    orphans = [
-        (p["region"], p["product"])
-        for p in mrms["check_products"]
-        if (p["region"], p["product"]) not in ingested
-    ]
-    assert orphans == []
+    from common.ingest.mrms.core_contract import PROTECTED_IDS
+    registry = _registry(mrms_goes)
+    discovery = {p.product_id for p in registry.products if p.discovery}
+    assert discovery == PROTECTED_IDS
+    assert discovery <= {p.product_id for p in registry.products}
 
 
 def test_mrms_readiness_entries_are_unique(mrms_goes):
-    entries = [(p["region"], p["product"]) for p in mrms_goes["mrms"]["check_products"]]
-    assert duplicates(entries) == {}
+    assert len(_registry(mrms_goes).get_check_modifiers()) == 3
 
 
 def test_detection_membership_names_ingested_products(mrms_goes):
-    """The detection list selects by product name, so a typo silently matches nothing.
-
-    ``None`` is a legitimate member: it is the ProbSevere entry, which has no
-    modifier component in its bucket path.
-    """
-    mrms = mrms_goes["mrms"]
-    detection = mrms["membership_lists"]["detection"]
-    available = {p["product"] for p in mrms["products"]}
-    assert [name for name in detection if name not in available] == []
+    from common.ingest.mrms.core_contract import PROTECTED_IDS
+    assert {p.product_id for p in _registry(mrms_goes).for_phase("detection")} == PROTECTED_IDS
 
 
 # --- GOES ABI channels ----------------------------------------------------
@@ -172,7 +163,7 @@ def test_mrms_render_layers_are_unique(render):
     layers = render["mrms_layers"]
     assert len(layers) == 16
     assert duplicates([layer["name"] for layer in layers]) == {}
-    assert duplicates([layer["filepath"] for layer in layers]) == {}
+    assert duplicates([layer["product"] for layer in layers]) == {}
     assert duplicates([layer["outdir"] for layer in layers]) == {}
 
 
@@ -206,7 +197,7 @@ def test_integration_stats_datasets_may_share_a_source_directory(integration):
     Pinned so that a future uniqueness sweep does not add the wrong invariant
     here: four datasets legitimately read MRMS_VIL_DIR.
     """
-    counts = duplicates([d["filepath"] for d in integration["stats_datasets"]])
+    counts = duplicates([d["product"] for d in integration["stats_datasets"]])
     assert counts, "expected at least one source directory to feed several datasets"
     assert max(counts.values()) == 4
 
@@ -249,21 +240,18 @@ def _attribute_names():
     runtime = loader.load_config("runtime")
 
     names: set[str] = set()
-    for product in mrms_goes["mrms"]["products"]:
-        names.add(product["outdir"])
-    for product in mrms_goes["mrms"]["check_products"]:
-        names.add(product["outdir"])
+    names.update(p.path_name for p in _registry(mrms_goes).products)
     for channel in mrms_goes["goes"]["abi_channels"]:
         names.add(channel["outdir"])
     names.add(mrms_goes["goes"]["glm_outdir"])
 
     for layer in render["mrms_layers"]:
-        names.update((layer["filepath"], layer["outdir"]))
+        names.update(( _registry(mrms_goes).require(layer["product"]).path_name, layer["outdir"]))
     for layer in render["goes_layers"]["layers"]:
         names.update((layer["filepath"], layer["outdir"]))
 
     for dataset in integration["stats_datasets"]:
-        names.add(dataset["filepath"])
+        names.add(_registry(mrms_goes).require(dataset["product"]).path_name)
 
     names.add(runtime["cycle"]["state_file"]["dir"])
     names.add(runtime["supervisor"]["health_file"]["dir"])

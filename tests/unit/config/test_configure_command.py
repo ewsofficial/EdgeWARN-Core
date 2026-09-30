@@ -62,6 +62,12 @@ def test_dotted_path_mapping_keys_take_precedence_over_indices():
 
 
 def test_escaped_dotted_mapping_key_can_be_edited(config_tree):
+    # Escaped source-map keys remain supported for pre-migration v1 trees.
+    from tests.unit.config.test_mrms_v2 import v1_documents
+    document = yaml.safe_load((config_tree / "ingest.yaml").read_text())
+    legacy = v1_documents()["ingest"]
+    document.update(legacy)
+    (config_tree / "ingest.yaml").write_text(yaml.safe_dump(document))
     result = configure.edit_configuration(
         config_tree,
         r"ingest.mrms.ncep_https.directory_map.EchoTop_18_00\.50",

@@ -1,6 +1,8 @@
 # Configurable MRMS ingestion: architecture and implementation plan
 
-Status: proposed implementation; no runtime changes in this document.
+Status: implemented through Phase 8, with offline release qualification recorded
+in [migration and qualification](../docs/core/configurable-mrms-phase8.md).
+Deployment-specific operational verification remains an operator responsibility.
 
 ## 1. Outcome and scope
 

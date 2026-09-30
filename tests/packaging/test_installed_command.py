@@ -181,6 +181,10 @@ def test_installed_mrms_migration_uses_release_schemas(installed_command):
     root, python, edgewarn = installed_command
     config = root / "migration-v1-config"
     shutil.copytree(REPO_ROOT / "config", config)
+    # Restore frozen pre-upgrade documents independently of the shipped catalog.
+    from tests.unit.config.test_mrms_v2 import v1_documents
+    for name, document in v1_documents().items():
+        (config / f"{name}.yaml").write_text(yaml.safe_dump(document))
     # Simulate an old operator tree which has no v2 schema.
     (config / "schema/ingest.v2.schema.json").unlink()
     before = {str(p.relative_to(config)): p.read_bytes() for p in config.rglob('*') if p.is_file()}
@@ -195,3 +199,34 @@ def test_installed_mrms_migration_uses_release_schemas(installed_command):
     assert sum(p['action'] == 'rename' for p in report['paths']) == 10
     assert not (root / 'migration-runtime').exists()
     assert before == {str(p.relative_to(config)): p.read_bytes() for p in config.rglob('*') if p.is_file()}
+
+
+def test_installed_mrms_apply_and_rollback_with_node(installed_command):
+    if shutil.which('node') is None:
+        pytest.skip('Node runtime unavailable')
+    root, python, edgewarn = installed_command
+    release_root = python.parent.parent / 'share/edgewarn'
+    assert (release_root / 'scripts/validate-config.js').is_file()
+    # Reuse installed npm dependencies without downloading or contacting a registry.
+    dependencies = REPO_ROOT / 'node_modules'
+    if not dependencies.is_dir():
+        pytest.skip('Release npm dependencies unavailable')
+    (release_root / 'node_modules').symlink_to(dependencies, target_is_directory=True)
+    config = root / 'apply-v1-config'
+    shutil.copytree(REPO_ROOT / 'config', config)
+    from tests.unit.config.test_mrms_v2 import v1_documents
+    for name, document in v1_documents().items():
+        (config / f'{name}.yaml').write_text(yaml.safe_dump(document))
+    before = (config / 'ingest.yaml').read_bytes()
+    base = root / 'apply-runtime'
+    source = base / 'data/MRMS_EchoTop18'
+    source.mkdir(parents=True)
+    (source / 'scan.grib2').write_bytes(b'fixture')
+    for operation, expected in [('--apply', 'complete'), ('--rollback', 'rolled-back')]:
+        result = subprocess.run([str(edgewarn), 'migrate-mrms', '--config-path', str(config),
+                                 '--base-dir', str(base), operation], cwd=root,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)['status'] == expected
+    assert (config / 'ingest.yaml').read_bytes() == before
+    assert (source / 'scan.grib2').read_bytes() == b'fixture'

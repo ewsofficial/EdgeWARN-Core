@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { configRoot, expandPath, getProvenance, loadConfig, repoRoot, srcRoot, validateAllConfigs } from '../../config/loader.js';
+import { requireCompletedMigration } from '../../config/mrms-migration.js';
 
 // package.json is the sole owner of the version. This was a literal default,
 // which agreed with the manifest only until one of the two was bumped.
@@ -107,6 +108,7 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
   const configDirCli = oneValue(readFlag(argv, ['--config-dir']), '--config-dir');
   const configDirEnv = env.EDGEWARN_CONFIG_DIR;
   const selectedConfigDir = configDirCli || configDirEnv;
+  requireCompletedMigration(configRoot(selectedConfigDir));
   validateAllConfigs({ configDir: selectedConfigDir });
   const api = loadConfig('api', { configDir: selectedConfigDir });
   const filesystem = loadConfig('filesystem', { configDir: selectedConfigDir });

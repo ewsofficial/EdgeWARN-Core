@@ -2,71 +2,22 @@
   {
     "@tuple": [
       "CONUS",
-      "EchoTop_18_00.50",
-      "fs:MRMS_ECHOTOP18_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
-      "EchoTop_30_00.50",
-      "fs:MRMS_ECHOTOP30_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
-      "EchoTop_50_00.50",
-      "fs:MRMS_ECHOTOP50_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
-      "MergedAzShear_0-2kmAGL_00.50",
-      "fs:MRMS_AZSHEARLOW_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
-      "MergedAzShear_3-6kmAGL_00.50",
-      "fs:MRMS_AZSHEARMID_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
-      "VIL_Density_00.50",
-      "fs:MRMS_DVIL_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "ProbSevere",
-      null,
-      "fs:MRMS_PROBSEVERE_DIR"
+      "MergedReflectivityQCComposite_00.50",
+      "base:data/MRMS_MergedReflectivityQCComposite"
     ]
   },
   {
     "@tuple": [
       "CONUS",
       "PrecipFlag_00.00",
-      "fs:MRMS_PRECIPTYP_DIR"
+      "base:data/MRMS_PrecipFlag"
     ]
   },
   {
     "@tuple": [
-      "CONUS",
-      "MergedReflectivityQCComposite_00.50",
-      "fs:MRMS_COMPOSITE_DIR"
-    ]
-  },
-  {
-    "@tuple": [
-      "CONUS",
-      "VII_00.50",
-      "fs:MRMS_VII_DIR"
+      "ProbSevere",
+      null,
+      "base:data/MRMS_ProbSevere"
     ]
   }
 ]

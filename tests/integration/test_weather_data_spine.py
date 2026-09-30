@@ -25,7 +25,7 @@ def _read(name):
     return json.loads((FIXTURES / name).read_text())
 
 
-def _write_grid(spec_name, destination, timestamp, *, value_override=None):
+def _write_grid(spec_name, destination, timestamp, *, value_override=None, product=None):
     spec = _read(spec_name)
     lat = spec["coordinates"]["latitude"]
     lon = spec["coordinates"]["longitude"]
@@ -48,7 +48,7 @@ def _write_grid(spec_name, destination, timestamp, *, value_override=None):
     )
     dataset["unknown"].attrs["units"] = spec["units"]
     destination.mkdir(parents=True, exist_ok=True)
-    path = destination / f"MRMS_{spec['product']}_{timestamp}.nc"
+    path = destination / f"MRMS_{product or spec['product']}_{timestamp}.nc"
     dataset.to_netcdf(path)
     return path
 
@@ -101,7 +101,7 @@ def _cycle_inputs(timestamp, cycle_time, *, newer_probability=None):
     probsevere = _write_probsevere(fs.MRMS_PROBSEVERE_DIR, timestamp)
     stats = _write_grid(
         "mrms_reflectivity.json", fs.MRMS_ECHOTOP30_DIR, timestamp,
-        value_override=10.0,
+        value_override=10.0, product="EchoTop_30_00.50",
     )
     glm = _write_glm(fs.GOES_GLM_DIR, timestamp)
     rap = _write_rap(fs.RAP_DIR, timestamp)
@@ -111,7 +111,7 @@ def _cycle_inputs(timestamp, cycle_time, *, newer_probability=None):
 
     manifest = CycleInputManifest(cycle_time=cycle_time, inputs=(
         _record("ProbSevere", probsevere, cycle_time),
-        _record("EchoTop30", stats, cycle_time),
+        _record("EchoTop_30_00.50", stats, cycle_time),
         _record("GLM", glm, cycle_time, "goes"),
         _record("RAP", rap, cycle_time, "rap"),
     ))
@@ -133,6 +133,9 @@ def test_two_connected_cycles_decode_enrich_publish_and_reopen():
     integration_main.main(
         snapshot_1,
         remove_old_cells=False,
+        # The compact fixture contains partial meteorology, insufficient for
+        # the complete StormProb feature contract.
+        disable_stormprob=True,
         disable_ctam_modules=True,
         input_manifest=manifest_1,
     )
@@ -166,13 +169,16 @@ def test_two_connected_cycles_decode_enrich_publish_and_reopen():
     integration_main.main(
         snapshot_2,
         remove_old_cells=False,
+        # The compact fixture contains partial meteorology, insufficient for
+        # the complete StormProb feature contract.
+        disable_stormprob=True,
         disable_ctam_modules=True,
         input_manifest=manifest_2,
     )
 
     published_2 = json.loads(snapshot_2.read_text())
     assert [cell["id"] for cell in published_2["features"]] == [17]
-    assert published_2["features"][0]["modules"]["StormProb"]["status"] == "success"
+    assert "StormProb" not in published_2["features"][0].get("modules", {})
     history = json.loads((fs.CELL_DIR / "17.json").read_text())
     assert [entry["timestamp"] for entry in history] == [
         "2026-03-17T20:00:00", "2026-03-17T20:02:00",
