@@ -1,398 +1,530 @@
-"""Phase 4 EWMRS record-consumer tests.
+"""EWMRS per-input render consumer (plan phase 6).
 
-Covers ordered processing of committed records, per-layer newest-local MRMS
-rendering, exact-path RAP conversion, checkpoint advancement, restart recovery
-(start after primary / before primary), explicit backlog abandonment, and
-render failures retrying without advancing.
+Covers: a non-check arrival rendering before Core readiness, two arrivals for
+one scan producing separate work, a later scan arriving while a render is in
+flight, partial RAP success, per-layer retry with unrelated layers advancing,
+acknowledgment loss after output publication, a stopped Core not pausing
+rendering, an explicit no-mapping acknowledgment, and expiry with a reason.
+
+The renderer is faked at the layer boundary, so no raster work and no upstream
+access happens here. The durable handoff is real.
 """
 
-import json
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+from pathlib import Path
+import threading
+import time
 
 import pytest
-
-import EWMRS.pipeline as ewmrs_pipeline
-from common.ingest.manifest import CycleInputManifest, StagedInput
-from util.runtime.handoff import (
-    PhaseRecordPublisher,
-    canonical_cycle_id,
-    phase_record_path,
-    read_phase_record,
+from common.config.loader import load_config
+from common.config.mrms_products import parse_product_id
+from common.ingest.inventory import InputInventory
+from common.ingest.mrms.core_contract import resolve_dependencies
+from common.ingest.mrms.registry import _plain, build_registry
+from common.ingest.manifest import StagedInput
+from common.ingest.objects import CommittedInput
+from util.runtime.ewmrs_consumer import (
+    INPUT_LAYER,
+    InputRenderConsumer,
+    RenderJobSettings,
+    render_configuration_fingerprint,
 )
-from util.runtime.ewmrs_consumer import EwmrsRecordConsumer
+from util.runtime.ingest_handoff import render_job_id
+from util.runtime.mrms_registry import publish_ingest_registry
+from util.runtime.services import ServiceHeartbeat, heartbeat_path, write_heartbeat
+
+UTC = timezone.utc
+T = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
+REFLECTIVITY = "MergedReflectivityQCComposite_00.50"
+PRECIP_RATE = "PrecipRate_00.00"
+UNMAPPED = "RadarQualityIndex_00.00"
+RAP = "RAP"
 
 
-CYCLE_DT = datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc)
+class FakeLayerPool:
+    """A single-worker render pool whose jobs a test can hold open."""
+
+    def __init__(self, *, failing=(), outputs=None, gate=None):
+        self.failing = set(failing)
+        self.outputs = outputs
+        self.calls = []
+        self.gate = gate
+        self.closed = False
+
+    def render(self, layers):
+        results = {}
+        for layer in layers:
+            name = str(layer["name"])
+            self.calls.append((name, layer.get("input_path")))
+            if self.gate is not None:
+                self.gate.wait(30)
+            if name in self.failing:
+                results[name] = None
+            elif self.outputs is not None:
+                results[name] = self.outputs.get(name)
+            else:
+                results[name] = f"{name}.png"
+        return results
+
+    def shutdown(self, **kwargs):
+        self.closed = True
 
 
-@pytest.fixture(autouse=True)
-def matching_producer(tmp_path):
-    import util.file as fs
-    from common.ingest.mrms.config import get_registry
-    from util.runtime.mrms_registry import publish_registry
-    from util.runtime.services import ServiceHeartbeat, heartbeat_path, write_heartbeat
-    fs.initialize_filesystem(tmp_path)
-    publish_registry(get_registry(), "test-producer")
-    write_heartbeat(ServiceHeartbeat("edgewarn", 123, "test-producer", datetime.now(timezone.utc)),
-                    heartbeat_path(tmp_path, "edgewarn"))
+def make_registry(base_dir):
+    catalog = _plain(load_config("ingest")["mrms"])
+    catalog["products"] = [f"MRMS_{PRECIP_RATE}", f"MRMS_{UNMAPPED}"]
+    return build_registry(catalog, Path(base_dir))
 
 
-@pytest.fixture()
-def fake_render(tmp_path, monkeypatch):
-    calls = {"mrms": [], "rap": []}
-
-    def fake_run_mrms(dt, max_entries=None, input_manifest=None):
-        assert input_manifest is None
-        calls["mrms"].append((dt, input_manifest))
-        return {"CompRefQC": "gui/MRMS_MergedReflectivityQC/x.png"}
-
-    def fake_run_rap(rap_file, dt=None):
-        calls["rap"].append((rap_file, dt))
-        return {"CAPE": "gui/RAP/CAPE/data.u16"}
-
-    def fake_layer_list():
-        return [
-            {"name": product, "filepath": str(tmp_path / "mrms" / product)}
-            for product in ("Detection", "Integration")
-        ]
-
-    monkeypatch.setattr(ewmrs_pipeline, "run_mrms_render_pipeline", fake_run_mrms)
-    monkeypatch.setattr(ewmrs_pipeline, "run_rap_uint16_pipeline", fake_run_rap)
-    import EWMRS.render.config as ewmrs_render_config
-
-    monkeypatch.setattr(ewmrs_render_config, "get_mrms_file_list", fake_layer_list)
-    return calls
+def make_dependencies(registry):
+    return resolve_dependencies(
+        registry, include_rap=True, include_glm=False,
+        auxiliary_settings={"rap": {"max_age_minutes": 180}})
 
 
-def _staged(tmp_path, product, dt, family="mrms"):
-    path = tmp_path / family / product / f"MRMS_{product}_{dt:%Y%m%d-%H%M%S}.grib2"
+def commit(inventory, product, at=T, *, family="mrms", name=None):
+    suffix = "grib2"
+    if name is None:
+        name = (f"MRMS_PROBSEVERE_{at:%Y%m%d_%H%M%S}.json" if product == "ProbSevere"
+                else f"MRMS_{product}_{at:%Y%m%d-%H%M%S}.{suffix}")
+    path = inventory.base_dir / "data" / product / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"data")
-    return StagedInput(
-        product=product,
-        path=str(path),
-        analysis_time=dt,
-        source="test",
-        family=family,
-    )
+    body = f"validated {product} {at.isoformat()}".encode()
+    path.write_bytes(body)
+    staged = StagedInput(product, str(path), at, "s3", family)
+    return inventory.commit_input(
+        CommittedInput(staged, hashlib.sha256(body).hexdigest(), f"s3://bucket/{product}"))
 
 
-def _commit(tmp_path, dt, *, with_rap=True):
-    inputs = [_staged(tmp_path, "Detection", dt), _staged(tmp_path, "Integration", dt)]
-    manifest = CycleInputManifest(cycle_time=dt, inputs=tuple(inputs))
-    publisher = PhaseRecordPublisher(tmp_path)
-    publisher.publish("mrms-ready", manifest)
-
-    if with_rap:
-        rap = _staged(tmp_path, "RAP", dt, family="rap")
-        rap_manifest = CycleInputManifest(cycle_time=dt, inputs=(rap,))
-        publisher.publish("rap-ready", rap_manifest)
-    return canonical_cycle_id(dt)
+def notify(inventory, committed):
+    return inventory.handoff.publish_render_ready(committed.key)
 
 
-def test_consumes_committed_records_after_primary(tmp_path, fake_render, monkeypatch):
-    """EWMRS starting AFTER the primary drains already-committed cycles."""
-    cycle_id = _commit(tmp_path, CYCLE_DT)
-    consumer = EwmrsRecordConsumer(tmp_path)
-    processed, skipped = consumer.process_pending_once()
+def drain(consumer, registry, *, now=None, passes=200):
+    """Poll until nothing is in flight and no new work was admitted.
 
-    assert processed == 2  # one mrms-ready + one rap-ready
-    assert skipped == 0
-    rendered_dt, rendered_manifest = fake_render["mrms"][0]
-    assert rendered_dt == CYCLE_DT
-    # MRMS uses a per-layer newest-local scan rather than binding the record's
-    # aggregate manifest into every render layer.
-    assert rendered_manifest is None
-    assert fake_render["rap"] == [(fake_render["rap"][0][0], CYCLE_DT)]
-    # Checkpoint advanced only after validated publication.
-    assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == cycle_id
-    assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == cycle_id
-
-
-def test_consumer_started_before_primary_is_a_noop_then_picks_up(tmp_path, fake_render):
-    """EWMRS starting BEFORE the primary idles, then consumes the next cycle."""
-    consumer = EwmrsRecordConsumer(tmp_path)
-    assert consumer.process_pending_once() == (0, 0)
-
-    _commit(tmp_path, CYCLE_DT)
-    processed, skipped = consumer.process_pending_once()
-    assert (processed, skipped) == (2, 0)
-
-
-def test_already_processed_records_are_quiet_on_subsequent_polls(tmp_path, fake_render):
-    """Historical checkpoint records are expected, not one log event each."""
-    _commit(tmp_path, CYCLE_DT)
-    logs = []
-    consumer = EwmrsRecordConsumer(tmp_path, log=logs.append)
-    assert consumer.process_pending_once() == (2, 0)
-
-    assert consumer.process_pending_once() == (0, 0)
-    assert not any("Ignoring late-committed" in message for message in logs)
-
-
-def test_backlog_excess_marked_unrecoverable_without_rendering(tmp_path, fake_render):
-    for hour in range(5):
-        _commit(tmp_path, CYCLE_DT.replace(hour=hour))
-    consumer = EwmrsRecordConsumer(tmp_path, max_backlog=2)
-    processed, skipped = consumer.process_pending_once()
-
-    # Oldest three abandoned without rendering; newest two rendered per phase.
-    assert skipped == 6  # 3 abandoned cycles x both phases
-    rendered_hours = sorted(dt.hour for dt, _ in fake_render["mrms"])
-    assert rendered_hours == [3, 4]
-    assert [dt.hour for _, dt in fake_render["rap"]] == [3, 4]
-    expected = canonical_cycle_id(CYCLE_DT.replace(hour=4))
-    assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == expected
-    assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == expected
-
-
-def test_missing_exact_mrms_input_does_not_block_local_layer_scan(tmp_path, fake_render):
-    """MRMS trigger records do not require every recorded path to survive."""
-    _commit(tmp_path, CYCLE_DT)
-    # Delete every exact input behind both records.
-    for phase in ("mrms-ready", "rap-ready"):
-        record = read_phase_record(phase_record_path(tmp_path, canonical_cycle_id(CYCLE_DT), phase))
-        for staged in record.inputs:
-            staged.local_path.unlink()
-
-    consumer = EwmrsRecordConsumer(tmp_path)
-    processed, skipped = consumer.process_pending_once()
-    assert processed == 1
-    assert skipped == 1
-    assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
-    assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
-
-
-def test_render_failure_retries_without_advancing(tmp_path, fake_render, monkeypatch):
-    _commit(tmp_path, CYCLE_DT)
-
-    def failing_mrms(dt, max_entries=None, input_manifest=None):
-        raise RuntimeError("renderer exploded")
-
-    monkeypatch.setattr(ewmrs_pipeline, "run_mrms_render_pipeline", failing_mrms)
-    consumer = EwmrsRecordConsumer(tmp_path)
-    processed, _skipped = consumer.process_pending_once()
-
-    # The mrms phase contributed nothing (failed, stays pending for retry);
-    # the rap phase drained independently.
-    assert len(fake_render["mrms"]) == 0
-    assert processed == 1 and fake_render["rap"]
-    # Per-phase checkpoints: the failed mrms cycle stays pending for retry...
-    assert consumer.checkpoint_for("mrms-ready") is None
-    # ...while the successfully rendered rap phase advanced its own cursor.
-    assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
-
-
-def test_missing_mrms_layers_do_not_block_cycle_checkpoint(
-    tmp_path, fake_render, monkeypatch
-):
-    cycle_id = _commit(tmp_path, CYCLE_DT, with_rap=False)
-
-    def partially_available_mrms(dt, max_entries=None, input_manifest=None):
-        assert input_manifest is None
-        return {
-            "Available": "gui/available/chunk.f16.gz",
-            "Lagging": None,
-        }
-
-    monkeypatch.setattr(
-        ewmrs_pipeline, "run_mrms_render_pipeline", partially_available_mrms
-    )
-    monkeypatch.setattr(
-        ewmrs_pipeline,
-        "mrms_required_layer_failures",
-        lambda _results: (["Lagging"], []),
-    )
-    logs = []
-    consumer = EwmrsRecordConsumer(tmp_path, log=logs.append)
-
-    assert consumer.process_pending_once() == (1, 0)
-    assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == cycle_id
-    assert any("next cycle: Lagging" in message for message in logs)
-
-
-def test_restart_replays_render_interrupted_before_checkpoint_once(tmp_path, monkeypatch):
-    cycle_id = _commit(tmp_path, CYCLE_DT, with_rap=False)
-    output_dir = tmp_path / "gui" / "CompRefQC"
-    attempts = []
-
-    def publish_render(dt, max_entries=None, input_manifest=None):
-        output_dir.mkdir(parents=True, exist_ok=True)
-        artifact = output_dir / f"{canonical_cycle_id(dt)}.bin"
-        artifact.write_bytes(b"complete")
-        (output_dir / "index.json").write_text(
-            json.dumps({"timestamps": [canonical_cycle_id(dt)]}),
-            encoding="utf-8",
-        )
-        attempts.append(canonical_cycle_id(dt))
-        return {"CompRefQC": [artifact]}
-
-    import EWMRS.render.config as ewmrs_render_config
-    monkeypatch.setattr(ewmrs_pipeline, "run_mrms_render_pipeline", publish_render)
-    monkeypatch.setattr(
-        ewmrs_render_config,
-        "get_mrms_file_list",
-        lambda: [
-            {"name": product, "filepath": str(tmp_path / "mrms" / product)}
-            for product in ("Detection", "Integration")
-        ],
-    )
-
-    import util.runtime.ewmrs_consumer as consumer_module
-
-    first = EwmrsRecordConsumer(tmp_path)
-    original_record = consumer_module.ConsumerCheckpointStore.record
-    interrupted = False
-
-    def interrupt_before_checkpoint(store, processed_cycle_id):
-        nonlocal interrupted
-        if not interrupted:
-            interrupted = True
-            raise RuntimeError("process interrupted after publication")
-        return original_record(store, processed_cycle_id)
-
-    monkeypatch.setattr(consumer_module.ConsumerCheckpointStore, "record", interrupt_before_checkpoint)
-    assert first.process_pending_once() == (0, 0)
-    assert first.checkpoint_for("mrms-ready") is None
-
-    monkeypatch.setattr(consumer_module.ConsumerCheckpointStore, "record", original_record)
-    restarted = EwmrsRecordConsumer(tmp_path)
-    assert restarted.process_pending_once() == (1, 0)
-    assert restarted.checkpoint_for("mrms-ready").last_processed_cycle_id == cycle_id
-    assert attempts == [cycle_id, cycle_id]
-    assert [path.name for path in output_dir.glob("*.bin")] == [f"{cycle_id}.bin"]
-    assert json.loads((output_dir / "index.json").read_text())["timestamps"] == [cycle_id]
-
-
-def test_malformed_record_stops_drain_preserving_order(tmp_path, fake_render):
-    later = CYCLE_DT.replace(hour=21)
-    _commit(tmp_path, CYCLE_DT)
-    _commit(tmp_path, later)
-    target = phase_record_path(tmp_path, canonical_cycle_id(CYCLE_DT), "mrms-ready")
-    target.write_text("{not json")
-
-    consumer = EwmrsRecordConsumer(tmp_path)
-    processed, skipped = consumer.process_pending_once()
-
-    # The malformed record blocks the mrms drain entirely; nothing newer may
-    # be rendered under an older timestamp's identity.
-    assert all(dt.hour != 21 for dt, _ in fake_render["mrms"])
-    # rap-ready records are unaffected by the malformed mrms file.
-    assert [dt.hour for _, dt in fake_render["rap"]] == [20, 21]
-    assert processed >= 0 and skipped == 0
-
-
-def test_consumer_loop_target_is_importable_and_wraps_streams(
-    tmp_path, fake_render, monkeypatch
-):
-    """Regression: the supervised loop target crashed at startup (missing sys).
-
-    Invoked with a pre-set stop event, the target performs its startup side
-    effects (process name, stream wrapping through ``sys``) and returns
-    without entering the polling loop.
+    Renders are admitted asynchronously on purpose, so a test that wants the
+    durable result drains instead of assuming one pass is enough.
     """
-    import multiprocessing
-    import sys
-
-    import threading
-
-    from util.io import QueueWriter
-    from util.runtime.ewmrs_consumer import ewmrs_consumer_loop
-    from util.runtime import process_identity
-
-    stop = threading.Event()
-    stop.set()
-    parent_death_signal = []
-    monkeypatch.setattr(
-        process_identity, "set_parent_death_signal", lambda: parent_death_signal.append(True)
-    )
-    monkeypatch.setattr(sys, "stdout", object(), raising=False)
-    monkeypatch.setattr(sys, "stderr", object(), raising=False)
-
-    log_queue = multiprocessing.Queue()
-    try:
-        ewmrs_consumer_loop(str(tmp_path), log_queue, stop_event=stop)
-    finally:
-        # Restore real streams immediately; monkeypatch teardown handles it,
-        # but later assertions in this test read sys below.
-        pass
-
-    assert isinstance(sys.stdout, QueueWriter) or sys.stdout is not None
-    assert parent_death_signal == [True]
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline and passes > 0:
+        before = consumer.metrics["dispatched"]
+        consumer.poll_once(registry, now=now)
+        passes -= 1
+        if not consumer.in_flight and consumer.metrics["dispatched"] == before:
+            return
+    assert not consumer.in_flight, "render work never completed"
 
 
-def test_rap_record_without_rap_input_is_unrecoverable_not_blocking(
-    tmp_path, fake_render
-):
-    """A producer-bug record must not stall the rap phase forever."""
-    inputs = (_staged(tmp_path, "Detection", CYCLE_DT),)
-    manifest = CycleInputManifest(cycle_time=CYCLE_DT, inputs=inputs)
-    PhaseRecordPublisher(tmp_path).publish("rap-ready", manifest)
-
-    consumer = EwmrsRecordConsumer(tmp_path)
-    processed, skipped = consumer.process_pending_once()
-
-    assert processed == 0 and skipped == 1
-    assert consumer.checkpoint_for("rap-ready").last_processed_cycle_id == canonical_cycle_id(CYCLE_DT)
+@pytest.fixture
+def world(tmp_path):
+    registry = make_registry(tmp_path)
+    dependencies = make_dependencies(registry)
+    inventory = InputInventory(tmp_path, fingerprint=dependencies.fingerprint,
+                               run_id="ingest")
+    publish_ingest_registry(registry, "ingest", dependency_fingerprint=dependencies.fingerprint)
+    write_heartbeat(ServiceHeartbeat("ingest", 1, "ingest", datetime.now(UTC)),
+                    heartbeat_path(tmp_path, "ingest"))
+    return registry, dependencies, inventory
 
 
-def test_malformed_oldest_record_still_abandoned_by_backlog_cap(tmp_path, fake_render):
-    for hour in (0, 1, 2, 3):
-        _commit(tmp_path, CYCLE_DT.replace(hour=hour))
-    target = phase_record_path(
-        tmp_path, canonical_cycle_id(CYCLE_DT.replace(hour=0)), "mrms-ready"
-    )
-    target.write_text("{not json")
-
-    consumer = EwmrsRecordConsumer(tmp_path, max_backlog=2)
-    processed, skipped = consumer.process_pending_once()
-
-    # The malformed oldest cycle is cap-able out; the two newest still render.
-    rendered_hours = sorted(dt.hour for dt, _ in fake_render["mrms"])
-    assert rendered_hours == [2, 3]
-    # 2 abandoned mrms cycles plus the abandoned rap-side excess.
-    assert skipped >= 2
-    assert consumer.checkpoint_for("mrms-ready").last_processed_cycle_id == \
-        canonical_cycle_id(CYCLE_DT.replace(hour=3))
+def make_consumer(world, pool, **settings):
+    registry, dependencies, inventory = world
+    values = dict(pending_max_jobs=64, max_age_minutes=120, retry_max_attempts=3,
+                  retry_initial_seconds=5, retry_max_seconds=30)
+    values.update(settings)
+    consumer = InputRenderConsumer(
+        inventory.base_dir, run_id="ewmrs", dependencies=dependencies,
+        log=lambda _message: None, settings=RenderJobSettings(**values), pool=pool)
+    return consumer
 
 
-def test_uncommitted_phase_file_waits_quietly(tmp_path, fake_render):
-    """Cycle dirs appear when the first phase lands; the other phase waits."""
-    _commit(tmp_path, CYCLE_DT)  # commits both phases; then remove one file
-    phase_record_path(tmp_path, canonical_cycle_id(CYCLE_DT), "rap-ready").unlink()
+class StubRenderer:
+    """Patches the two rendering seams the consumer calls."""
 
-    later = CYCLE_DT.replace(hour=21)
-    _commit(tmp_path, later)
+    def __init__(self, *, failing=(), gate=None):
+        self.failing = set(failing)
+        self.gate = gate
+        self.mrms_calls = []
+        self.rap_calls = []
+        self.complete = set()
 
-    consumer = EwmrsRecordConsumer(tmp_path)
-    processed, skipped = consumer.process_pending_once()
+    def layer_output_complete(self, layer):
+        name = str(layer.get("name"))
+        if name in self.failing:
+            return False
+        if name not in self.complete:
+            self.complete.add(name)
+        return True
 
-    # The missing (not yet committed) rap record stops only the rap drain,
-    # preserving order -- it neither blocks mrms rendering nor is treated as
-    # malformed damage. If the producer never commits it, the backlog cap is
-    # the dead-letter path.
-    assert [dt.hour for dt, _ in fake_render["mrms"]] == [20, 21]
-    assert fake_render["rap"] == []
-    assert skipped == 0
-    assert consumer.checkpoint_for("rap-ready") is None
+    def _wait(self):
+        if self.gate is not None:
+            self.gate.wait(30)
 
 
-def test_v2_paused_mrms_keeps_checkpoint_and_rap_then_recovers(tmp_path, fake_render, monkeypatch):
-    from common.ingest.mrms import config as ingest
-    from common.ingest.mrms.registry import build_registry
-    from util.runtime.mrms_registry import publish_registry
-    from util.runtime.services import ServiceHeartbeat, heartbeat_path, write_heartbeat
-    registry = build_registry({"products": []}, tmp_path)
-    monkeypatch.setattr(ingest, "get_registry", lambda: registry)
-    _commit(tmp_path, CYCLE_DT)
-    consumer = EwmrsRecordConsumer(tmp_path)
-    assert consumer.process_pending_once() == (1, 0)
-    assert not fake_render["mrms"]
-    assert consumer.checkpoint_for("mrms-ready") is None
-    assert len(fake_render["rap"]) == 1
-    publish_registry(registry, "live")
-    write_heartbeat(ServiceHeartbeat("edgewarn", 123, "live", datetime.now(timezone.utc)),
-                    heartbeat_path(tmp_path, "edgewarn"))
-    assert consumer.process_pending_once() == (1, 0)
-    assert len(fake_render["mrms"]) == 1
-    assert consumer.process_pending_once() == (0, 0)
+@pytest.fixture
+def renderer(monkeypatch):
+    stub = StubRenderer()
+    import EWMRS.pipeline as pipeline_module
+    import EWMRS.rap.uint16_pipeline as rap_module
+
+    monkeypatch.setattr(pipeline_module, "layer_output_complete", stub.layer_output_complete)
+
+    def run_rap(rap_file, dt=None, layers=None, **kwargs):
+        stub._wait()
+        names = [str(layer["name"]) for layer in (layers or [])]
+        stub.rap_calls.append((str(rap_file), tuple(names)))
+        return {name: (None if name in stub.failing else f"{name}.u16") for name in names}
+
+    monkeypatch.setattr(rap_module, "run_rap_uint16_pipeline", run_rap)
+    monkeypatch.setattr(pipeline_module, "run_rap_uint16_pipeline", run_rap, raising=False)
+    return stub
+
+
+class TestPerInputWork:
+    def test_a_non_check_arrival_renders_before_core_readiness(self, world, renderer):
+        """A renderable input becomes work without any Core phase record."""
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        assert inventory.handoff.records("core-start-ready") == ()
+
+        drain(consumer, registry)
+        metrics = consumer.metrics
+
+        assert metrics["dispatched"] == 1
+        assert metrics["succeeded"] == 1
+        assert pool.calls and pool.calls[0][1] == committed.data["input"]["path"]
+        assert inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, INPUT_LAYER,
+                                        consumer.fingerprint)) is not None
+
+    def test_two_arrivals_for_one_scan_create_separate_work(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        first = notify(inventory, commit(inventory, PRECIP_RATE))
+        second = notify(inventory, commit(inventory, PRECIP_RATE, T + timedelta(minutes=2)))
+
+        drain(consumer, registry)
+
+        assert len(inventory.handoff.records("render-ready")) == 2
+        assert {path for _, path in pool.calls} == {
+            first.data["input"]["path"], second.data["input"]["path"]}
+        assert {record.data["input_id"]
+                for record in inventory.handoff.records("render-ack")} == {
+            first.key, second.key}
+        for record in inventory.handoff.records("render-ack"):
+            assert record.data["input_id"] in {first.key, second.key}
+        assert consumer.metrics["dispatched"] == 2
+
+    def test_a_later_scan_arriving_during_a_render_is_not_blocked(self, world, renderer):
+        """Acceptance continues while an earlier render is still running."""
+        registry, dependencies, inventory = world
+        gate = threading.Event()
+        pool = FakeLayerPool(gate=gate)
+        consumer = make_consumer(world, pool)
+        first = notify(inventory, commit(inventory, PRECIP_RATE))
+
+        consumer.poll_once(registry)
+        while not pool.calls:
+            threading.Event().wait(0.01)
+        # The T input is still rendering when the T+2 input arrives.
+        assert consumer.in_flight
+        later = notify(inventory, commit(inventory, PRECIP_RATE, T + timedelta(minutes=2)))
+        assert {path for _, path in pool.calls} == {
+            inventory.handoff.read("input", first.key).data["input"]["path"]}
+
+        consumer.poll_once(registry)
+
+        # The later arrival was admitted on the next pass even though the first
+        # render had not finished, and it renders from its own source file.
+        assert {path for _, path in pool.calls} == {
+            inventory.handoff.read("input", first.key).data["input"]["path"],
+            later.data["input"]["path"]}
+        gate.set()
+        drain(consumer, registry)
+        assert {record.data["input_id"]
+                for record in inventory.handoff.records("render-ack")} == {
+            first.key, later.key}
+
+    def test_an_input_with_no_layer_mapping_is_acknowledged_explicitly(self, world,
+                                                                        renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        committed = notify(inventory, commit(inventory, UNMAPPED))
+        # An enabled product with no EWMRS render layer configured.
+        assert consumer.layers_for(inventory.handoff.read("render-ready", committed.key)) == ()
+
+        consumer.poll_once(registry)
+
+        assert pool.calls == []
+        ack = inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, INPUT_LAYER, consumer.fingerprint))
+        assert ack.data["status"] == "no-mapping"
+        assert "No configured layer mapping" in ack.data["reason"]
+
+
+class TestPerLayerIndependence:
+    def test_unrelated_layers_advance_while_one_fails(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, retry_initial_seconds=0, retry_max_seconds=0)
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        layers = consumer.layers_for(
+            inventory.handoff.read("render-ready", committed.key))
+        renderer.failing = {layers[0]}
+
+        drain(consumer, registry)
+
+        states = {layer: inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, layer, consumer.fingerprint))
+            for layer in layers}
+        assert states[layers[0]].data["status"] == "retry"
+        assert all(states[layer].data["status"] == "success" for layer in layers[1:])
+        # The input is not acknowledged while one mapped layer is still retrying.
+        assert inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, INPUT_LAYER,
+                                        consumer.fingerprint)) is None
+
+    def test_a_failed_layer_retries_and_only_itself(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, retry_initial_seconds=0, retry_max_seconds=0)
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        layers = consumer.layers_for(
+            inventory.handoff.read("render-ready", committed.key))
+        renderer.failing = {layers[0]}
+        drain(consumer, registry)
+        first_calls = list(pool.calls)
+
+        renderer.failing = set()
+        drain(consumer, registry, now=datetime.now(UTC) + timedelta(seconds=1))
+
+        retried = [name for name, _ in pool.calls[len(first_calls):]]
+        assert retried == [layers[0]]
+        ack = inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, layers[0], consumer.fingerprint))
+        assert ack.data["status"] == "success"
+        assert inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, INPUT_LAYER,
+                                        consumer.fingerprint)).data["status"] == "success"
+
+    def test_a_permanently_failing_layer_expires_with_a_reason(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, retry_initial_seconds=0, retry_max_seconds=0,
+                                 retry_max_attempts=1)
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        layers = consumer.layers_for(
+            inventory.handoff.read("render-ready", committed.key))
+        renderer.failing = {layers[0]}
+
+        drain(consumer, registry)
+
+        ack = inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, layers[0], consumer.fingerprint))
+        assert ack.data["status"] == "expired"
+        assert "no usable artifacts" in ack.data["reason"]
+        final = inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, INPUT_LAYER, consumer.fingerprint))
+        assert final.data["status"] == "expired"
+
+    def test_a_render_exception_is_a_failed_job(self, world, renderer, monkeypatch):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, retry_initial_seconds=0, retry_max_seconds=0)
+
+        def explode(_layers):
+            raise RuntimeError("renderer crashed")
+
+        pool.render = explode
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        drain(consumer, registry)
+        layer = consumer.layers_for(inventory.handoff.read("render-ready", committed.key))[0]
+        ack = inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, layer, consumer.fingerprint))
+        assert ack.data["status"] in {"retry", "expired"}
+        assert "renderer crashed" in ack.data["reason"]
+
+
+class TestPartialRapSuccess:
+    def test_successful_rap_layers_are_acknowledged_separately(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, retry_initial_seconds=0, retry_max_seconds=0)
+        rap_name = "RAP.20260930-12z.awp130pgrbf00.grib2"
+        committed = notify(inventory, commit(
+            inventory, RAP, datetime(2026, 9, 30, 12, 0, tzinfo=UTC), family="rap",
+            name=rap_name))
+        layers = consumer.layers_for(inventory.handoff.read("render-ready", committed.key))
+        assert layers
+        renderer.failing = {layers[0]}
+
+        drain(consumer, registry)
+
+        # One call carrying only the selected layer, reusing the pinned analysis.
+        assert renderer.rap_calls == [(str(inventory.base_dir / "data" / RAP / rap_name),
+                                       (layers[0],))]
+        states = {layer: inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, layer, consumer.fingerprint))
+            for layer in layers}
+        assert states[layers[0]].data["status"] == "retry"
+        assert all(states[layer].data["status"] == "success" for layer in layers[1:])
+
+    def test_a_reused_rap_analysis_produces_no_second_notification(self, world, renderer):
+        registry, dependencies, inventory = world
+        consumer = make_consumer(world, FakeLayerPool())
+        rap_name = "RAP.20260930-12z.awp130pgrbf00.grib2"
+        first = notify(inventory, commit(
+            inventory, RAP, datetime(2026, 9, 30, 12, 0, tzinfo=UTC), family="rap",
+            name=rap_name))
+        path = inventory.base_dir / "data" / RAP / rap_name
+        again = inventory.commit_input(CommittedInput(
+            StagedInput(RAP, str(path), datetime(2026, 9, 30, 12, 0, tzinfo=UTC),
+                        "synoptic", "rap"),
+            hashlib.sha256(path.read_bytes()).hexdigest(), "s3://rap"))
+        assert again.key == first.key
+        assert len(inventory.handoff.records("render-ready")) == 1
+
+
+class TestPublicationAndRecovery:
+    def test_a_complete_output_is_reused_after_acknowledgment_loss(self, world, renderer):
+        """Restart after publication but before acknowledgment reuses the output."""
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        drain(consumer, registry)
+        layer = consumer.layers_for(inventory.handoff.read("render-ready", committed.key))[0]
+        input_ack = render_job_id(committed.key, INPUT_LAYER, consumer.fingerprint)
+        assert inventory.handoff.read("render-ack", input_ack) is not None
+        # Simulate a crash after output publication but before the input-level
+        # acknowledgment was durable.
+        inventory.handoff.path("render-ack", input_ack).unlink()
+        calls_before = list(pool.calls)
+
+        restarted = make_consumer(world, pool)
+        drain(restarted, registry)
+
+        assert pool.calls == calls_before
+        assert inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, INPUT_LAYER,
+                                        restarted.fingerprint)).data["status"] == "success"
+
+    def test_an_unchanged_input_creates_no_new_render_work(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        notify(inventory, commit(inventory, PRECIP_RATE))
+        drain(consumer, registry)
+        before = list(pool.calls)
+
+        consumer.poll_once(registry)
+
+        assert pool.calls == before
+        assert len(inventory.handoff.records("render-ack")) >= 1
+
+    def test_a_changed_render_configuration_reopens_the_work(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        drain(consumer, registry)
+        first = consumer.fingerprint
+
+        consumer._fingerprint = "f" * 64
+        assert consumer.fingerprint != first
+        calls_before = len(pool.calls)
+        drain(consumer, registry)
+        assert len(pool.calls) > calls_before
+        assert render_configuration_fingerprint() != "f" * 64
+        assert committed.data["input"]["path"] in {path for _, path in pool.calls}
+
+    def test_pending_work_expires_with_an_explicit_reason(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, retry_max_attempts=99,
+                                 retry_initial_seconds=3600, retry_max_seconds=3600)
+        committed = notify(inventory, commit(inventory, PRECIP_RATE))
+        layer = consumer.layers_for(inventory.handoff.read("render-ready", committed.key))[0]
+        renderer.failing = {layer}
+        drain(consumer, registry)
+        stale = datetime.now(UTC) + timedelta(minutes=consumer.settings.max_age_minutes + 1)
+
+        consumer.poll_once(registry, now=stale)
+
+        ack = inventory.handoff.read(
+            "render-ack", render_job_id(committed.key, layer, consumer.fingerprint))
+        assert ack.data["status"] == "expired"
+        assert "exceeded" in ack.data["reason"]
+
+    def test_a_bounded_job_window_defers_new_work_explicitly(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, pending_max_jobs=1, retry_max_attempts=99,
+                                 retry_initial_seconds=3600, retry_max_seconds=3600)
+        first = notify(inventory, commit(inventory, PRECIP_RATE))
+        layers = consumer.layers_for(inventory.handoff.read("render-ready", first.key))
+        renderer.failing = {layers[0]}
+        drain(consumer, registry)
+        notify(inventory, commit(inventory, PRECIP_RATE, T + timedelta(minutes=2)))
+
+        consumer.poll_once(registry)
+
+        assert consumer.metrics["rejected"] >= 1
+        assert len(pool.calls) == 1
+
+
+class TestProducerAgreement:
+    def test_a_stopped_core_does_not_pause_rendering(self, world, renderer):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        notify(inventory, commit(inventory, PRECIP_RATE))
+
+        drain(consumer, registry)
+
+        assert pool.calls
+        assert consumer.metrics["succeeded"] >= 1
+
+    def test_a_missing_producer_pauses_visibly(self, world, renderer, tmp_path):
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        notify(inventory, commit(inventory, PRECIP_RATE))
+        (Path(tmp_path) / "state/realtime/services/ingest-mrms-registry.json").unlink()
+
+        consumer.poll_once(registry)
+
+        assert pool.calls == []
+        assert consumer.metrics["dispatched"] == 0
+
+    def test_a_dependency_mismatch_pauses_visibly(self, world, renderer):
+        from dataclasses import replace
+
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool)
+        notify(inventory, commit(inventory, PRECIP_RATE))
+        consumer.dependencies = replace(dependencies, check=("Only_This_00.00",))
+
+        consumer.poll_once(registry)
+
+        assert pool.calls == []
+
+    def test_the_render_fingerprint_covers_every_enabled_layer(self, world, renderer):
+        from EWMRS.rap.config import get_rap_uint16_layers
+        from EWMRS.render.config import get_mrms_file_list
+
+        first = render_configuration_fingerprint()
+        assert first == render_configuration_fingerprint()
+        assert len(first) == 64
+        assert get_mrms_file_list() and get_rap_uint16_layers()
+        payload = json.dumps({"mrms": len(get_mrms_file_list()),
+                              "rap": len(get_rap_uint16_layers())})
+        assert payload

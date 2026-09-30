@@ -267,6 +267,170 @@ def _worker_initializer() -> None:
     _ensure_runtime_configured()
 
 
+def render_worker_budget(phase_name: str = "Layer") -> int:
+    """Process count for a persistent, long-lived render pool.
+
+    The same CPU and memory budgets as the per-call path decide it, but once at
+    construction so jobs submitted across many inputs share a bounded worker set
+    instead of each file building its own process pool.
+    """
+    return _adaptive_process_worker_count(max(1, worker_max_workers()), phase_name)
+
+
+class RenderLayerPool:
+    """A long-lived bounded executor for selected-layer renders.
+
+    Owned by the input render consumer so a long render never blocks accepting
+    the next notification, while the process count stays bounded for the whole
+    service lifetime. Worker recovery and shutdown follow the executor's own
+    contract, which the consumer awaits explicitly.
+    """
+
+    def __init__(self, *, max_workers: int | None = None, phase_name: str = "Layer"):
+        from concurrent.futures import ProcessPoolExecutor
+
+        self.phase_name = phase_name
+        self.max_workers = max_workers if max_workers is not None else render_worker_budget(
+            phase_name)
+        self._executor = ProcessPoolExecutor(
+            max_workers=max(1, self.max_workers), initializer=_worker_initializer)
+        self._closed = False
+
+    def render(self, layers) -> Dict[str, RenderOutput]:
+        """Render the given layers and report each one's validated outcome."""
+        from concurrent.futures import as_completed
+
+        results: Dict[str, RenderOutput] = {}
+        if self._closed:
+            raise RuntimeError("the render layer pool is shut down")
+        futures = {self._executor.submit(_render_layer, layer): layer for layer in layers}
+        for future in as_completed(futures):
+            layer = futures[future]
+            try:
+                name, output = future.result()
+            except Exception as exc:
+                # A crashed or cancelled worker is a failed job, not a lost one.
+                io_manager.write_error(
+                    f"Error processing layer {layer.get('name')}: {exc}")
+                results[str(layer.get("name"))] = None
+                continue
+            results[name] = output
+        return results
+
+    def shutdown(self, *, wait: bool = True, cancel_futures: bool = True) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+
+
+def pinned_layer(layer, input_path, *, source_type="mrms"):
+    """Bind a configured layer to one notified source file and its timestamp.
+
+    The notified path is used verbatim: a layer never falls back to a
+    directory's newer ``latest`` file, so a late arrival for an already
+    processed scan still produces new render work.
+    """
+    if input_path is None:
+        raise ValueError("a renderable input must supply its exact notified path")
+    bound = dict(layer)
+    bound["input_path"] = str(input_path)
+    bound["input_manifest_bound"] = True
+    bound["source_type"] = source_type
+    return bound
+
+
+def layer_output_complete(layer) -> bool:
+    """Whether one layer's published artifacts are usable, not merely present.
+
+    A render is only complete when its expected chunk set, metadata, and product
+    index are all readable. A partial publication is a failed job so it retries
+    instead of being acknowledged and served forever.
+    """
+    output_path = layer.get("outdir")
+    if output_path is None:
+        return False
+    timestamp = _layer_source_timestamp(layer)
+    if timestamp is None:
+        return False
+    if str(layer.get("source_type", "mrms")).lower() == "rap_uint16":
+        directory = Path(output_path) / timestamp
+        data = directory / "data.u16"
+        metadata = directory / "metadata.json"
+        if not (data.is_file() and data.stat().st_size > 0):
+            return False
+        if not (metadata.is_file() and metadata.stat().st_size > 0):
+            return False
+        return _product_index_lists(Path(output_path), timestamp)
+    return bool(_current_render_paths(Path(output_path), timestamp))
+
+
+def _product_index_lists(out_dir: Path, timestamp: str) -> bool:
+    index = out_dir / "index.json"
+    try:
+        payload = json.loads(index.read_text())
+    except (OSError, ValueError):
+        return False
+    timestamps = payload if isinstance(payload, list) else payload.get("timestamps", [])
+    return timestamp in timestamps
+
+
+def _layer_source_timestamp(layer):
+    pinned = layer.get("render_timestamp")
+    if pinned:
+        return str(pinned)
+    from EWMRS.render.tools import TransformUtils
+
+    source = layer.get("input_path")
+    if source is None:
+        source = layer.get("filepath")
+    if source is None:
+        return None
+    try:
+        stamp = TransformUtils.find_timestamp(str(source))
+    except Exception:
+        return None
+    return _normalize_render_timestamp(stamp) if stamp else None
+
+
+def render_input_layers(pool, layers, *, phase_name="Layer") -> Dict[str, bool]:
+    """Render a selected layer set and report per-layer success.
+
+    ``_render_layer`` returning ``None`` is a failure even without an
+    exception, and a publication that cannot be validated is a failure too.
+    """
+    outputs = pool.render(layers) if isinstance(pool, RenderLayerPool) else None
+    by_name = {str(layer.get("name")): layer for layer in layers}
+    if outputs is None:
+        from concurrent.futures import as_completed
+
+        if hasattr(pool, "submit"):
+            outputs = {}
+            futures = {pool.submit(_render_layer, layer): layer for layer in layers}
+            for future in as_completed(futures):
+                layer = futures[future]
+                try:
+                    name, output = future.result()
+                except Exception as exc:
+                    io_manager.write_error(
+                        f"Error processing layer {layer.get('name')}: {exc}")
+                    outputs[str(layer.get("name"))] = None
+                    continue
+                outputs[name] = output
+    results: Dict[str, bool] = {}
+    for name, output in outputs.items():
+        ok = output is not None and layer_output_complete(by_name.get(name, {}))
+        results[name] = ok
+        if ok:
+            io_manager.write_info(f"Rendered layer: {name}")
+        else:
+            io_manager.write_warning(f"Layer {name} produced no usable artifacts")
+    for name in by_name:
+        results.setdefault(name, False)
+    return results
+
+
+
 def _latest_source_file(src_dir: Path) -> Optional[Path]:
     latest = fs.latest_files(src_dir, 1)
     if not latest:

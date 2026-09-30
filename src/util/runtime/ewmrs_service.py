@@ -2,8 +2,8 @@
 
 Registers every child of the standalone EWMRS service (``run_ewmrs.py``):
 METAR, NWS, and WPC continuous ingest, GOES ABI ingest and poll-based
-rendering, and the phase-record consumer that renders from the exact paths in
-committed ``mrms-ready``/``rap-ready`` records.
+rendering, and the input render consumer that turns each committed source input
+into independent, acknowledged per-layer work.
 
 NEXRAD is deliberately absent: it is supervised by
 ``util.runtime.nexrad_service``, never here. The primary EdgeWARN service does
@@ -29,14 +29,15 @@ def register_ewmrs_accessories(
     goes_pause_ingest_during_render,
     goes_poll_seconds,
     child_log_queue,
+    run_id=None,
 ):
     """Add every EWMRS-owned child loop to *supervisor*.
 
-    ``goes_ingest_enabled`` gates ABI ingest only; scan-time GLM is a primary
-    integration input and runs inside the primary service. Accessory loops are
-    optional inputs to primary integration — stopping one degrades those
-    inputs visibly without blocking MRMS detection, and a crash-looped child
-    is reported as a degraded entry in the EWMRS heartbeat rather than hidden.
+    ``goes_ingest_enabled`` gates ABI ingest only; scan-time GLM is acquired by
+    the independent ingest service and rendered by EWMRS's own GOES ABI loop.
+    Accessory loops are optional inputs — stopping one degrades those inputs
+    visibly without blocking other products, and a crash-looped child is
+    reported as a degraded entry in the EWMRS heartbeat rather than hidden.
     """
     supervisor.add(
         "METAR", metar_loop,
@@ -76,5 +77,6 @@ def register_ewmrs_accessories(
         "EWMRS Consumer", ewmrs_consumer_loop,
         enabled=consumer_enabled,
         args=(base_dir, child_log_queue),
+        kwargs={"run_id": run_id},
         daemon=False,
     )
