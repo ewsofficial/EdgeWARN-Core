@@ -1,6 +1,6 @@
 # Independent ingest polling and incremental EWMRS rendering
 
-Status: phases 1 and 2 implemented and verified; phases 3–8 remain pending.
+Status: phases 1–3 implemented and verified; phases 4–8 remain pending.
 The independent realtime service and consumer cutover are not yet enabled.
 
 ## 1. Required outcome
@@ -541,33 +541,52 @@ service topology and staged callbacks remain in use until the later cutover.
 **Reuse:** `src/common/ingest/{manifest,replay}.py`, `src/util/atomic.py`, and
 the locking/strict-validation patterns in `src/util/runtime/handoff.py`.
 
-- [ ] Define versioned record models and strict readers/writers for the namespace
+- [x] Define versioned record models and strict readers/writers for the namespace
   in section 5. Include immutable input IDs, fingerprints, validation evidence,
   contained paths, source times, and producer identity. Reject incompatible
   existing records instead of overwriting their selections.
-- [ ] Implement `commit_input(...)` and `publish_render_ready(...)` as separate
+- [x] Implement `commit_input(...)` and `publish_render_ready(...)` as separate
   recoverable operations. Key render records by input identity so two products
   or two arrival times for one scan cannot collapse into one cycle checkpoint.
-- [ ] Implement pure `evaluate_scan(...)` over the inventory. Compute start
+- [x] Implement pure `evaluate_scan(...)` over the inventory. Compute start
   readiness as all valid current inputs in the effective check set; resolve and
   pin previous detection history separately. Compute integration readiness from
   the dependency fixture in phase 1.
-- [ ] Publish start and integration manifests once, retaining identical detection
+- [x] Publish start and integration manifests once, retaining identical detection
   selections. Persist the bounded optional-completion snapshot required by the
   current CTAM/StormProb flow without mutating an earlier phase record.
-- [ ] Add per-scan terminal records, persisted Core consumption state, and
+- [x] Add per-scan terminal records, persisted Core consumption state, and
   per-input/per-layer EWMRS acknowledgment records. Include retry eligibility,
   explicit expiry reasons, and the render configuration fingerprint.
-- [ ] Implement `reconcile(...)` for valid files without inventory, inventory
+- [x] Implement `reconcile(...)` for valid files without inventory, inventory
   without notifications, and notifications without acknowledgments. Acquire
   the shared retention lock when selecting/pinning inputs and deleting eligible
   unreferenced files; integrate with existing replay protection.
-- [ ] Add focused tests under `tests/integration/handoff/` for every crash window,
+- [x] Add focused tests under `tests/integration/handoff/` for every crash window,
   timestamp mismatch, fingerprint mismatch, path escape, late same-scan arrival,
   and cleanup racing a new pin.
 
 **Completion check:** restart recovers missing notifications; every missing
 check blocks Core; two late same-scan inputs remain independently consumable.
+
+**Phase 3 verification (2026-09-30):** all 49 new inventory/handoff tests
+pass in the `EdgeWARN` environment. The combined handoff, input-manifest,
+replay, and independent-ingest configuration selection completed with 129
+passing tests and two existing replay-fixture failures. Both failures were
+reproduced from an isolated archive of unchanged `HEAD`: the history-selection
+fixture supplies undecodable placeholder bytes, and the optional-history
+fixture supplies a registry without the required `discovery` fields.
+Multiprocessing tests passed outside the sandbox, which blocks their local
+manager sockets. All test runtime roots were temporary.
+
+Command: `python -m pytest tests/integration/handoff tests/core/test_input_manifest.py tests/core/test_ingest_replay.py tests/architecture/test_independent_ingest_config.py -q`.
+
+The producer API now includes immutable `core-final-ready` snapshots, persisted
+scan timing, render plans and per-layer dispositions, explicit history/worker
+pins, and retained input tombstones for interrupted cleanup. Source adoption
+requires a caller-supplied payload validator and registry-selected candidate
+paths. Poll scheduling, source enumeration, consumer execution, and deployment
+activation remain assigned to phases 4–8.
 
 ### Phase 4 — Build the independently supervised ingest service
 

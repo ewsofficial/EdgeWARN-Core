@@ -404,3 +404,45 @@ inventory repair instead of deleting or replacing potentially referenced files.
 The future inventory owns deduplication and durable notifications, including
 avoiding a second render event on RAP reuse. Existing historical wrappers retain
 their cleanup defaults; realtime callers must use the no-cleanup object APIs.
+
+## Independent ingest durable contracts (phase 3)
+
+The producer contract is implemented in `common.ingest.inventory`,
+`common.pipeline.readiness`, and `util.runtime.ingest_handoff`. Service startup
+and consumer cutover are scheduled for later phases of the
+[independent ingest plan](../../plans/independent-ingest-incremental-rendering-plan.md).
+
+`InputInventory.commit_input()` accepts a validated acquisition completion and
+persists its identity, digest, exact source path/time, provenance, dependency
+fingerprint, and producer run ID beneath `state/realtime/ingest/v1/inputs/`.
+`IngestHandoff.publish_render_ready()` separately commits an immutable input
+notification. Restart reconciliation adopts explicitly enumerated files through
+a supplied payload validator, repairs missing notifications, and returns pending
+input IDs. Publication failure leaves the acquisition committed for recovery.
+
+`InputInventory.publish_scan()` uses the shared replay input lease to select
+and pin inputs before retention can delete them. The pure `evaluate_scan()`
+requires every check product in the normalized scan, selects previous history
+separately, and evaluates mandatory integration and enabled RAP/GLM inputs.
+Frozen auxiliary settings carry the RAP age budget. Start, integration, and
+final optional-input manifests retain the earlier phase selections. Persisted
+scan timing bounds optional completion across restarts; terminal records state
+why an incomplete scan was abandoned. Consumers must validate dependency
+membership with `validate_phase_dependencies()` and exact files with
+`validate_phase_inputs()` before using a phase.
+
+EWMRS records its enabled layer mapping with `plan_render()`. Layer dispositions
+are keyed by input ID, layer ID, and render configuration fingerprint and include
+attempt counts, retry eligibility, and terminal reasons. `acknowledge_input()`
+requires every mapped layer to reach a terminal disposition, or explicitly
+records that no layer is configured. Artifact and index verification before
+successful acknowledgment belongs to the renderer consumer in phase 6.
+
+Retention protects pending notifications, active Core selections, explicit
+worker pins, and detection/optional history pins. Cleanup uses the same
+nonblocking replay lease; callers retry on lock contention. Only acknowledged,
+unreferenced inputs older than the caller's rediscovery cutoff are eligible.
+Identity tombstones precede deletion so reconciliation can finish interrupted
+cleanup and reject conflicting rediscovery. File verification caches use file
+version metadata only to avoid repeated hashing; encoded observation time
+remains the source-time authority.
