@@ -15,6 +15,7 @@ _PROCESS_TEST_FILES = {
     "test_run_all_launcher.py",
     "test_package_run.py",
     "test_runner.py",
+    "test_ingest_service_runtime.py",
 }
 _CONNECTED_CORE_FILES = {
     "test_durable_handoff_wiring.py",

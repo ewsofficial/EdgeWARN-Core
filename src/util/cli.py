@@ -23,7 +23,12 @@ import argparse
 def build_service_parser(service, *, add_help=True):
     """Build the argument grammar for one realtime service without resolving it."""
     parser = argparse.ArgumentParser(add_help=add_help, allow_abbrev=False)
-    if service == "edgewarn":
+    if service == "ingest":
+        add_base_directory_flags(parser)
+        parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
+        parser.add_argument("--disable-goes", action=argparse.BooleanOptionalAction, default=None)
+        add_mrms_core_only_flag(parser)
+    elif service == "edgewarn":
         add_primary_domain_flags(parser)
         add_base_directory_flags(parser)
         add_primary_processing_flags(parser)

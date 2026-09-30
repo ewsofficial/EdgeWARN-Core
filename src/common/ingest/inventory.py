@@ -164,6 +164,16 @@ class InputInventory:
             a.data['render_fingerprint'] == p.data['render_fingerprint'] and
             a.data['status'] in TERMINAL_STATUSES for a in acks) for p in mappings)
 
+    def referenced_inputs(self):
+        """Every input identity a live Core phase or render job still needs.
+
+        Exposed for retention maintenance outside this class (the ingest
+        service's RAP analysis cap) so no other module has to reach into the
+        private reference walk.
+        """
+        with input_lock(self.base_dir):
+            return self._references()
+
     def _references(self):
         references = set()
         for pin in self.handoff.records('pin'):

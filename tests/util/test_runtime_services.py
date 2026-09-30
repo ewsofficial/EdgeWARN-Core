@@ -42,8 +42,12 @@ def make_beat(service="ewmrs", **overrides):
 
 
 class TestRegistry:
-    def test_canonical_names_are_exactly_three_services(self):
-        assert CANONICAL_SERVICE_NAMES == ("edgewarn", "ewmrs", "nexrad")
+    def test_canonical_names_are_exactly_the_four_owned_services(self):
+        assert CANONICAL_SERVICE_NAMES == ("ingest", "edgewarn", "ewmrs", "nexrad")
+
+    def test_ingest_is_diagnostic_and_never_gates_a_route_family(self):
+        assert "ingest" in CANONICAL_SERVICE_NAMES
+        assert "ingest" not in ROUTE_SERVICE_REQUIREMENTS.values()
 
     def test_heartbeat_paths_live_under_state_realtime_services(self, tmp_path):
         base = tmp_path / "base"
@@ -204,6 +208,7 @@ class TestPublicationAndClassification:
         )
         assert set(states) == set(CANONICAL_SERVICE_NAMES)
         assert states["edgewarn"][0] == "active"
+        assert states["ingest"][0] == "disabled"
         assert states["ewmrs"][0] == "disabled"
         assert states["nexrad"][0] == "disabled"
 

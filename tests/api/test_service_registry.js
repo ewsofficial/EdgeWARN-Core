@@ -260,7 +260,7 @@ describe('SERVICE_NOT_ENABLED gating for the nexrad route family', () => {
   it('reports every canonical service in the health services block', async () => {
     const app = await createAppWithBaseDir();
     const ready = await request(app).get('/health/ready').expect(200);
-    expect(Object.keys(ready.body.services).sort()).toEqual(['edgewarn', 'ewmrs', 'nexrad']);
+    expect(Object.keys(ready.body.services).sort()).toEqual(['edgewarn', 'ewmrs', 'ingest', 'nexrad']);
     expect(ready.body.services.edgewarn).toEqual({ state: 'disabled', phase: null, lastSeen: null, degradedChildren: [] });
   });
 });
