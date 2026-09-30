@@ -32,7 +32,9 @@ def registry(tmp_path):
 
 class Body:
     def __init__(self, data): self.data = data
-    async def __aenter__(self): return self
+    # aiobotocore returns its raw aiohttp response from __aenter__, while
+    # iter_chunks belongs to the StreamingBody wrapper.
+    async def __aenter__(self): return object()
     async def __aexit__(self, *args): pass
     async def iter_chunks(self, **kwargs):
         yield self.data

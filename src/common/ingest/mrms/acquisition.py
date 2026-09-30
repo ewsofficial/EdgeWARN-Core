@@ -252,7 +252,10 @@ async def _fetch(s3, session, source, locator, path, chunk_size, deadline):
     if source == 's3':
         from common.ingest.mrms.source import MRMS_BUCKET
         response = await s3.get_object(Bucket=MRMS_BUCKET, Key=locator)
-        async with response['Body'] as body:
+        body = response['Body']
+        # aiobotocore's context manager returns the underlying aiohttp
+        # response; keep the StreamingBody wrapper for iter_chunks().
+        async with body:
             with path.open('wb') as handle:
                 async for chunk in body.iter_chunks(chunk_size=chunk_size):
                     if time.monotonic() >= deadline:
