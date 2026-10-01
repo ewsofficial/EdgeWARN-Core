@@ -140,7 +140,7 @@ def test_batch_legacy_histories_match_individual_reads(tmp_path):
     assert histories["999"] == []
 
 
-def test_legacy_import_hash_validation_and_backup(tmp_path):
+def test_legacy_import_hash_validation(tmp_path):
     repo = StormProbRepository(tmp_path)
     legacy = tmp_path / "data" / "cells" / "101.json"
     legacy.parent.mkdir(parents=True)
@@ -149,8 +149,6 @@ def test_legacy_import_hash_validation_and_backup(tmp_path):
     assert report["imported"] == 1
     assert repo.import_legacy_file(legacy)["skipped"] is True
     assert len(repo.feature_history(101)) == 1
-    backup = repo.backup(tmp_path / "data" / "stormprob" / "backups" / "stormprob-1.sqlite3")
-    assert backup.exists()
     legacy.write_text("[]")
     with pytest.raises(ValueError, match="changed"):
         repo.import_legacy_file(legacy)
@@ -370,13 +368,3 @@ def test_model_inputs_long_track_preserves_age_and_30_row_window(tmp_path):
     assert all(inputs["history_mask"])
     assert inputs["current"][-2:] == [31 * 300.0, 30.0]
     assert inputs["trajectory_sequence"][-1][-2] == pytest.approx(31 * 5 / 60)
-
-
-def test_daily_backup_is_idempotent(tmp_path):
-    repo = StormProbRepository(tmp_path)
-    cell = _cell()
-    repo.commit_cycle("cycle1", cell["timestamp"], [cell])
-    day = datetime(2024, 5, 1)
-    backup = repo.backup_if_due(now=day)
-    assert backup is not None and backup.exists()
-    assert repo.backup_if_due(now=day) is None

@@ -27,7 +27,7 @@ independently overridable as `--ctam-module-dir`, then
 | `lineage.yaml` | Tracking and lineage matching controls. |
 | `integration.yaml` | Dataset sources, statistics, rounding, and RAP products. |
 | `scheduler.yaml` | MRMS update-selection and scheduling policy. |
-| `api_index.yaml` | Generated EdgeWARN index/snapshot retention. |
+| `api_index.yaml` | Generated EdgeWARN index/snapshot and StormProb inactive-cell retention. |
 | `ingest.yaml` | MRMS/GOES ingest products, source keys, and retention. |
 | `nexrad.yaml` | NEXRAD discovery, parsing, grouping, and output selection. |
 | `synoptic_rap.yaml` | RAP S3 and NOMADS HTTPS sources, freshness, and request policy. |
