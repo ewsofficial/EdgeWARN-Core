@@ -1,8 +1,10 @@
 """Replay boundaries: immutable records, cleanup ownership, and phase failures."""
 import asyncio
+import base64
 from datetime import datetime, timezone
 import multiprocessing
 import os
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +16,12 @@ from common.pipeline import coordinator
 import util.file as fs
 
 DT = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
+
+
+def grib():
+    """One real decodable GRIB2 message; history candidates are decode-validated."""
+    data = base64.b64decode((Path(__file__).parents[1] / "fixtures/weather/rap.grib2.b64").read_text())
+    return data[:int.from_bytes(data[8:16], "big")]
 
 
 def batch(tmp_path, products=PROTECTED_IDS, *, role="current"):
@@ -113,7 +121,7 @@ def test_previous_selection_uses_identity_and_encoded_time(tmp_path):
     latest = directory / "MRMS_MESH_00.50_20260928-115800.grib2"
     unrelated = directory / "MRMS_VIL_00.50_20260928-115959.grib2"
     for path in (old, latest, unrelated):
-        path.write_bytes(b"data")
+        path.write_bytes(grib())
     os.utime(old, (2_000_000_000, 2_000_000_000))
     previous = coordinator._previous_detection_records((current,))
     assert previous[0].local_path == latest
@@ -177,19 +185,16 @@ def test_deferred_cleanup_runs_after_cycle_finishes(monkeypatch, tmp_path):
 
 
 def test_previous_optional_remains_available_when_current_download_is_absent(monkeypatch, tmp_path):
-    from types import SimpleNamespace
-    import json
+    from dataclasses import replace
     detection_batch = batch(tmp_path)
     directory = tmp_path / "MESH"
     directory.mkdir()
     previous = directory / "MRMS_MESH_00.50_20260928-115800.grib2"
-    previous.write_bytes(b"data")
-    registry = SimpleNamespace(
-        fingerprint="test",
-        normalized_config_json=json.dumps({"downloads": {"optional_timeout_seconds": 1},
-                                           "ncep_https": {"sync_timeout_seconds": 1}}),
-        products=(SimpleNamespace(protected=False, product_id="MESH_00.50", directory=directory),),
-    )
+    previous.write_bytes(grib())
+    base = coordinator.mrms_ingest.get_registry()
+    spec = next(p for p in base.products if p.product_id == "MESH_00.50")
+    registry = replace(base, products=(*(p for p in base.products if p.protected),
+                                       replace(spec, directory=directory)))
     async def detection(*args):
         return detection_batch
     async def optional(*args):
