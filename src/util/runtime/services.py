@@ -28,7 +28,13 @@ from util.atomic import atomic_write_json
 #: Canonical service names. The single-instance locks, heartbeats, leases, and
 #: API discovery all key off these strings; nothing else may appear under the
 #: services directory.
-CANONICAL_SERVICE_NAMES: tuple[str, ...] = ("edgewarn", "ewmrs", "nexrad")
+#:
+#: ``ingest`` owns every realtime MRMS/RAP/GLM acquisition. Its heartbeat is
+#: diagnostic poll liveness only: a quiet upstream leaves it ``active`` with no
+#: new inputs, so it never becomes evidence that an input is ready, and it is
+#: absent from :data:`ROUTE_SERVICE_REQUIREMENTS` so an ingest outage stays
+#: visible without gating already-rendered artifacts.
+CANONICAL_SERVICE_NAMES: tuple[str, ...] = ("ingest", "edgewarn", "ewmrs", "nexrad")
 
 HEARTBEAT_SCHEMA_VERSION = 1
 

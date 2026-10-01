@@ -56,11 +56,11 @@ class TestServiceSelection:
         with pytest.raises(SystemExit):
             run_all._parse_args(["--services", "edgewarn,bogus"])
 
-    def test_mrms_core_only_starts_only_the_primary(self):
+    def test_mrms_core_only_retains_ingest_and_primary(self):
         args, services = run_all._parse_args(["--mrms-core-only"])
-        assert services == ["edgewarn"]
+        assert services == ["ingest", "edgewarn"]
 
-    def test_yaml_mrms_core_only_starts_only_the_primary(self, monkeypatch):
+    def test_yaml_mrms_core_only_retains_ingest_and_primary(self, monkeypatch):
         monkeypatch.setattr(
             run_all.config_loader,
             "load_config",
@@ -72,7 +72,7 @@ class TestServiceSelection:
         )
         args, services = run_all._parse_args([])
         assert args.mrms_core_only is True
-        assert services == ["edgewarn"]
+        assert services == ["ingest", "edgewarn"]
 
     def test_disable_flags_omit_services(self, monkeypatch):
         # CLI values must win over the YAML layer.
@@ -311,14 +311,15 @@ class TestSupervision:
             "import run_all\n"
             f"run_all.SERVICE_SCRIPTS['edgewarn'] = {sleeper!r}\n"
             f"run_all.SERVICE_SCRIPTS['ewmrs'] = {sleeper_b!r}\n"
-            "sys.exit(run_all.main(['--services', 'edgewarn,ewmrs']))\n"
+            f"run_all.SERVICE_SCRIPTS['ingest'] = {sleeper!r}\n"
+            "sys.exit(run_all.main(['--services', 'ingest,edgewarn,ewmrs']))\n"
         )
 
         proc = subprocess.Popen(
             [sys.executable, str(driver)], start_new_session=True
         )
         try:
-            time.sleep(2.0)  # launcher + two sleepers up
+            time.sleep(2.0)  # launcher + three sleepers up
 
             proc.send_signal(signal.SIGINT)
             code = proc.wait(timeout=30)
@@ -343,8 +344,8 @@ class TestSupervision:
             "import sys\n"
             f"sys.path.insert(0, {repo_src!r})\n"
             "import run_all\n"
-            f"run_all.SERVICE_SCRIPTS['edgewarn'] = {str(sleeper)!r}\n"
-            "sys.exit(run_all.main(['--services', 'edgewarn']))\n",
+            f"run_all.SERVICE_SCRIPTS['ingest'] = {str(sleeper)!r}\n"
+            "sys.exit(run_all.main(['--services', 'ingest']))\n",
             encoding="utf-8",
         )
 
@@ -374,8 +375,8 @@ class TestSupervision:
             "import sys\n"
             f"sys.path.insert(0, {repo_src!r})\n"
             "import run_all\n"
-            f"run_all.SERVICE_SCRIPTS['edgewarn'] = {str(failing_child)!r}\n"
-            "sys.exit(run_all.main(['--services', 'edgewarn']))\n"
+            f"run_all.SERVICE_SCRIPTS['ingest'] = {str(failing_child)!r}\n"
+            "sys.exit(run_all.main(['--services', 'ingest']))\n"
         )
 
         proc = subprocess.Popen(
@@ -453,8 +454,8 @@ class TestSupervision:
             f"sys.path.insert(0, {repo_src!r})\n"
             "import run_all\n"
             "run_all.STOP_GRACE_SECONDS = 0.5\n"
-            f"run_all.SERVICE_SCRIPTS['edgewarn'] = {str(worker)!r}\n"
-            "sys.exit(run_all.main(['--services', 'edgewarn']))\n",
+            f"run_all.SERVICE_SCRIPTS['ingest'] = {str(worker)!r}\n"
+            "sys.exit(run_all.main(['--services', 'ingest']))\n",
             encoding="utf-8",
         )
 
@@ -496,3 +497,41 @@ def test_launcher_imports_no_pipeline_module():
     assert "EWMRS: False" in result.stdout
     assert "NEXRAD: False" in result.stdout
     assert "EDGEWARN: False" in result.stdout
+
+
+@pytest.mark.parametrize("services", [["edgewarn"], ["ewmrs"], ["ingest", "ingest"]])
+def test_preflight_rejects_missing_or_duplicate_producer(services):
+    with pytest.raises(ValueError):
+        run_all.preflight_topology(_args(), services)
+
+
+def test_preflight_rejects_disabled_handoff(monkeypatch):
+    monkeypatch.setenv("EDGEWARN_HANDOFF_ENABLED", "false")
+    with pytest.raises(ValueError, match="handoff.enabled"):
+        run_all.preflight_topology(_args(), ["ingest", "edgewarn"])
+
+
+def test_preflight_propagates_worker_root_and_glm_setting(tmp_path):
+    args = _args()
+    services = ["ingest", "edgewarn", "ewmrs"]
+    forwarded = {"ingest": ("--base-dir", str(tmp_path), "--disable-goes")}
+    run_all.preflight_topology(args, services, forwarded)
+    commands = run_all.build_service_commands(args, services, str(tmp_path), service_argv=forwarded)
+    for command in commands.values():
+        assert "--disable-goes" in command
+        assert str(tmp_path) in command
+
+
+@pytest.mark.parametrize("forwarded", [
+    {"ingest": ("--disable-goes",), "edgewarn": ("--no-disable-goes",)},
+    {"ingest": ("--base-dir", "/a"), "edgewarn": ("--base-dir", "/b")},
+])
+def test_preflight_rejects_conflicting_worker_settings(forwarded):
+    with pytest.raises(ValueError, match="conflicting"):
+        run_all.preflight_topology(_args(), ["ingest", "edgewarn"], forwarded)
+
+
+def test_ingest_and_ewmrs_can_run_without_core():
+    args, services = run_all._parse_args(["--services", "ingest,ewmrs"])
+    run_all.preflight_topology(args, services)
+    assert services == ["ingest", "ewmrs"]

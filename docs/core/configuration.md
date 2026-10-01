@@ -124,3 +124,53 @@ output aliases remain unchanged. Disabled entries remain visible in diagnostics
 and are omitted from execution. Core publishes its registry after preflight;
 EWMRS requires matching configuration and a live Core run before MRMS scanning.
 Restart all services after changes. See [upgrade and qualification](configurable-mrms-phase8.md).
+
+### Independent ingest foundation settings
+
+Phases 1–2 add catalog controls for the later independent ingest service. These
+settings do not yet switch the deployed topology or replace the existing Core
+and EWMRS loops. They are editable through the normal `edgewarn configure`
+path-based editor and require restart when the consuming service is deployed.
+No new CLI flags or environment variables are introduced in these phases.
+
+- `scheduler.ingest_poll_seconds`: 10 seconds, bounded to 1–300. Discovery uses
+  the existing `scheduler.s3_lookback_hours` window.
+- `runtime.consumers.core_readiness_seconds` and
+  `runtime.consumers.ewmrs_notification_seconds`: 1 second, bounded to 0.1–1.
+- `runtime.ingest`: listing/download/decode/auxiliary concurrency, per-listing
+  object/page limits, pending-job limits, source timeouts, retry bounds, scan
+  deadlines, reconciliation, shutdown and unpinned retention/disk budgets.
+  Each YAML entry documents its units, default and schema bounds.
+- `ewmrs_pipeline.input_jobs`: 4096 pending jobs, 120-minute maximum age, three
+  attempts, and 5–30-second retry backoff. Existing render worker CPU/memory
+  controls still own execution capacity.
+
+Nullable ingest controls inherit existing source authorities, resolved once by
+`get_ingest_settings()`: MRMS listing/download concurrency inherits
+`ingest.mrms.downloads.max_concurrency` (8); listing timeout inherits the MRMS
+HTTPS timeout (10 seconds); MRMS job timeout is four such timeouts (40 seconds);
+auxiliary timeout is four RAP NOMADS timeouts (480 seconds); unpinned retention
+inherits the MRMS cleanup age (60 minutes). Decode concurrency defaults to two,
+capped by resolved download concurrency. Two auxiliary slots reserve capacity
+for RAP and GLM independently of MRMS. The 8192 MiB disk budget is a backpressure
+limit, never permission to delete an actively referenced input.
+
+The frozen dependency fingerprint includes the registry configuration and
+RAP/GLM enablement and effective auxiliary source/freshness settings. Later producers and consumers must compare it before using
+readiness. Phase-one baselines live in
+`tests/config_baseline/independent_ingest_{dependencies,settings}.json`;
+`tests/fixtures/ingest/source_arrivals.json` defines missing-check, delayed-layer,
+reused-RAP and disabled-GLM scenarios for subsequent phases.
+
+### Independent input rendering
+
+Scan-time GLM is a Core integration input and receives an explicit `no-mapping`
+render acknowledgment. GOES ABI acquisition/rendering remains owned by EWMRS;
+GLM arrivals do not represent an ABI channel.
+
+Each RAP analysis maps to the configured `ewmrs_pipeline.rap_uint16` layer catalog
+(including templates). The consumer shares one pinned analysis and admits
+per-layer work within `ewmrs_pipeline.input_jobs.pending_max_jobs`, retrying
+failures independently. Size this bound for the configured catalog (currently
+about 46 layers per RAP arrival). Change the configured layers/templates to
+change the rendered set; do not silently omit advertised RAP products.

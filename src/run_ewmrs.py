@@ -111,7 +111,8 @@ def main():
     _require_nws_zone_assets(nws_enabled=not args.disable_nws)
 
     print(f"EWMRS service started (v{get_release_version()}). Press CTRL+C to exit.")
-    print("[EWMRS] MRMS/RAP downloads are owned by the primary service; this service consumes its committed records.")
+    print("[EWMRS] MRMS/RAP/GLM acquisition is owned by the independent ingest "
+          "service; this service renders each committed input independently.")
 
     run_id = uuid.uuid4().hex
     lock = ServiceLock(args.base_dir, SERVICE_NAME)
@@ -159,6 +160,7 @@ def main():
         goes_pause_ingest_during_render=goes_pause_ingest_during_render,
         goes_poll_seconds=goes_coordination["poll_seconds"],
         child_log_queue=child_log_queue,
+        run_id=run_id,
     )
 
     stop_event = threading.Event()

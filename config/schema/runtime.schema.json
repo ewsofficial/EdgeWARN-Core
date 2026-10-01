@@ -3,8 +3,43 @@
   "title": "runtime.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "identity", "run", "goes_coordination", "nexrad_coordination", "supervisor", "background_intervals", "cycle", "handoff", "profiling"],
+  "required": ["schema_version", "identity", "run", "goes_coordination", "nexrad_coordination", "supervisor", "background_intervals", "cycle", "handoff", "profiling", "ingest", "consumers"],
   "properties": {
+    "ingest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listing_concurrency", "download_concurrency", "decode_concurrency", "auxiliary_concurrency", "listing_timeout_seconds", "download_timeout_seconds", "auxiliary_timeout_seconds", "listing_page_size", "listing_max_pages", "listing_max_objects", "pending_max_jobs", "retry_max_attempts", "retry_initial_seconds", "retry_max_seconds", "scan_deadline_seconds", "reconcile_interval_seconds", "retention_minutes", "disk_budget_mb", "shutdown_timeout_seconds"],
+      "properties": {
+        "listing_concurrency": {"type": ["integer", "null"], "minimum": 1, "maximum": 64, "description": "Concurrent listing jobs; null inherits ingest.mrms.downloads.max_concurrency."},
+        "download_concurrency": {"type": ["integer", "null"], "minimum": 1, "maximum": 64, "description": "Concurrent MRMS transfers; null inherits ingest.mrms.downloads.max_concurrency."},
+        "decode_concurrency": {"type": "integer", "minimum": 1, "maximum": 16, "description": "Concurrent blocking decode workers, capped by download concurrency."},
+        "auxiliary_concurrency": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Separate RAP/GLM worker slots, one for each source by default."},
+        "listing_timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "maximum": 600, "description": "Listing timeout in seconds; null inherits MRMS HTTPS timeout."},
+        "download_timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "maximum": 3600, "description": "MRMS job timeout in seconds; null inherits four MRMS HTTPS timeouts."},
+        "auxiliary_timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "maximum": 7200, "description": "RAP/GLM job timeout in seconds; null inherits four RAP NOMADS timeouts."},
+        "listing_page_size": {"type": "integer", "minimum": 1, "maximum": 1000, "description": "S3 objects per page; follows every page within explicit limits."},
+        "listing_max_pages": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Maximum pages per product refresh; overflow is an explicit error."},
+        "listing_max_objects": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum eligible objects per product refresh; overflow is an explicit error."},
+        "pending_max_jobs": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum queued acquisition jobs; overflow applies backpressure."},
+        "retry_max_attempts": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum acquisition attempts per object, matching cycle retry default."},
+        "retry_initial_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "description": "Initial retry delay in seconds, matching cycle retry default."},
+        "retry_max_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Maximum retry delay in seconds, matching cycle retry default."},
+        "scan_deadline_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Incomplete scan deadline in seconds; covers MRMS alignment window."},
+        "reconcile_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Reconciliation cadence in seconds, matching discovery default."},
+        "retention_minutes": {"type": ["integer", "null"], "minimum": 1, "maximum": 10080, "description": "Unpinned MRMS retention in minutes; null inherits MRMS cleanup age."},
+        "disk_budget_mb": {"type": "integer", "minimum": 64, "maximum": 1048576, "description": "Raw inventory disk budget in MiB; active pins must never be deleted."},
+        "shutdown_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Owned-worker termination bound in seconds."}
+      }
+    },
+    "consumers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core_readiness_seconds", "ewmrs_notification_seconds"],
+      "properties": {
+        "core_readiness_seconds": {"type": "number", "minimum": 0.1, "maximum": 1.0, "description": "Core local readiness check interval in seconds."},
+        "ewmrs_notification_seconds": {"type": "number", "minimum": 0.1, "maximum": 1.0, "description": "EWMRS input notification check interval in seconds."}
+      }
+    },
     "schema_version": { "type": "integer", "const": 1 },
     "identity": {
       "type": "object",

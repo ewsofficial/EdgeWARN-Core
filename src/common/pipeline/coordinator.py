@@ -127,7 +127,14 @@ async def run_staged_ingest_cycle(
     if max_entries is None:
         max_entries = load_config("runtime")["cycle"]["ingest_max_entries"]
     registry = mrms_ingest.get_registry()
-    expected = {modifier or "ProbSevere" for modifier in mrms_ingest.get_detection_modifiers()}
+    if registry is not None:
+        from common.ingest.mrms.core_contract import resolve_dependencies
+        from common.ingest.mrms.config import ingest_auxiliary_settings
+        dependencies = resolve_dependencies(registry, include_rap=include_rap, include_glm=include_goes,
+                                            auxiliary_settings=ingest_auxiliary_settings())
+        expected = set(dependencies.detection)
+    else:
+        expected = {modifier or "ProbSevere" for modifier in mrms_ingest.get_detection_modifiers()}
     settings = load_config("ingest")["mrms"] if registry is None else json.loads(registry.normalized_config_json)
     deadline = settings.get("downloads", {}).get(
         "optional_timeout_seconds", settings["ncep_https"]["sync_timeout_seconds"]

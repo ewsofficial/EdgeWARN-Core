@@ -7,6 +7,9 @@ non-daemonic; the pure ingest loops have no such requirement.
 """
 
 import threading
+import sys
+
+import pytest
 
 from util.runtime.ewmrs_service import register_ewmrs_accessories
 
@@ -62,3 +65,32 @@ def test_pure_ingest_children_stay_daemonic():
     children = _registered_children()
     for name in PURE_INGEST_CHILDREN:
         assert children[name]["daemon"] is True
+
+
+def test_consumer_receives_resolved_glm_disablement():
+    children = _registered_children()
+    assert children["EWMRS Consumer"]["kwargs"]["disable_goes"] is True
+
+@pytest.mark.parametrize("disable_goes", [False, True])
+def test_consumer_builds_dependencies_with_glm_setting(monkeypatch, disable_goes):
+    from util.runtime import ewmrs_consumer
+    from common.ingest.mrms import config
+
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "stderr", sys.stderr)
+    observed = []
+    class StopAfterResolution(Exception):
+        pass
+
+    def resolve(**kwargs):
+        observed.append(kwargs)
+        raise StopAfterResolution
+
+    monkeypatch.setattr(config, "get_ingest_dependencies", resolve)
+    monkeypatch.setattr(ewmrs_consumer, "QueueWriter", lambda _queue: sys.stdout)
+    monkeypatch.setattr(ewmrs_consumer.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr("util.runtime.process_identity.set_process_name", lambda *_args: None)
+    monkeypatch.setattr("util.runtime.process_identity.set_parent_death_signal", lambda: None)
+    with pytest.raises(StopAfterResolution):
+        ewmrs_consumer.ewmrs_consumer_loop("/tmp/unused", object(), disable_goes=disable_goes)
+    assert observed == [{"disable_goes": disable_goes}]

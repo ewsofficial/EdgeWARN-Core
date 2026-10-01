@@ -74,3 +74,58 @@ def source_for(identity: MrmsProductIdentity) -> MrmsSource:
         "CONUS", "conus_grib2", identity.product_id,
         HTTPS_DIRECTORY_EXCEPTIONS.get(identity.product_id, identity.base_product),
     )
+
+
+@dataclass(frozen=True)
+class DiscoveredObject:
+    """An exact upstream observation, not a request for the latest scan."""
+    product_id: str
+    observation_time: datetime
+    source: str
+    locator: str
+    remote_version: str | None = None
+    remote_version_kind: str = "etag"
+
+    def __post_init__(self):
+        from common.config.mrms_products import parse_product_id
+        from common.ingest.manifest import parse_file_analysis_time
+        from urllib.parse import urlsplit
+        if self.remote_version_kind not in {"etag", "version_id"}:
+            raise ValueError("Unsupported remote version kind")
+        identity = parse_product_id("MRMS_" + self.product_id)
+        source = source_for(identity)
+        stamp = _utc(self.observation_time)
+        name = self.locator.rsplit("/", 1)[-1]
+        expected = "MRMS_PROBSEVERE_" if source.adapter == "probsevere_json" else f"MRMS_{self.product_id}_"
+        suffixes = (".json", ".json.gz") if source.adapter == "probsevere_json" else (".grib2", ".grib2.gz")
+        if (not name.startswith(expected) or not name.endswith(suffixes)
+                or "\\" in self.locator or parse_file_analysis_time(name) != stamp):
+            raise ValueError("Object name/product/encoded observation time mismatch")
+        if self.source == "s3":
+            if self.locator != source.s3_prefix(stamp) + name:
+                raise ValueError("Unexpected MRMS S3 source locator")
+        elif self.source == "https":
+            url = urlsplit(self.locator)
+            if self.locator != source.https_url + "/" + name or url.query or url.fragment:
+                raise ValueError("Unexpected MRMS HTTPS source locator")
+        else:
+            raise ValueError("Unsupported MRMS source transport")
+        object.__setattr__(self, "observation_time", stamp)
+
+    @property
+    def logical_identity(self):
+        """Mirror-independent candidate key; content is compared after validation."""
+        return (self.product_id, self.observation_time.isoformat())
+
+    @property
+    def acquisition_identity(self):
+        return (*self.logical_identity, self.source, self.locator,
+                self.remote_version_kind, self.remote_version)
+
+    def mirror(self, transport):
+        from common.config.mrms_products import parse_product_id
+        source = source_for(parse_product_id("MRMS_" + self.product_id))
+        name = self.locator.rsplit("/", 1)[-1]
+        locator = (source.s3_prefix(self.observation_time) if transport == "s3"
+                   else source.https_url + "/") + name
+        return DiscoveredObject(self.product_id, self.observation_time, transport, locator)

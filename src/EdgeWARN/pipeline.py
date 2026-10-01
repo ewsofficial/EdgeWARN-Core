@@ -267,20 +267,21 @@ def edgewarn_cycle_worker(
                 config_dir=registry_generation["config_dir"],
                 expected_mrms_fingerprint=registry_generation["fingerprint"],
             )
-        log(f"INFO: EdgeWARN worker waiting for detection inputs for {dt}")
+        log(f"INFO: EdgeWARN worker waiting for the committed detection snapshot for {dt}")
         detection_ready_event.wait()
 
         if not shared_state.get("detection_inputs_ready", False):
-            message = "Detection inputs were not staged successfully"
+            message = "The local check set was not complete for this scan"
             publish_stage("unavailable", errors=(message,))
             log(f"ERROR: {message}; skipping EdgeWARN pipeline")
             return
 
-        input_manifest = CycleInputManifest.from_dict(
-            shared_state.get("detection_manifest", shared_state.get("input_manifest"))
-        )
-        if input_manifest is None:
-            message = "Cycle input manifest was not published"
+        # The parent installs the pinned start manifest before releasing the
+        # barrier, so detection always runs against exact committed inputs and
+        # never against a directory's newest file.
+        input_manifest = CycleInputManifest.from_dict(shared_state.get("detection_manifest"))
+        if input_manifest is None or input_manifest.validate_alignment():
+            message = "The pinned detection snapshot was missing or misaligned"
             publish_stage("failed", errors=(message,))
             log(f"ERROR: {message}")
             return
@@ -303,11 +304,12 @@ def edgewarn_cycle_worker(
             log(f"ERROR: {message}")
             return
 
-        log("INFO: EdgeWARN detection phase complete; waiting for integration inputs")
+        log("INFO: EdgeWARN detection phase complete; waiting for the committed "
+            "integration snapshot")
         integration_ready_event.wait()
 
         if not shared_state.get("edgewarn_integration_inputs_ready", False):
-            message = "EdgeWARN integration inputs were not staged successfully"
+            message = "The committed integration readiness snapshot never arrived"
             publish_stage(
                 "unavailable",
                 artifacts=(generated_file,),
@@ -316,11 +318,12 @@ def edgewarn_cycle_worker(
             log(f"ERROR: {message}; skipping integration")
             return
 
-        input_manifest = CycleInputManifest.from_dict(
-            shared_state.get("integration_manifest", shared_state.get("input_manifest"))
-        )
-        if input_manifest is None:
-            message = "Cycle input manifest was unavailable at integration release"
+        # The parent installs the pinned integration manifest before releasing
+        # the barrier, so integration runs against the exact committed
+        # selections and never against a directory's newest file.
+        input_manifest = CycleInputManifest.from_dict(shared_state.get("integration_manifest"))
+        if input_manifest is None or input_manifest.validate_alignment():
+            message = "The pinned integration snapshot was missing or misaligned"
             publish_stage(
                 "failed",
                 artifacts=(generated_file,),
@@ -339,7 +342,10 @@ def edgewarn_cycle_worker(
                         "did not reach a final snapshot. Core is exiting nonzero."
                     )
                 raise RuntimeError("Optional acquisition did not finish cleanly")
-            return CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
+            final = CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
+            if final is None or final.validate_alignment():
+                raise RuntimeError("The pinned final optional-input snapshot is unusable")
+            return final
 
         extra = ({"final_input_provider": final_input_provider}
                  if optional_complete_event is not None else {})

@@ -110,19 +110,18 @@ async def _async_clean_rap_cache(reference_time, *, max_age_minutes, max_files):
     )
 
 
-async def download_rap_async(dt: datetime):
+async def download_rap_async(dt: datetime, *, cleanup=True, preserve_existing=False):
     """
     Async version of download_rap.
     Cleans up RAP files before and after downloading so the RAP directory stays bounded.
     """
     max_age_minutes = get_rap_max_age_minutes()
-    await _async_clean_rap_cache(
-        dt,
-        max_age_minutes=max_age_minutes,
-        max_files=None,
-    )
-    result = await _download_rap(dt)
-    if result:
+    if cleanup:
+        await _async_clean_rap_cache(
+            dt, max_age_minutes=max_age_minutes, max_files=None,
+        )
+    result = await _download_rap(dt, **({"preserve_existing": True} if preserve_existing else {}))
+    if result and cleanup:
         await _async_clean_rap_cache(
             dt,
             max_age_minutes=max_age_minutes,
@@ -174,3 +173,34 @@ if __name__ == "__main__":
         io_manager.write_info(f"Test successful: {result}")
     else:
         io_manager.write_error("Test failed")
+
+
+async def acquire_rap_input(dt: datetime):
+    """Return a validated analysis identity; defer all deletion to inventory.
+
+    Reusing an analysis for another scan returns the same input_id. Producers
+    must key notifications by this ID, not by the requesting scan timestamp.
+    """
+    from common.ingest.manifest import CycleInputManifest, staged_input_from_path
+    from common.ingest.mrms.acquisition import validate_payload
+    from common.ingest.objects import CommittedInput
+    directory = Path(fs.RAP_DIR)
+    if not directory.resolve().is_relative_to(Path(fs.BASE_DIR).resolve()):
+        raise ValueError("RAP directory escapes runtime base directory")
+    before = set(directory.glob("*.grib2"))
+    result = await download_rap_async(dt, cleanup=False, preserve_existing=True)
+    if not result:
+        raise RuntimeError("RAP acquisition returned no usable file")
+    path = Path(result)
+    if path.is_symlink() or not path.resolve().is_relative_to(Path(fs.BASE_DIR).resolve()):
+        raise ValueError("RAP input escapes runtime base directory")
+    analysis_time = parse_rap_analysis_time(path)
+    if analysis_time is None:
+        raise ValueError("RAP filename does not encode an analysis time")
+    digest = validate_payload(path, 'conus_grib2')
+    record = staged_input_from_path('RAP', path, source='synoptic', family='rap',
+                                    analysis_time=analysis_time)
+    errors = CycleInputManifest(dt, (record,)).validate_alignment()
+    if errors:
+        raise ValueError('; '.join(errors))
+    return CommittedInput(record, digest, str(path), reused=path in before)

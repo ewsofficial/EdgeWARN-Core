@@ -30,90 +30,59 @@ disables both; `--disable-ctam-modules` disables only external modules.
 ## Service ownership
 
 ```text
+run_ingest.py
+  MRMS + raw RAP + scan-time GLM acquisition
+    -> validated inventory + per-input render-ready -> run_ewmrs.py
+    -> core-start-ready / core-integration-ready / core-final-ready -> run_edgewarn.py
+
 run_edgewarn.py
-  MRMS detection + integration ──┐
-  raw RAP ────────────────────────┼─> exact cycle manifest
-  scan-time GLM (when enabled) ──┘       │
-                                         ├─ mrms-ready ─> run_ewmrs.py
-                                         └─ rap-ready  ─> run_ewmrs.py
+  local readiness consumer: detection, integration, CTAM, alerts, publication
 
 run_ewmrs.py
-  committed-record consumer, MRMS rendering, RAP Uint16 conversion
-  GOES ABI ingest + rendering, METAR, NWS alerts, WPC surface analysis
+  per-input MRMS rendering + RAP Uint16 conversion
+  GOES ABI ingest/render + METAR, NWS, WPC accessories
 
 run_nexrad.py
-  NEXRAD Level-II discovery/download/parse/staging + polar rendering
+  Level-II discovery/download/parse/staging + polar rendering
 ```
 
-The primary service does not import or start EWMRS, NEXRAD, METAR, NWS, WPC,
-or the GOES ABI loops. EWMRS does not download MRMS or RAP and does not render
-NEXRAD. NEXRAD is an independent service rather than an EWMRS child.
+`edgewarn run` starts all four Python services. `edgewarn run core` starts
+ingest and Core; `edgewarn run ewmrs` starts ingest, Core, and EWMRS.
+Direct consumers require a separately managed `run_ingest.py` using the same
+config root, runtime root, and dependency options. Ingest and EWMRS can run
+without Core using `run_all.py --services ingest,ewmrs`.
 
-## Shared staged MRMS/RAP cycle
+## Realtime readiness and rendering
 
-`src/common/pipeline/coordinator.py:run_staged_ingest_cycle` is used by the
-realtime primary and historical EdgeWARN processing. It starts MRMS detection,
-MRMS integration, and (when requested) RAP ingestion concurrently. Each
-ingest path is async-first and has a synchronous fallback where supported.
+The ingest service commits validated inputs and durable records beneath
+`<BASE_DIR>/state/realtime/ingest/v1/`. Core starts detection only after all
+check inputs are ready locally, then waits for integration and final snapshots.
+The snapshots pin exact paths and timestamps through processing and retention.
 
-The coordinator returns a `CycleState` containing an immutable
-`CycleInputManifest`. A manifest records the requested UTC cycle, the exact
-local path for every selected input, product/family/source identity, encoded
-analysis time, validation status, and whether an input is current or previous
-history. Alignment is checked from product timestamps; filesystem modification
-time is not used as the observation timestamp.
+EWMRS runs `InputRenderConsumer`, consuming each `render-ready` notification
+independently of Core readiness. It persists per-layer plans and acknowledgments,
+retries failed layers separately, and releases the input reference after all
+mapped layers have a durable terminal disposition. Each RAP analysis fans out to
+the configured RAP layers. Scan-time GLM is a Core integration input with an
+explicit no-mapping acknowledgment; GOES ABI is acquired/rendered separately.
 
-Readiness transitions are emitted in dependency order:
+Realtime no longer writes `state/realtime/ingest-reports` or the legacy
+`cycles/<cycle-id>/{mrms-ready,rap-ready}.json` records. Repository readers do
+not depend on the retired report directory; external tooling needs an operator
+audit. Legacy handoff primitives remain available for migration tooling.
 
-1. Detection MRMS inputs: the configured detection subset is complete and
-   timestamp-valid, so the EdgeWARN detection worker may run.
-2. EWMRS MRMS cycle trigger: emitted every Core ingest cycle. EWMRS scans each
-   configured MRMS source directory independently, reuses complete renders for
-   unchanged source timestamps, and renders newly available layers. There is
-   no aggregate all-products readiness gate.
-3. Base EdgeWARN integration inputs: MRMS inputs plus a valid raw RAP input,
-   unless RAP is disabled (for example, `mrms-core-only`).
-4. EdgeWARN integration inputs: base inputs plus scan-time GLM when GOES/GLM is
-   enabled. GOES ABI availability is not part of this primary barrier.
+## Historical staged MRMS/RAP cycle
 
-Production realtime mode calls the coordinator with `include_goes=False`.
-Scan-time GLM is downloaded separately by the primary and added to the
-integration manifest only after its own timestamp/alignment validation.
-`include_goes` remains available to coordinator callers and tests, but it is
-not the production ABI-render path.
+Historical processing retains `common.pipeline.coordinator.run_staged_ingest_cycle`
+and its async acquisition with synchronous fallback. It returns a `CycleState`
+with an immutable `CycleInputManifest`: exact local paths, product/family/source
+identity, encoded analysis times, validation, and current/previous selections.
+Historical reports remain under `state/historical/ingest-reports`.
 
-The primary publishes successful phases through
-`src/util/runtime/handoff.py`. Publication is atomic and idempotent:
+## RAP rendering
 
-```text
-<BASE_DIR>/state/realtime/cycles/<cycle-id>/mrms-ready.json
-<BASE_DIR>/state/realtime/cycles/<cycle-id>/rap-ready.json
-```
-
-The record contains the canonical UTC cycle ID, producer/run metadata, the
-manifest's staged paths, tolerances, and warnings. `mrms-ready` is published as
-an EWMRS cycle trigger even when one or more MRMS products are unavailable;
-`rap-ready` remains gated on a valid exact RAP input. Publication failure is
-logged as a handoff problem and does not rewrite an existing incompatible
-record or make the primary cycle falsely successful.
-
-`run_ewmrs.py` runs `util.runtime.ewmrs_consumer.EwmrsRecordConsumer` as a
-supervised child. It drains `mrms-ready` and `rap-ready` in cycle order and
-strictly re-reads each record at the consumption boundary. An `mrms-ready`
-record is a cycle trigger: each MRMS layer selects its newest complete local
-source independently, reuses an existing complete render for that source
-timestamp, and leaves unavailable layers for a later cycle. RAP conversion
-continues to use the exact path recorded by `rap-ready`.
-There is a separate durable checkpoint for each phase under
-`<BASE_DIR>/state/realtime/consumers/`. The MRMS checkpoint advances after a
-best-effort per-layer scan completes; unavailable layers are reconsidered on
-the next Core cycle. Renderer exceptions remain retryable without advancing.
-Malformed records and invalid exact-input RAP records are logged and marked
-unrecoverable so they cannot block the backlog indefinitely. Backlogs beyond
-`cycle.max_backlog_cycles` are also explicitly abandoned.
-
-RAP Uint16 conversion is EWMRS-owned derived processing. For each accepted
-`rap-ready` record, configured layers are written as:
+RAP Uint16 conversion is EWMRS-owned derived processing. For each accepted RAP
+`render-ready` notification, configured layers are written as:
 
 ```text
 <BASE_DIR>/gui/RAP/<outdir>/<YYYYMMDD-HHMM00>/data.u16
@@ -343,3 +312,106 @@ continue. Matching configuration and a live matching Core run automatically
 resume pending MRMS work. Restart services after configuration changes.
 
 See [Phase 8 migration and qualification](configurable-mrms-phase8.md) for upgrade, rollback, and offline resource measurements.
+
+## Independent ingest foundations (phases 1–2)
+
+The current services still use the staged cycle coordinator. The independent
+service, inventory/outbox, and per-layer consumer cutover are later phases of
+`plans/independent-ingest-incremental-rendering-plan.md`.
+
+`resolve_dependencies()` in `common.ingest.mrms.core_contract` freezes the
+registry's full manifest IDs and dependency policy. The default check and
+detection sets are composite reflectivity, PrecipFlag, and `ProbSevere` (the
+legacy null modifier). Empty checks, disabled references, and detection outside
+the check set fail preflight. There are currently no additional mandatory MRMS
+integration products. Enabled RAP and scan-time GLM remain separate integration
+requirements; `mrms_core_only` disables both and `disable_goes` disables GLM.
+Previous detection history is the latest validated strictly earlier observation,
+when available; it is pinned independently from current checks.
+
+Optional MRMS acquisition still has the configured 30-second default deadline;
+the staged coordinator retains its additional single HTTPS-timeout teardown
+allowance (10 seconds by default). CTAM receives a distinct immutable final
+snapshot: the unchanged detection/history and integration selections, plus
+aligned successful optional current inputs and validated optional history.
+Every optional product has a terminal outcome, including unavailable/expired
+ones. Late arrivals after that boundary must not revise this snapshot. They can
+still supply independent rendering in the later inventory phase. StormProb's
+existing preflight and fatal per-cycle source/feature checks remain authoritative;
+an optional acquisition failure does not make a required StormProb feature
+optional. Missing final optional completion is also fatal when both CTAM and
+StormProb are enabled.
+
+`discover_objects()` and `discover_objects_sync()` in
+`common.ingest.mrms.discovery` list a bounded observation-time window across day
+boundaries and all S3 pages. They return immutable descriptors with exact source
+locators, encoded times and remote versions/ETags when available. S3 acquisition uses `VersionId` for
+versions and `IfMatch` for ETags. HTTPS fallback
+uses the same product/time identity. Object/page limits raise
+`ListingLimitExceeded`; consumers must apply backpressure or subdivide the
+window, never advance a completed cursor from an incomplete result. Sync callers
+must supply an S3 client with bounded connection/read timeouts.
+
+`acquire_object()` / `acquire_object_sync()` in `common.ingest.mrms.acquisition`
+acquire an exact descriptor and use exact-time mirror fallback, existing payload
+validation, quarantine and atomic publication. They return `CommittedInput`
+only after the final file is usable. Its `input_id` derives from family, full
+product ID, observation time and validated content digest, so mirror reuse has
+one identity. Corrected content cannot replace an existing published file.
+`acquire_batch()` and its sync counterpart keep historical behavior and can
+report each completion through `on_committed` before the batch finishes.
+Notification failures do not undo files already committed; recovery must retry
+notification delivery rather than assume the source download failed.
+
+`acquire_rap_input()` preserves analysis-hour selection and validates the returned
+GRIB and age. Requests for different scans that reuse one analysis return the
+same identity. `acquire_glm_inputs_for_scan()` isolates source/merge work in
+staging, validates NetCDF variables and scan alignment, then publishes without
+replacing existing bytes. Neither completion wrapper owns source retention.
+Realtime RAP acquisition also preserves invalid existing observations for
+inventory repair instead of deleting or replacing potentially referenced files.
+The future inventory owns deduplication and durable notifications, including
+avoiding a second render event on RAP reuse. Existing historical wrappers retain
+their cleanup defaults; realtime callers must use the no-cleanup object APIs.
+
+## Independent ingest durable contracts (phase 3)
+
+The producer contract is implemented in `common.ingest.inventory`,
+`common.pipeline.readiness`, and `util.runtime.ingest_handoff`. Service startup
+and consumer cutover are scheduled for later phases of the
+[independent ingest plan](../../plans/independent-ingest-incremental-rendering-plan.md).
+
+`InputInventory.commit_input()` accepts a validated acquisition completion and
+persists its identity, digest, exact source path/time, provenance, dependency
+fingerprint, and producer run ID beneath `state/realtime/ingest/v1/inputs/`.
+`IngestHandoff.publish_render_ready()` separately commits an immutable input
+notification. Restart reconciliation adopts explicitly enumerated files through
+a supplied payload validator, repairs missing notifications, and returns pending
+input IDs. Publication failure leaves the acquisition committed for recovery.
+
+`InputInventory.publish_scan()` uses the shared replay input lease to select
+and pin inputs before retention can delete them. The pure `evaluate_scan()`
+requires every check product in the normalized scan, selects previous history
+separately, and evaluates mandatory integration and enabled RAP/GLM inputs.
+Frozen auxiliary settings carry the RAP age budget. Start, integration, and
+final optional-input manifests retain the earlier phase selections. Persisted
+scan timing bounds optional completion across restarts; terminal records state
+why an incomplete scan was abandoned. Consumers must validate dependency
+membership with `validate_phase_dependencies()` and exact files with
+`validate_phase_inputs()` before using a phase.
+
+EWMRS records its enabled layer mapping with `plan_render()`. Layer dispositions
+are keyed by input ID, layer ID, and render configuration fingerprint and include
+attempt counts, retry eligibility, and terminal reasons. `acknowledge_input()`
+requires every mapped layer to reach a terminal disposition, or explicitly
+records that no layer is configured. Artifact and index verification before
+successful acknowledgment belongs to the renderer consumer in phase 6.
+
+Retention protects pending notifications, active Core selections, explicit
+worker pins, and detection/optional history pins. Cleanup uses the same
+nonblocking replay lease; callers retry on lock contention. Only acknowledged,
+unreferenced inputs older than the caller's rediscovery cutoff are eligible.
+Identity tombstones precede deletion so reconciliation can finish interrupted
+cleanup and reject conflicting rediscovery. File verification caches use file
+version metadata only to avoid repeated hashing; encoded observation time
+remains the source-time authority.

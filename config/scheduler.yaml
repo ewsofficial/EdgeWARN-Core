@@ -11,3 +11,6 @@ scheduler:
 
   # Diagnostic threshold only; it does not change scheduling behavior.
   slow_check_log_threshold_ms: 2000
+
+  # Independent discovery cadence in seconds (1..300).
+  ingest_poll_seconds: 10

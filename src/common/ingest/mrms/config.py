@@ -388,3 +388,52 @@ def normalize_goes_modifier(spec):
         return GoesIngestSpec(product=product, outdir=outdir)
 
     raise TypeError(f"Unsupported GOES modifier specification: {spec!r}")
+
+
+def get_ingest_dependencies(*, include_rap=True, include_glm=True,
+                            mrms_core_only=False, disable_goes=False):
+    """Freeze the effective catalog/overlay agreement before starting workers."""
+    from common.ingest.mrms.core_contract import resolve_dependencies
+    registry = get_registry()
+    if registry is None:
+        raise ValueError("Independent ingest requires the v2 MRMS registry")
+    datasets = load_config("integration", config_dir=fs.MRMS_CONFIG_DIR)["stats_datasets"]
+    enrichment = {entry["product"] for entry in datasets
+                  if entry.get("product") and registry.is_enabled(entry["product"])}
+    return resolve_dependencies(registry, enrichment=enrichment, include_rap=include_rap,
+                                include_glm=include_glm, mrms_core_only=mrms_core_only,
+                                disable_goes=disable_goes,
+                                auxiliary_settings=ingest_auxiliary_settings(config_dir=fs.MRMS_CONFIG_DIR))
+
+
+def get_ingest_settings(*, config_dir=None):
+    """Resolve inherited limits once; no service-side resource constants."""
+    config_dir = config_dir or fs.MRMS_CONFIG_DIR
+    result = dict(load_config("runtime", config_dir=config_dir)["ingest"])
+    mrms = load_config("ingest", config_dir=config_dir)["mrms"]
+    rap = load_config("synoptic_rap", config_dir=config_dir)["rap"]
+    inherited = {
+        "listing_concurrency": mrms["downloads"]["max_concurrency"],
+        "download_concurrency": mrms["downloads"]["max_concurrency"],
+        "listing_timeout_seconds": mrms["ncep_https"]["sync_timeout_seconds"],
+        "download_timeout_seconds": 4 * mrms["ncep_https"]["sync_timeout_seconds"],
+        "auxiliary_timeout_seconds": 4 * rap["nomads_timeout_seconds"],
+        "retention_minutes": mrms["cleanup_max_age_minutes"],
+    }
+    for key, value in inherited.items():
+        if result[key] is None:
+            result[key] = value
+    result["decode_concurrency"] = min(result["decode_concurrency"], result["download_concurrency"])
+    return result
+
+
+def ingest_auxiliary_settings(*, config_dir=None):
+    """Source/freshness settings that must agree across producer and consumers."""
+    from common.ingest.mrms.registry import _plain
+    config_dir = config_dir or fs.MRMS_CONFIG_DIR
+    goes = load_config('ingest', config_dir=config_dir)['goes']
+    return {
+        'rap': _plain(load_config('synoptic_rap', config_dir=config_dir)['rap']),
+        'glm': {key: _plain(goes[key]) for key in
+                ('bucket', 'glm_product', 'glm_outdir', 'max_entries', 'hour_lookback', 'bucket_path_pattern')},
+    }

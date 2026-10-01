@@ -4,7 +4,11 @@ import path from 'path';
 // Mirror of src/util/runtime/services.py (the schema owner). Keep both sides
 // in lockstep: canonical names, heartbeat schema version, route-family map,
 // and the active/stale/disabled/degraded/unsupported-schema classification.
-export const CANONICAL_SERVICE_NAMES = ['edgewarn', 'ewmrs', 'nexrad'];
+//
+// 'ingest' is diagnostic poll liveness for the independent acquisition
+// service. It deliberately has no route-family requirement: an ingest outage
+// must be visible without gating artifacts that are already published.
+export const CANONICAL_SERVICE_NAMES = ['ingest', 'edgewarn', 'ewmrs', 'nexrad'];
 export const HEARTBEAT_SCHEMA_VERSION = 1;
 
 export const ROUTE_SERVICE_REQUIREMENTS = {

@@ -260,7 +260,17 @@ describe('SERVICE_NOT_ENABLED gating for the nexrad route family', () => {
   it('reports every canonical service in the health services block', async () => {
     const app = await createAppWithBaseDir();
     const ready = await request(app).get('/health/ready').expect(200);
-    expect(Object.keys(ready.body.services).sort()).toEqual(['edgewarn', 'ewmrs', 'nexrad']);
+    expect(Object.keys(ready.body.services).sort()).toEqual(['edgewarn', 'ewmrs', 'ingest', 'nexrad']);
     expect(ready.body.services.edgewarn).toEqual({ state: 'disabled', phase: null, lastSeen: null, degradedChildren: [] });
+  });
+});
+
+
+describe('OpenAPI service diagnostics', () => {
+  it('documents all four services on readiness without an ingest route gate', async () => {
+    const spec = JSON.parse(await fs.readFile(OPENAPI_PATH, 'utf8'));
+    expect(spec.components.schemas.Services.required.sort()).toEqual(['edgewarn', 'ewmrs', 'ingest', 'nexrad']);
+    expect(spec.paths['/health/ready'].get.responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/Readiness');
+    expect(requiredServiceForRoute('/api/v3/render-products')).toBe('ewmrs');
   });
 });

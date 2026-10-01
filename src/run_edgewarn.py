@@ -1,15 +1,17 @@
 """Supported primary EdgeWARN command (decomposition Phase 5).
 
-The latency-sensitive primary service. Owns MRMS timestamp selection and the
-S3/HTTPS selection policy, detection/integration MRMS downloads exactly once
-per cycle, raw RAP download, scan-time GLM when GOES is enabled, detection,
-tracking/lineage, integration, CTAM, alert generation, and API index updates,
-plus the truthful primary cycle outcome/retry state and publication of the
-immutable ``mrms-ready``/``rap-ready`` records ``run_ewmrs.py`` consumes.
+The latency-sensitive primary service. Owns detection, tracking/lineage,
+integration, CTAM, alert generation, and API index updates, plus the truthful
+primary cycle outcome/retry state.
 
-Run directly:
-
-    python src/run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
+Since the independent-ingest cutover this command performs **no source
+acquisition at all**: realtime MRMS, raw RAP, and scan-time GLM downloads are
+owned by ``run_ingest.py``. Core reads the immutable readiness records the
+ingest service commits beneath ``state/realtime/ingest/v1/``, starts detection
+only once every configured check modifier is locally valid, and waits locally
+for the later integration prerequisites. Launching Core without a separately
+running ingest service leaves it waiting, with an explicit diagnostic, until
+scan readiness appears.
 
 It does not import or start EWMRS, NEXRAD, METAR, NWS, WPC, or GOES ABI loops.
 Behavior mirrors the other direct services: a single-instance lock beneath
@@ -28,7 +30,6 @@ from datetime import datetime, timezone
 from common.config import loader as config_loader
 from EdgeWARN import initialize_runtime
 from EdgeWARN.ctam.preflight import PreflightError, StormProbDependencyError, check_core_startup
-from EdgeWARN.schedule.scheduler import MRMSUpdateChecker
 from util.io import TimestampedOutput, IOManager
 from util.release import get_release_version
 from util.runtime.handoff import ServiceLock
@@ -56,6 +57,7 @@ def main():
 
     io_manager = IOManager("[EdgeWARN]")
     args = io_manager.get_args()
+    args.ingest_run_id = uuid.uuid4().hex
 
     try:
         from util.runtime.mrms_migration import require_completed_migration
@@ -72,14 +74,17 @@ def main():
         sys.exit(1)
 
     initialize_runtime(base_dir=args.base_dir, io_manager=io_manager)
-    from common.ingest.mrms.config import get_registry
     import util.file as fs
+    from common.ingest.mrms.config import get_registry
+
     registry = get_registry()
     if registry is not None:
         fs.ensure_mrms_directories(registry)
 
     print(f"Primary EdgeWARN service started (v{get_release_version()}). Press CTRL+C to exit.")
     print("[EdgeWARN] EWMRS and its accessories are owned by run_ewmrs.py; NEXRAD by run_nexrad.py.")
+    print("[EdgeWARN] Realtime MRMS/RAP/GLM acquisition is owned by run_ingest.py; this "
+          "process consumes its durable readiness records and waits when they are absent.")
     log_effective_flags(args)
 
     run_id = uuid.uuid4().hex
@@ -89,10 +94,6 @@ def main():
     except RuntimeError as exc:
         print(f"[EdgeWARN] {exc}")
         sys.exit(1)
-
-    if registry is not None:
-        from util.runtime.mrms_registry import publish_registry
-        publish_registry(registry, run_id)
 
     stop_event = threading.Event()
 
@@ -128,7 +129,6 @@ def main():
 
     try:
         run_primary_cycle_loop(
-            checker=MRMSUpdateChecker(verbose=True),
             cycle_config=build_cycle_config(args),
             supervisor=None,
             on_tick=None,

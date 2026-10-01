@@ -6,7 +6,7 @@
     "/api/v3": {"get": {"operationId": "getApiDiscovery", "responses": {"200": {"description": "Capability document", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResourceEnvelope"}}}}}}},
     "/api/v3/openapi.json": {"get": {"operationId": "getOpenApi", "responses": {"200": {"description": "OpenAPI document"}}}},
     "/health/live": {"get": {"operationId": "getLiveness", "responses": {"200": {"description": "Live"}}}},
-    "/health/ready": {"get": {"operationId": "getReadiness", "responses": {"200": {"description": "Ready"}, "503": {"description": "Producer roots unavailable"}}}},
+    "/health/ready": {"get": {"operationId": "getReadiness", "responses": {"200": {"description": "Ready", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Readiness"}}}}, "503": {"description": "Producer roots unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Readiness"}}}}}}},
     "/api/v3/cells": {"get": {"operationId": "listCells", "responses": {"200": {"description": "Cell collection"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
     "/api/v3/cells/{cellId}": {"get": {"operationId": "getCell", "parameters": [{"$ref": "#/components/parameters/cellId"}], "responses": {"200": {"description": "Cell"}, "404": {"$ref": "#/components/responses/Problem"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
     "/api/v3/storm-snapshots": {"get": {"operationId": "listStormSnapshots", "responses": {"200": {"description": "Snapshot collection"}, "503": {"$ref": "#/components/responses/ServiceNotEnabled"}}}},
@@ -36,6 +36,9 @@
   },
   "components": {
     "schemas": {
+      "ServiceState": {"type": "object", "required": ["state", "phase", "lastSeen", "degradedChildren"], "properties": {"state": {"enum": ["active", "stale", "disabled", "degraded", "unsupported-schema"]}, "phase": {"type": ["string", "null"]}, "lastSeen": {"type": ["string", "null"]}, "degradedChildren": {"type": "array", "items": {"type": "string"}}}},
+      "Services": {"type": "object", "required": ["ingest", "edgewarn", "ewmrs", "nexrad"], "properties": {"ingest": {"$ref": "#/components/schemas/ServiceState"}, "edgewarn": {"$ref": "#/components/schemas/ServiceState"}, "ewmrs": {"$ref": "#/components/schemas/ServiceState"}, "nexrad": {"$ref": "#/components/schemas/ServiceState"}}, "additionalProperties": false},
+      "Readiness": {"type": "object", "required": ["status", "services"], "properties": {"status": {"enum": ["ready", "not-ready"]}, "services": {"$ref": "#/components/schemas/Services"}}, "description": "Readiness depends on runtime directories. Service states are diagnostic; ingest owns no route gate."},
       "ResourceEnvelope": {
         "type": "object",
         "required": ["data", "meta"],

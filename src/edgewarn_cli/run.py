@@ -18,16 +18,17 @@ from types import MappingProxyType
 # startup order, which is significant for the EWMRS producer dependency.
 TOPOLOGIES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
-        "all": ("edgewarn", "ewmrs", "nexrad"),
-        "core": ("edgewarn",),
-        "ewmrs": ("edgewarn", "ewmrs"),
+        "all": ("ingest", "edgewarn", "ewmrs", "nexrad"),
+        "core": ("ingest", "edgewarn"),
+        "ewmrs": ("ingest", "edgewarn", "ewmrs"),
+        "ingest": ("ingest",),
         "nexrad": ("nexrad",),
     }
 )
 
-WORKERS: tuple[str, ...] = ("core", "ewmrs", "nexrad")
+WORKERS: tuple[str, ...] = ("ingest", "core", "ewmrs", "nexrad")
 _WORKER_TO_SERVICE: Mapping[str, str] = MappingProxyType(
-    {"core": "edgewarn", "ewmrs": "ewmrs", "nexrad": "nexrad"}
+    {"ingest": "ingest", "core": "edgewarn", "ewmrs": "ewmrs", "nexrad": "nexrad"}
 )
 _WRAPPER_OWNED_OPTIONS = frozenset(
     {
@@ -74,7 +75,7 @@ def add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar=("WORKER", "JSON_ARGV"),
         default=[],
         help=(
-            "worker-scoped JSON array of arguments; repeat for core, ewmrs, or "
+            "worker-scoped JSON array of arguments; repeat for ingest, core, ewmrs, or "
             "nexrad"
         ),
     )
@@ -239,6 +240,7 @@ def run_from_namespace(args: argparse.Namespace) -> int:
             parse_worker_argv(args.args, services), invocation_dir
         )
         preflight_worker_argv(worker_argv)
+        run_all.preflight_topology(launcher_args, services, worker_argv)
         if "edgewarn" in services:
             from util.cli import build_service_parser
             from util.ctam_config import resolve_ctam_module_dir

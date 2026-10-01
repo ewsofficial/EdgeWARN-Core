@@ -5,6 +5,7 @@ listing/transfer are replaced. Each replay runs in a fresh Python process.
 """
 import argparse
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import gzip
@@ -19,6 +20,12 @@ import time
 from unittest.mock import patch, MagicMock
 
 DT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+def grib2_message():
+    """One real decodable GRIB2 message; acquisition decode-validates payloads."""
+    fixture = Path(__file__).resolve().parents[1] / 'tests/fixtures/weather/rap.grib2.b64'
+    data = base64.b64decode(fixture.read_text())
+    return data[:int.from_bytes(data[8:16], 'big')]
 
 async def qualify(base, short, replay):
     from common.config.loader import load_config
@@ -52,8 +59,7 @@ async def qualify(base, short, replay):
         if 'PROBSEVERE' in locator:
             payload = json.dumps({'type':'FeatureCollection','features':[]}).encode()
         else:
-            sections = b''.join((5).to_bytes(4,'big') + bytes([n]) for n in (1,3,4,5,6,7))
-            payload = gzip.compress(b'GRIB\0\0\0\2'+(20+len(sections)).to_bytes(8,'big')+sections+b'7777')
+            payload = gzip.compress(grib2_message())
         path.write_bytes(payload)
     async def detection(dt, max_entries, **kwargs):
         batch = await a.acquire_batch(registry,dt,max_entries,list(PROTECTED_IDS),MagicMock())

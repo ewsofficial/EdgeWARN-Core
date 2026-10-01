@@ -32,7 +32,7 @@ The image bundles Python dependencies, configuration, models, and an NWS zone sn
 | NEXRAD | Level-II ingest and radar rendering. |
 | API v3 | Versioned, file-backed access to generated products at `/api/v3`. Legacy API routes have been removed. |
 
-The three Python services coordinate through durable runtime records. EWMRS requires the primary Core producer; NEXRAD starts both ingest and rendering. Historical reprocessing is also supported.
+The four Python services coordinate through durable runtime records. Ingest acquires MRMS, RAP, and scan-time GLM; Core consumes readiness records and EWMRS renders input notifications independently; NEXRAD starts both ingest and rendering. Historical reprocessing is also supported.
 
 ## Develop from source
 
@@ -54,9 +54,10 @@ The branch command selects v3.0.1 while the default branch tracks an earlier rel
 ### Processing
 
 ```bash
-edgewarn run                  # All three services
-edgewarn run core             # Core only
-edgewarn run ewmrs            # Core producer + EWMRS
+edgewarn run                  # Ingest + Core + EWMRS + NEXRAD
+edgewarn run core             # Ingest + Core
+edgewarn run ewmrs            # Ingest + Core + EWMRS
+edgewarn run ingest           # Acquisition only
 edgewarn run nexrad           # NEXRAD ingest + rendering
 edgewarn run core --config-path /etc/edgewarn/config
 ```

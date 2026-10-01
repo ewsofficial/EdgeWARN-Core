@@ -45,6 +45,8 @@ OPERATIONAL_LITERAL_EXCEPTIONS = {
     ("api/services/serviceRegistry.js", "<parameter>", "CACHE_TTL_MS"): "same scanner-cache constant seen by the JS literal scanner",
     ("run_edgewarn.py", "<module>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "heartbeat write throttle inside the primary's own tick hook, not deployable policy",
     ("run_edgewarn.py", "<parameter>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "same heartbeat throttle constant seen by the literal scanner",
+    ("run_ingest.py", "<module>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "heartbeat write throttle inside the ingest liveness thread, not deployable policy",
+    ("run_ingest.py", "<parameter>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "same heartbeat throttle constant seen by the literal scanner",
 }
 _CATALOG_NAME = re.compile(r"(?:product|event|pressure|catalog|channel|modifier|vcp)", re.I)
 _OPERATIONAL_NAME = re.compile(r"(?:timeout|poll|interval|retention|cache|worker|retry|backoff|cleanup|age|limit|ttl)", re.I)

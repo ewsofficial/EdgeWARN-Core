@@ -1,0 +1,40 @@
+{
+  "scheduler": {
+    "modifier_lookup_max_entries": 20,
+    "s3_lookback_hours": 2,
+    "slow_check_log_threshold_ms": 2000,
+    "ingest_poll_seconds": 10
+  },
+  "ingest": {
+    "listing_concurrency": 8,
+    "download_concurrency": 8,
+    "decode_concurrency": 2,
+    "auxiliary_concurrency": 2,
+    "listing_timeout_seconds": 10,
+    "download_timeout_seconds": 40,
+    "auxiliary_timeout_seconds": 480,
+    "listing_page_size": 1000,
+    "listing_max_pages": 100,
+    "listing_max_objects": 4096,
+    "pending_max_jobs": 4096,
+    "retry_max_attempts": 3,
+    "retry_initial_seconds": 5,
+    "retry_max_seconds": 30,
+    "scan_deadline_seconds": 180,
+    "reconcile_interval_seconds": 10,
+    "retention_minutes": 60,
+    "disk_budget_mb": 8192,
+    "shutdown_timeout_seconds": 30
+  },
+  "consumers": {
+    "core_readiness_seconds": 1.0,
+    "ewmrs_notification_seconds": 1.0
+  },
+  "input_jobs": {
+    "pending_max_jobs": 4096,
+    "max_age_minutes": 120,
+    "retry_max_attempts": 3,
+    "retry_initial_seconds": 5,
+    "retry_max_seconds": 30
+  }
+}

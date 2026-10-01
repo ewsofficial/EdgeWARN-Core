@@ -1,7 +1,15 @@
-"""Convert selected RAP GRIB2 layers to Uint16Array-compatible files."""
+"""Convert selected RAP GRIB2 layers to Uint16Array-compatible files.
+
+Each layer is converted and published independently so a consumer can
+acknowledge a successful layer, retry only the failed ones, and reuse the same
+pinned raw analysis across those jobs. Shared product-index updates are
+serialized between processes, and an older completion can never move a product's
+latest timestamp backward.
+"""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import re
 import shutil
@@ -28,6 +36,36 @@ from util.atomic import atomic_write_bytes, atomic_write_json
 io_manager = IOManager("[RAPUint16]")
 
 
+@contextmanager
+def _serialized_index_update(out_dir: Path):
+    """Serialize the read-modify-write of one product index across processes.
+
+    Per-layer jobs for the same analysis can finish in any order in separate
+    render workers; without this, two concurrent writers would drop a timestamp
+    from the published index.
+    """
+    from util.runtime.handoff import _AdvisoryFileLock
+
+    lock_root = out_dir.parent / ".index-locks"
+    lock_root.mkdir(parents=True, exist_ok=True)
+    lock = _AdvisoryFileLock(lock_root / f"{out_dir.name}.lock")
+    while True:
+        try:
+            lock.acquire()
+            break
+        except OSError:
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def rap_timestamp_label(rap_file: str | Path, dt=None) -> str:
+    """The published output timestamp for a pinned analysis, resolved once."""
+    return _timestamp_label(dt, Path(rap_file))
+
+
 def run_rap_uint16_pipeline(
     rap_file: str | Path,
     dt=None,
@@ -35,12 +73,15 @@ def run_rap_uint16_pipeline(
     *,
     timings: dict[str, dict[str, Any]] | None = None,
     force: bool | None = None,
+    cleanup: bool = True,
 ) -> dict[str, Path | None]:
     """Convert configured RAP messages into one raw uint16 file per layer.
 
-    ``force=None`` means "no preference", deferring to the catalog; ``True`` and
-    ``False`` are both explicit caller choices, which is why the default is not
-    ``False``.
+    ``layers`` selects an explicit subset, so a consumer can convert, publish,
+    and acknowledge one layer while the others are still retrying against the
+    same pinned analysis. ``force=None`` means "no preference", deferring to the
+    catalog; ``True`` and ``False`` are both explicit caller choices, which is
+    why the default is not ``False``.
     """
     rap_path = Path(rap_file)
     if force is None:
@@ -133,7 +174,9 @@ def run_rap_uint16_pipeline(
         missing_layers.append(str(missing_name))
         _record_timing(timings, missing_name, status="missing", seconds=None, output_path=None)
 
-    removed_count = cleanup_old_rap_uint16_layers()
+    removed_count = 0
+    if cleanup:
+        removed_count = cleanup_old_rap_uint16_layers(keep=(timestamp,))
     if removed_count:
         io_manager.write_info(
             f"RAP Uint16 cleanup summary: removed={removed_count} old layer directories"
@@ -280,32 +323,42 @@ def _update_product_index(out_dir: Path, timestamp: str, max_timestamps: int | N
         max_timestamps = rap_uint16_max_timestamps()
     out_dir.mkdir(parents=True, exist_ok=True)
     index_path = out_dir / "index.json"
-    timestamps: list[str] = []
-    if index_path.exists():
-        try:
-            existing = json.loads(index_path.read_text(encoding="utf-8"))
-            if isinstance(existing, list):
-                timestamps = [str(item) for item in existing]
-            elif isinstance(existing, dict):
-                timestamps = [str(item) for item in existing.get("timestamps", [])]
-        except Exception as exc:
-            io_manager.write_warning(f"Overwriting corrupt RAP uint16 index {index_path}: {exc}")
+    with _serialized_index_update(out_dir):
+        timestamps: list[str] = []
+        if index_path.exists():
+            try:
+                existing = json.loads(index_path.read_text(encoding="utf-8"))
+                if isinstance(existing, list):
+                    timestamps = [str(item) for item in existing]
+                elif isinstance(existing, dict):
+                    timestamps = [str(item) for item in existing.get("timestamps", [])]
+            except Exception as exc:
+                io_manager.write_warning(
+                    f"Overwriting corrupt RAP uint16 index {index_path}: {exc}")
 
-    timestamps = sorted({timestamp, *timestamps}, reverse=True)
-    index_data = {
-        "timestamps": timestamps[:max_timestamps],
-        "format": "uint16",
-        "byte_order": "little_endian",
-        "missing_value": uint16_nodata(),
-    }
-    atomic_write_json(index_path, index_data, indent=2)
+        # Descending order and deduplication mean an older job completing late
+        # cannot move a product's latest entry backward. ``max_timestamps`` stays
+        # the single retention window shared with the directory cleanup below.
+        merged = sorted({timestamp, *timestamps}, reverse=True)
+        index_data = {
+            "timestamps": merged[:max_timestamps],
+            "format": "uint16",
+            "byte_order": "little_endian",
+            "missing_value": uint16_nodata(),
+        }
+        atomic_write_json(index_path, index_data, indent=2)
 
-def cleanup_old_rap_uint16_layers(max_timestamps: int | None = None) -> int:
-    """Remove old timestamp directories for RAP uint16 layers, keeping only max_timestamps per layer."""
+def cleanup_old_rap_uint16_layers(max_timestamps: int | None = None, *, keep=()) -> int:
+    """Remove old timestamp directories, keeping the configured recent window.
+
+    ``keep`` names timestamp directories an active per-layer job is still
+    writing, so retention never deletes a directory out from under a job.
+    """
     if max_timestamps is None:
         max_timestamps = rap_uint16_max_timestamps()
     if not fs.GUI_RAP_DIR.exists():
         return 0
+    protected = {str(value) for value in keep}
     removed_count = 0
     for layer_dir in fs.GUI_RAP_DIR.iterdir():
         if not layer_dir.is_dir():
@@ -315,6 +368,8 @@ def cleanup_old_rap_uint16_layers(max_timestamps: int | None = None) -> int:
             continue
         timestamp_dirs.sort(key=lambda d: d.name, reverse=True)
         for old_dir in timestamp_dirs[max_timestamps:]:
+            if old_dir.name in protected:
+                continue
             try:
                 shutil.rmtree(old_dir)
                 removed_count += 1

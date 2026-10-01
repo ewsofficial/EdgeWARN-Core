@@ -29,6 +29,7 @@ from common.config.mrms_products import parse_product_id
 from common.ingest.aws_async_compat import ensure_aiobotocore_endpoint_compat
 from common.ingest.manifest import parse_file_analysis_time, staged_input_from_path
 from common.ingest.mrms.source import source_for
+from common.ingest.objects import CommittedInput
 from common.ingest.mrms.s3_async import AsyncFileFinder
 from common.ingest.mrms.https_client import HttpsFileFinder
 
@@ -45,6 +46,12 @@ class ProductResult:
     reason: str | None = None
     elapsed_seconds: float = 0.0
     sha256: str | None = None
+    source_locator: str | None = None
+    remote_version: str | None = None
+
+
+class InputIdentityConflict(ValueError):
+    """Published bytes disagree with an upstream revision; never try a mirror."""
 
 
 class WorkBudget:
@@ -99,8 +106,10 @@ _DOWNLOAD_LOCKS = {}
 
 
 @asynccontextmanager
-async def _product_lock(registry, spec):
-    key = (str(registry.base_dir), spec.product_id)
+async def _product_lock(registry, spec, observation_time):
+    from util.file import verify_mrms_containment
+    verify_mrms_containment(registry)
+    key = (str(registry.base_dir), spec.product_id, observation_time.isoformat())
     with _BUDGET_LOCK:
         lock = _DOWNLOAD_LOCKS.setdefault(key, threading.Lock())
     while not lock.acquire(blocking=False):
@@ -227,7 +236,7 @@ def publish(registry, spec, staged, digest):
         if destination.exists():
             existing_digest = validate_payload(destination, spec)
             if existing_digest != digest:
-                raise ValueError('Conflicting content for an already published observation')
+                raise InputIdentityConflict('Conflicting content for an already published observation')
             return destination, 'local'
         # Hard-link publication is atomic and never overwrites another producer.
         try:
@@ -266,11 +275,13 @@ def _select(candidates, spec, dt, window):
     return min(choices)[2] if choices else None
 
 
-async def _fetch(s3, session, source, locator, path, chunk_size, deadline):
+async def _fetch(s3, session, source, locator, path, chunk_size, deadline, remote_version=None, remote_version_kind="etag"):
     written = 0
     if source == 's3':
         from common.ingest.mrms.source import MRMS_BUCKET
-        response = await s3.get_object(Bucket=MRMS_BUCKET, Key=locator)
+        response = await s3.get_object(Bucket=MRMS_BUCKET, Key=locator,
+                                       **({('VersionId' if remote_version_kind == 'version_id' else 'IfMatch'): remote_version}
+                                          if remote_version else {}))
         body = response['Body']
         # aiobotocore's context manager returns the underlying aiohttp
         # response; keep the StreamingBody wrapper for iter_chunks().
@@ -300,12 +311,12 @@ async def _fetch(s3, session, source, locator, path, chunk_size, deadline):
         raise ValueError(f'Truncated {source} response: expected {expected}, got {written}')
 
 
-async def _acquire(registry, spec, dt, max_entries, s3, session, settings, deadline, io):
-    async with _product_lock(registry, spec):
-        return await _acquire_unlocked(registry, spec, dt, max_entries, s3, session, settings, deadline, io)
+async def _acquire(registry, spec, dt, max_entries, s3, session, settings, deadline, io, discovered=None):
+    async with _product_lock(registry, spec, dt):
+        return await _acquire_unlocked(registry, spec, dt, max_entries, s3, session, settings, deadline, io, discovered)
 
 
-async def _acquire_unlocked(registry, spec, dt, max_entries, s3, session, settings, deadline, io):
+async def _acquire_unlocked(registry, spec, dt, max_entries, s3, session, settings, deadline, io, discovered=None):
     started = time.monotonic()
     stage = _contained_state(registry, 'staging') / uuid.uuid4().hex
     stage.mkdir()
@@ -314,11 +325,15 @@ async def _acquire_unlocked(registry, spec, dt, max_entries, s3, session, settin
     had_candidate = False
     try:
         source = source_for(parse_product_id(spec.configured_id))
-        for transport in ('s3', 'https'):
+        for transport in ((discovered.source, 'https' if discovered.source == 's3' else 's3')
+                          if discovered else ('s3', 'https')):
             selected_source = transport
             path = None
             try:
-                if transport == 's3':
+                if discovered is not None:
+                    candidate = discovered if transport == discovered.source else discovered.mirror(transport)
+                    candidates = [candidate.locator]
+                elif transport == 's3':
                     if s3 is None:
                         raise RuntimeError('S3 client unavailable')
                     prefix, marker = source.listing_bounds(dt)
@@ -326,31 +341,37 @@ async def _acquire_unlocked(registry, spec, dt, max_entries, s3, session, settin
                     candidates = [key for key, _ in await finder.async_lookup_files(prefix, start_after=marker)]
                 else:
                     candidates = await HttpsFileFinder(dt, io, raise_errors=True, source=source, timeout_seconds=settings['ncep_https']['sync_timeout_seconds']).find_files(spec.region, spec.source_modifier)
-                locator = _select(candidates, spec, dt, settings['ncep_https']['match_window_seconds'])
+                locator = _select(candidates, spec, dt, 0 if discovered else settings['ncep_https']['match_window_seconds'])
                 if locator is None:
                     continue
                 had_candidate = True
                 name = locator.rsplit('/', 1)[-1]
                 final_name = name[:-3] if name.endswith('.gz') else name
                 existing = spec.directory / final_name
-                if existing.is_file() and not existing.is_symlink():
+                if (existing.is_file() and not existing.is_symlink()
+                        and not (discovered and discovered.remote_version)):
                     try:
                         digest = validate_payload(existing, spec)
                     except Exception as exc:
                         quarantine(registry, existing, spec, 'local', dt, exc)
                         # Preserve a possibly pinned invalid file; never overwrite it.
                         raise ValueError(f'Invalid existing observation: {exc}') from exc
-                    return _ready(registry, spec, dt, existing, 'local', digest, started)
+                    return _ready(registry, spec, dt, existing, 'local', digest, started, locator=locator)
                 path = stage / name
                 await _fetch(s3, session, transport, locator, path,
-                             settings['ncep_https']['download_chunk_size_bytes'], deadline)
+                             settings['ncep_https']['download_chunk_size_bytes'], deadline,
+                             **({'remote_version': discovered.remote_version,
+                                 'remote_version_kind': discovered.remote_version_kind}
+                                if discovered and transport == discovered.source and discovered.remote_version else {}))
                 decoded = await _decode(path, settings['decompress_chunk_size_bytes'])
                 digest = validate_payload(decoded, spec)
                 if time.monotonic() >= deadline:
                     raise TimeoutError('optional deadline expired before publication')
                 destination, reuse = publish(registry, spec, decoded, digest)
-                return _ready(registry, spec, dt, destination, reuse or transport, digest, started)
-            except asyncio.CancelledError:
+                return _ready(registry, spec, dt, destination, reuse or transport, digest, started,
+                              locator=locator, remote_version=(discovered.remote_version
+                                  if discovered and transport == discovered.source else None))
+            except (asyncio.CancelledError, InputIdentityConflict):
                 raise
             except Exception as exc:
                 reason = f'{transport}: {type(exc).__name__}: {exc}'
@@ -364,11 +385,12 @@ async def _acquire_unlocked(registry, spec, dt, max_entries, s3, session, settin
         shutil.rmtree(stage)
 
 
-def _ready(registry, spec, dt, path, source, digest, started):
+def _ready(registry, spec, dt, path, source, digest, started, *, locator=None, remote_version=None):
     record = staged_input_from_path(spec.product_id, path, source=source, family='mrms')
     return ProductResult(spec.product_id, 'ready', dt.isoformat(), registry.fingerprint,
                          source, record.analysis_time.isoformat(), str(path),
-                         elapsed_seconds=time.monotonic()-started, sha256=digest), record
+                         elapsed_seconds=time.monotonic()-started, sha256=digest,
+                         source_locator=locator, remote_version=remote_version), record
 
 
 @asynccontextmanager
@@ -398,7 +420,14 @@ def _sync_s3(config, io):
             client.close()
 
 
-async def acquire_batch(registry, dt, max_entries, target_modifiers, io):
+async def acquire_batch(registry, dt, max_entries, target_modifiers, io, *, on_committed=None):
+    """Historical batch adapter over the shared per-product acquisition path.
+
+    No deletion occurs here. Historical main.py wrappers own their isolated
+    cleanup; realtime object callers defer it to inventory maintenance. An
+    optional completion hook runs immediately per committed file, before the
+    batch barrier, and must not delete or invalidate already published bytes.
+    """
     from common.ingest.mrms.downloader import DownloadBatchResult
     settings = json.loads(registry.normalized_config_json)
     dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
@@ -437,6 +466,11 @@ async def acquire_batch(registry, dt, max_entries, target_modifiers, io):
                 except Exception as exc:
                     results[spec.product_id] = ProductResult(spec.product_id, 'failed', dt.isoformat(), registry.fingerprint,
                                                             reason=f'{type(exc).__name__}: {exc}', elapsed_seconds=time.monotonic()-started)
+                if results[spec.product_id].status == 'ready' and on_committed is not None:
+                    import inspect
+                    notification = on_committed(_completion(result, record))
+                    if inspect.isawaitable(notification):
+                        await notification
         async with asyncio.TaskGroup() as group:
             for _ in range(min(len(specs), budget.limit)):
                 group.create_task(worker())
@@ -448,12 +482,12 @@ async def acquire_batch(registry, dt, max_entries, target_modifiers, io):
                                tuple(results.values()), tuple(metrics.items()))
 
 
-async def _acquire_sync_transport(registry, spec, dt, max_entries, s3, settings, deadline, io):
-    async with _product_lock(registry, spec):
-        return await _acquire_sync_unlocked(registry, spec, dt, max_entries, s3, settings, deadline, io)
+async def _acquire_sync_transport(registry, spec, dt, max_entries, s3, settings, deadline, io, discovered=None):
+    async with _product_lock(registry, spec, dt):
+        return await _acquire_sync_unlocked(registry, spec, dt, max_entries, s3, settings, deadline, io, discovered)
 
 
-async def _acquire_sync_unlocked(registry, spec, dt, max_entries, s3, settings, deadline, io):
+async def _acquire_sync_unlocked(registry, spec, dt, max_entries, s3, settings, deadline, io, discovered=None):
     """Synchronous network operations, owned by one bounded batch worker.
 
     This coroutine uses the common chunked decoder without launching any tasks
@@ -468,35 +502,42 @@ async def _acquire_sync_unlocked(registry, spec, dt, max_entries, s3, settings, 
     transport = None
     try:
         source = source_for(parse_product_id(spec.configured_id))
-        for transport in ('s3', 'https'):
+        for transport in ((discovered.source, 'https' if discovered.source == 's3' else 's3')
+                          if discovered else ('s3', 'https')):
             path = None
             try:
                 if time.monotonic() >= deadline:
                     raise TimeoutError('optional deadline expired')
-                if transport == 's3':
+                if discovered is not None:
+                    candidate = discovered if transport == discovered.source else discovered.mirror(transport)
+                    candidates = [candidate.locator]
+                elif transport == 's3':
                     if s3 is None:
                         raise RuntimeError('S3 client unavailable')
                     prefix, marker = source.listing_bounds(dt)
                     candidates = [key for key, _ in FileFinder(dt, source.bucket, max_entries, io, client=s3, raise_errors=True).lookup_files(prefix, start_after=marker)]
                 else:
                     candidates = HttpsFileFinder(dt, io, raise_errors=True, source=source, timeout_seconds=settings['ncep_https']['sync_timeout_seconds']).find_files_sync(spec.region, spec.source_modifier)
-                locator = _select(candidates, spec, dt, settings['ncep_https']['match_window_seconds'])
+                locator = _select(candidates, spec, dt, 0 if discovered else settings['ncep_https']['match_window_seconds'])
                 if locator is None:
                     continue
                 name = locator.rsplit('/', 1)[-1]
                 existing = spec.directory / (name[:-3] if name.endswith('.gz') else name)
-                if existing.is_file() and not existing.is_symlink():
+                if (existing.is_file() and not existing.is_symlink()
+                        and not (discovered and discovered.remote_version)):
                     try:
                         digest = validate_payload(existing, spec)
                     except Exception as exc:
                         quarantine(registry, existing, spec, 'local', dt, exc)
                         raise ValueError(f'Invalid existing observation: {exc}') from exc
-                    return _ready(registry, spec, dt, existing, 'local', digest, started)
+                    return _ready(registry, spec, dt, existing, 'local', digest, started, locator=locator)
                 path = stage / name
                 chunk_size = settings['ncep_https']['download_chunk_size_bytes']
                 written = 0
                 if transport == 's3':
-                    response = s3.get_object(Bucket=source.bucket, Key=locator)
+                    response = s3.get_object(Bucket=source.bucket, Key=locator,
+                                            **({('VersionId' if discovered.remote_version_kind == 'version_id' else 'IfMatch'): discovered.remote_version}
+                                               if discovered and transport == discovered.source and discovered.remote_version else {}))
                     body = response['Body']
                     expected = response.get('ContentLength')
                     chunks = body.iter_chunks(chunk_size=chunk_size)
@@ -523,7 +564,11 @@ async def _acquire_sync_unlocked(registry, spec, dt, max_entries, s3, settings, 
                 if time.monotonic() >= deadline:
                     raise TimeoutError('optional deadline expired before publication')
                 destination, reuse = publish(registry, spec, decoded, digest)
-                return _ready(registry, spec, dt, destination, reuse or transport, digest, started)
+                return _ready(registry, spec, dt, destination, reuse or transport, digest, started,
+                              locator=locator, remote_version=(discovered.remote_version
+                                  if discovered and transport == discovered.source else None))
+            except InputIdentityConflict:
+                raise
             except Exception as exc:
                 reason = f'{transport}: {type(exc).__name__}: {exc}'
                 io.write_warning(f'MRMS {spec.product_id}: {reason}')
@@ -535,7 +580,7 @@ async def _acquire_sync_unlocked(registry, spec, dt, max_entries, s3, settings, 
         shutil.rmtree(stage)
 
 
-def acquire_batch_sync(registry, dt, max_entries, target_modifiers, io):
+def acquire_batch_sync(registry, dt, max_entries, target_modifiers, io, *, on_committed=None):
     """Bounded synchronous fallback; joins every worker before returning."""
     from concurrent.futures import ThreadPoolExecutor
     from common.ingest.mrms.downloader import DownloadBatchResult
@@ -583,6 +628,8 @@ def acquire_batch_sync(registry, dt, max_entries, target_modifiers, io):
                     results[spec.product_id] = result
                     if record is not None:
                         records.append(record)
+                if record is not None and on_committed is not None:
+                    on_committed(_completion(result, record))
         with ThreadPoolExecutor(max_workers=budget.limit, thread_name_prefix='mrms') as pool:
             futures = [pool.submit(worker) for _ in range(min(len(specs), budget.limit))]
             for future in futures:
@@ -593,3 +640,54 @@ def acquire_batch_sync(registry, dt, max_entries, target_modifiers, io):
     return DownloadBatchResult(tuple(p.product_id for p in specs), tuple(records),
                                tuple(p.product_id for p in specs if results[p.product_id].status != 'ready'),
                                tuple(results.values()), tuple(metrics.items()))
+
+
+def _completion(result, record):
+    if record is None or result.status != 'ready':
+        raise RuntimeError(result.reason or f"MRMS acquisition {result.status}")
+    return CommittedInput(record, result.sha256,
+                          result.source_locator or record.path,
+                          result.remote_version,
+                          reused=result.source == 'local')
+
+
+async def acquire_object(registry, discovered, io):
+    """Acquire one exact object, with mirror fallback and no source cleanup.
+
+    The caller owns inventory retention and notification delivery. No sibling
+    task or batch must finish before this immutable completion is returned.
+    """
+    spec = registry.require(discovered.product_id)
+    settings = json.loads(registry.normalized_config_json)
+    timeout = settings['ncep_https']['sync_timeout_seconds']
+    budget = budget_for(registry)
+    duration = timeout * 4 if spec.protected else settings['downloads']['optional_timeout_seconds']
+    deadline = time.monotonic() + duration
+    config = Config(signature_version=UNSIGNED, connect_timeout=timeout, read_timeout=timeout,
+                    retries={'max_attempts': 1}, max_pool_connections=budget.limit)
+    async with asyncio.timeout(duration):
+        async with budget.slot(spec.protected):
+            async with _async_s3(config, io) as s3, aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                result, record = await _acquire(registry, spec, discovered.observation_time,
+                    1, s3, session, settings, deadline, io, discovered)
+    return _completion(result, record)
+
+
+def acquire_object_sync(registry, discovered, io):
+    """Synchronous transport fallback; all work remains owned by the caller."""
+    spec = registry.require(discovered.product_id)
+    settings = json.loads(registry.normalized_config_json)
+    timeout = settings['ncep_https']['sync_timeout_seconds']
+    budget = budget_for(registry)
+    duration = timeout * 4 if spec.protected else settings['downloads']['optional_timeout_seconds']
+    deadline = time.monotonic() + duration
+    config = Config(signature_version=UNSIGNED, connect_timeout=timeout, read_timeout=timeout,
+                    retries={'max_attempts': 1}, max_pool_connections=budget.limit)
+    with _sync_s3(config, io) as s3:
+        async def run():
+            async with asyncio.timeout(duration):
+                async with budget.slot(spec.protected):
+                    return await _acquire_sync_transport(registry, spec, discovered.observation_time,
+                        1, s3, settings, deadline, io, discovered)
+        result, record = asyncio.run(run())
+    return _completion(result, record)

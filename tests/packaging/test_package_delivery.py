@@ -44,6 +44,9 @@ def test_compose_separates_runtime_and_configuration_mounts():
         "EDGEWARN_SYNC_NWS_ZONES": "${EDGEWARN_SYNC_NWS_ZONES:-true}"
     }
 
+    assert services["edgewarn"]["command"] == [
+        "edgewarn", "run", "--config-path", "/etc/edgewarn/config"
+    ]
     production_mounts = services["edgewarn"]["volumes"]
     assert "${EDGEWARN_HOST_BASE_DIR:-./EdgeWARN_input}:/var/lib/edgewarn" in production_mounts
     assert services["edgewarn"]["environment"]["EDGEWARN_BASE_DIR"] == "/var/lib/edgewarn"

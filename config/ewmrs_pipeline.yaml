@@ -151,3 +151,16 @@ rap_uint16:
         - {name: 'RAP_VWind_{level}mb', short_names: [v], filter: {typeOfLevel: isobaricInhPa, level: '{level}'},
            units: m s-1, scale: {min: -80.0, max: 80.0},
            outdir: 'VWind_{level}mb', description: 'RAP {level} mb v-component wind', colormap_key: '{wind_colormap}'}
+
+# Independent ingest foundations; consumed by the later service cutover.
+input_jobs:
+  # Maximum pending input/layer jobs. Bound: 1..100000.
+  pending_max_jobs: 4096
+  # Maximum pending job age in minutes, matching GUI retention default. Bound: 1..10080.
+  max_age_minutes: 120
+  # Maximum attempts per input/layer job. Bound: 1..100.
+  retry_max_attempts: 3
+  # Initial retry delay in seconds. Bound: 1..300.
+  retry_initial_seconds: 5
+  # Maximum retry delay in seconds. Bound: 1..3600.
+  retry_max_seconds: 30

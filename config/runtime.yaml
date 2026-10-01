@@ -106,3 +106,51 @@ handoff:
 # Optional profiler path; null disables profiling overhead.
 profiling:
   perf_tracker: null
+
+# Independent ingest foundations; consumed by the later service cutover.
+ingest:
+  # Concurrent listing jobs; null inherits ingest.mrms.downloads.max_concurrency. Bound: 1..64.
+  listing_concurrency: null
+  # Concurrent MRMS transfers; null inherits ingest.mrms.downloads.max_concurrency. Bound: 1..64.
+  download_concurrency: null
+  # Concurrent blocking decode workers, capped by download concurrency. Bound: 1..16.
+  decode_concurrency: 2
+  # Separate RAP/GLM worker slots, one for each source by default. Bound: 1..8.
+  auxiliary_concurrency: 2
+  # Listing timeout in seconds; null inherits MRMS HTTPS timeout. Bound: 1..600.
+  listing_timeout_seconds: null
+  # MRMS job timeout in seconds; null inherits four MRMS HTTPS timeouts. Bound: 1..3600.
+  download_timeout_seconds: null
+  # RAP/GLM job timeout in seconds; null inherits four RAP NOMADS timeouts. Bound: 1..7200.
+  auxiliary_timeout_seconds: null
+  # S3 objects per page; follows every page within explicit limits. Bound: 1..1000.
+  listing_page_size: 1000
+  # Maximum pages per product refresh; overflow is an explicit error. Bound: 1..10000.
+  listing_max_pages: 100
+  # Maximum eligible objects per product refresh; overflow is an explicit error. Bound: 1..100000.
+  listing_max_objects: 4096
+  # Maximum queued acquisition jobs; overflow applies backpressure. Bound: 1..100000.
+  pending_max_jobs: 4096
+  # Maximum acquisition attempts per object, matching cycle retry default. Bound: 1..100.
+  retry_max_attempts: 3
+  # Initial retry delay in seconds, matching cycle retry default. Bound: 1..300.
+  retry_initial_seconds: 5
+  # Maximum retry delay in seconds, matching cycle retry default. Bound: 1..3600.
+  retry_max_seconds: 30
+  # Incomplete scan deadline in seconds; covers MRMS alignment window. Bound: 1..3600.
+  scan_deadline_seconds: 180
+  # Reconciliation cadence in seconds, matching discovery default. Bound: 1..3600.
+  reconcile_interval_seconds: 10
+  # Unpinned MRMS retention in minutes; null inherits MRMS cleanup age. Bound: 1..10080.
+  retention_minutes: null
+  # Raw inventory disk budget in MiB; active pins must never be deleted. Bound: 64..1048576.
+  disk_budget_mb: 8192
+  # Owned-worker termination bound in seconds. Bound: 1..600.
+  shutdown_timeout_seconds: 30
+
+# Independent ingest foundations; consumed by the later service cutover.
+consumers:
+  # Core local readiness check interval in seconds. Bound: 0.1..1.0.
+  core_readiness_seconds: 1.0
+  # EWMRS input notification check interval in seconds. Bound: 0.1..1.0.
+  ewmrs_notification_seconds: 1.0

@@ -76,6 +76,7 @@ def test_config_and_base_rebinding(tmp_path):
 
 
 def test_fresh_process_rebuilds_and_rejects_changed_config(tmp_path):
+    import os
     import subprocess
     import sys
     config = tmp_path / 'config'
@@ -92,10 +93,12 @@ fs.initialize_filesystem(sys.argv[1], config_dir=sys.argv[2], expected_mrms_fing
 assert fs.MRMS_REGISTRY.fingerprint == sys.argv[3]
 '''
     command = [sys.executable, '-c', code, str(base), str(config), fingerprint]
-    assert subprocess.run(command, capture_output=True, text=True).returncode == 0
+    env = {**os.environ, 'PYTHONPATH': os.pathsep.join(filter(None, [str(ROOT / 'src'), os.environ.get('PYTHONPATH')]))}
+    first = subprocess.run(command, capture_output=True, text=True, env=env)
+    assert first.returncode == 0, first.stderr
     doc['mrms']['products'] = []
     (config / 'ingest.yaml').write_text(yaml.safe_dump(doc))
-    changed = subprocess.run(command, capture_output=True, text=True)
+    changed = subprocess.run(command, capture_output=True, text=True, env=env)
     assert changed.returncode != 0
     assert 'fingerprint' in changed.stderr
     assert not base.exists()

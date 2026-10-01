@@ -263,3 +263,125 @@ def test_rap_uint16_pipeline_reports_missing_layer_without_failing(tmp_path):
         "seconds": None,
         "output_path": None,
     }
+
+
+def _stub_grib():
+    return (
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_grib_multi_support_on"),
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_grib_new_from_file",
+              side_effect=["msg", None]),
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_get_string",
+              side_effect=lambda gid, key: {"shortName": "2t",
+                                            "typeOfLevel": "heightAboveGround"}[key]),
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_grib_get_long",
+              create=True, side_effect=KeyError("unused")),
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_get_long",
+              side_effect=lambda gid, key: {"level": 2, "Ni": 3, "Nj": 2}[key]),
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_get_double_array",
+              side_effect=lambda gid, key: np.array([180.0, 210.0, 240.0, 270.0, 330.0, np.nan])),
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_get_double",
+              side_effect=KeyError("missingValue")),
+        patch("EWMRS.rap.uint16_pipeline.eccodes.codes_release"),
+    )
+
+
+def _layer(tmp_path, name, outdir_name):
+    return {"name": name, "colormap_key": name, "short_names": ["2t"],
+            "filter": {"typeOfLevel": "heightAboveGround", "level": 2},
+            "scale": {"min": 180.0, "max": 330.0},
+            "outdir": tmp_path / "gui" / "RAP" / outdir_name}
+
+
+def test_rap_uint16_pipeline_converts_only_the_selected_layers(tmp_path):
+    """Partial RAP success: one analysis, one selected layer, one output."""
+    import util.file as fs
+
+    fs.initialize_filesystem(tmp_path)
+    rap_file = tmp_path / "RAP.20260427-13z.awp130pgrbf00.grib2"
+    rap_file.write_bytes(b"grib")
+    selected = _layer(tmp_path, "RAP_Selected", "Selected")
+    unselected = _layer(tmp_path, "RAP_Unselected", "Unselected")
+
+    with _stub_grib()[0], _stub_grib()[1], _stub_grib()[2], _stub_grib()[4], \
+            _stub_grib()[5], _stub_grib()[6], _stub_grib()[7]:
+        results = run_rap_uint16_pipeline(rap_file, layers=[selected], cleanup=False)
+
+    assert results == {"RAP_Selected": selected["outdir"] / "20260427-130000" / "data.u16"}
+    assert results["RAP_Selected"].is_file()
+    assert not (unselected["outdir"] / "20260427-130000").exists()
+
+
+def test_rap_uint16_pipeline_reuses_a_complete_output(tmp_path):
+    import util.file as fs
+
+    fs.initialize_filesystem(tmp_path)
+    rap_file = tmp_path / "RAP.20260427-13z.awp130pgrbf00.grib2"
+    rap_file.write_bytes(b"grib")
+    layer = _layer(tmp_path, "RAP_Reused", "Reused")
+    with _stub_grib()[0], _stub_grib()[1], _stub_grib()[2], _stub_grib()[4], \
+            _stub_grib()[5], _stub_grib()[6], _stub_grib()[7]:
+        first = run_rap_uint16_pipeline(rap_file, layers=[layer], cleanup=False)
+    # A second conversion of the same analysis finds the published output and
+    # reuses it instead of rewriting identical bytes.
+    with _stub_grib()[0], _stub_grib()[1], _stub_grib()[2], _stub_grib()[4], \
+            _stub_grib()[5], _stub_grib()[6], _stub_grib()[7]:
+        timings = {}
+        second = run_rap_uint16_pipeline(rap_file, layers=[layer], timings=timings,
+                                         cleanup=False)
+    assert first == second
+    assert timings["RAP_Reused"]["status"] == "skipped_existing"
+
+
+def test_an_older_completion_does_not_move_the_latest_timestamp_backward(tmp_path):
+    from EWMRS.rap.uint16_pipeline import _update_product_index
+
+    out_dir = tmp_path / "gui" / "RAP" / "Index"
+    _update_product_index(out_dir, "20260427-130000", max_timestamps=3)
+    _update_product_index(out_dir, "20260427-120000", max_timestamps=3)
+    # A late older completion keeps the newest entry first.
+    _update_product_index(out_dir, "20260427-110000", max_timestamps=3)
+    payload = json.loads((out_dir / "index.json").read_text())
+    assert payload["timestamps"] == ["20260427-130000", "20260427-120000",
+                                     "20260427-110000"]
+
+
+def test_product_index_updates_are_serialized_between_processes(tmp_path):
+    """Two writers of the same product index must not lose a timestamp."""
+    from EWMRS.rap.uint16_pipeline import _update_product_index
+
+    out_dir = tmp_path / "gui" / "RAP" / "Index"
+    import multiprocessing
+    from EWMRS.rap.uint16_pipeline import _update_product_index as update
+
+    with multiprocessing.Pool(2) as pool:
+        pool.starmap(update, [(out_dir, "20260427-120000", 8),
+                              (out_dir, "20260427-130000", 8)])  # noqa: E501
+    payload = json.loads((out_dir / "index.json").read_text())
+    assert payload["timestamps"] == ["20260427-130000", "20260427-120000"]
+
+
+def test_cleanup_keeps_a_timestamp_an_active_job_is_writing(tmp_path, monkeypatch):
+    import util.file as fs
+    from EWMRS.rap.uint16_pipeline import cleanup_old_rap_uint16_layers
+
+    fs.initialize_filesystem(tmp_path)
+    layer_dir = Path(fs.GUI_RAP_DIR) / "Layer"
+    for stamp in ("20260427-100000", "20260427-110000", "20260427-120000",
+                  "20260427-130000"):
+        (layer_dir / stamp).mkdir(parents=True)
+    removed = cleanup_old_rap_uint16_layers(max_timestamps=1,
+                                            keep=("20260427-100000",))
+    assert (layer_dir / "20260427-100000").is_dir()
+    assert not (layer_dir / "20260427-110000").exists()
+    assert (layer_dir / "20260427-130000").is_dir()
+    assert removed == 2
+
+
+def test_rap_timestamp_label_comes_from_the_encoded_analysis(tmp_path):
+    from EWMRS.rap.uint16_pipeline import rap_timestamp_label
+
+    path = tmp_path / "RAP.20260427-13z.awp130pgrbf00.grib2"
+    path.write_bytes(b"grib")
+    assert rap_timestamp_label(path) == "20260427-130000"
+    assert rap_timestamp_label(path, datetime(2026, 1, 1, tzinfo=timezone.utc)) == \
+        "20260427-130000"

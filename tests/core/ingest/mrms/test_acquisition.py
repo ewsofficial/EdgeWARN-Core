@@ -367,3 +367,233 @@ def test_sync_deadline_joins_workers_without_late_publication(registry, monkeypa
     assert not any(t.name.startswith('mrms') for t in threading.enumerate())
     assert a.budget_for(registry).active == 0
     assert not list((registry.base_dir / 'state/mrms/staging').iterdir())
+
+
+def discovered(registry, name=NAME, transport='s3'):
+    from common.ingest.mrms.source import DiscoveredObject
+    stamp = a.parse_file_analysis_time(name)
+    source = a.source_for(a.parse_product_id('MRMS_NewProduct_01.25'))
+    locator = (source.s3_prefix(stamp) if transport == 's3' else source.https_url + '/') + name
+    return DiscoveredObject('NewProduct_01.25', stamp, transport, locator)
+
+
+def test_object_completes_while_sibling_blocked(registry, transport, monkeypatch):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = a._fetch
+    async def blocked(s3, session, source, locator, *args, **kwargs):
+        if '000200' in locator:
+            entered.set()
+            await release.wait()
+        return await original(s3, session, source, locator, *args, **kwargs)
+    monkeypatch.setattr(a, '_fetch', blocked)
+    async def run():
+        # Different products need not wait on the per-product publication lock.
+        from common.ingest.mrms.source import DiscoveredObject
+        other = DiscoveredObject('PrecipFlag_00.00', DT.replace(minute=2), 's3',
+            'CONUS/PrecipFlag_00.00/20260101/MRMS_PrecipFlag_00.00_20260101-000200.grib2.gz')
+        slow = asyncio.create_task(a.acquire_object(registry, other, MagicMock()))
+        await entered.wait()
+        first = await asyncio.wait_for(a.acquire_object(registry, discovered(registry), MagicMock()), 1)
+        assert first.record.local_path.is_file() and first.sha256
+        assert not slow.done()
+        release.set()
+        await slow
+    asyncio.run(run())
+
+
+def test_duplicate_mirrors_have_one_committed_identity(registry, transport):
+    first = asyncio.run(a.acquire_object(registry, discovered(registry), MagicMock()))
+    again = asyncio.run(a.acquire_object(registry, discovered(registry, transport='https'), MagicMock()))
+    assert first.input_id == again.input_id
+    assert again.reused
+    assert discovered(registry).logical_identity == discovered(registry, transport='https').logical_identity
+
+
+def test_corrupt_object_never_completes(registry, transport, monkeypatch):
+    async def corrupt(*args, **kwargs):
+        args[4].write_bytes(b'partial')
+    monkeypatch.setattr(a, '_fetch', corrupt)
+    with pytest.raises(RuntimeError):
+        asyncio.run(a.acquire_object(registry, discovered(registry), MagicMock()))
+    assert not registry.path_for('NewProduct_01.25').exists()
+
+
+def test_object_fallback_is_exact_not_nearest(registry, transport, monkeypatch):
+    attempted = []
+    async def fetch(s3, session, transport, locator, path, *args, **kwargs):
+        attempted.append((transport, locator))
+        if transport == 's3':
+            raise OSError('S3 unavailable')
+        path.write_bytes(gzip.compress(grib()))
+    monkeypatch.setattr(a, '_fetch', fetch)
+    result = asyncio.run(a.acquire_object(registry, discovered(registry), MagicMock()))
+    assert result.record.source == 'https'
+    assert result.source_locator == attempted[1][1]
+    assert [source for source, _ in attempted] == ['s3', 'https']
+    assert all(locator.endswith(NAME) for _, locator in attempted)
+
+
+def test_probsevere_object_json(registry, transport, monkeypatch):
+    from common.ingest.mrms.source import DiscoveredObject
+    async def fetch(s3, session, transport, locator, path, *args, **kwargs):
+        path.write_text('{"type":"FeatureCollection","features":[]}')
+    monkeypatch.setattr(a, '_fetch', fetch)
+    obj = DiscoveredObject('ProbSevere', DT, 's3',
+                           'ProbSevere/20260101/MRMS_PROBSEVERE_20260101_000000.json')
+    result = asyncio.run(a.acquire_object(registry, obj, MagicMock()))
+    assert result.record.product == 'ProbSevere'
+    assert result.record.analysis_time == DT
+
+
+def test_sync_object_completion(registry, monkeypatch):
+    import boto3
+    payload = gzip.compress(grib())
+    class SyncBody:
+        def iter_chunks(self, **kwargs): yield payload
+        def close(self): pass
+    class Client:
+        def get_object(self, **kwargs): return {'Body': SyncBody(), 'ContentLength': len(payload)}
+        def close(self): pass
+    monkeypatch.setattr(boto3, 'client', lambda *args, **kwargs: Client())
+    result = a.acquire_object_sync(registry, discovered(registry), MagicMock())
+    assert result.record.local_path.read_bytes() == grib()
+
+
+@pytest.mark.parametrize('sync', [False, True])
+def test_discovery_follows_pages_across_day_boundary(registry, sync):
+    from datetime import timedelta
+    from common.ingest.mrms.discovery import discover_objects, discover_objects_sync
+    older = discovered(registry, NAME.replace('20260101-000000', '20251231-235800'))
+    current = discovered(registry)
+    later = discovered(registry, NAME.replace('000000', '000200'))
+    pages = [
+        {'Contents': [{'Key': older.locator, 'ETag': 'v1'}]},
+        {'Contents': [{'Key': current.locator, 'ETag': 'v2'}]},
+        {'Contents': [{'Key': later.locator, 'ETag': 'v3'}]},
+    ]
+    seen = []
+    class Paginator:
+        def paginate(self, **kwargs):
+            seen.append(kwargs)
+            subset = [p for p in pages if p['Contents'][0]['Key'].startswith(kwargs['Prefix'])]
+            if sync:
+                return iter(subset)
+            async def iterate():
+                for page in subset: yield page
+            return iterate()
+    client = MagicMock()
+    client.get_paginator.return_value = Paginator()
+    args = (registry.require('NewProduct_01.25'), DT-timedelta(minutes=3), DT+timedelta(minutes=2))
+    kwargs = dict(s3=client, io=MagicMock(), max_objects=10, max_pages=10, page_size=1, timeout_seconds=1)
+    result = discover_objects_sync(*args, **kwargs) if sync else asyncio.run(discover_objects(*args, **kwargs))
+    assert [o.observation_time for o in result] == [older.observation_time, DT, later.observation_time]
+    assert [o.remote_version for o in result] == ['v1', 'v2', 'v3']
+    assert len(seen) == 2
+    assert all(k['PaginationConfig']['PageSize'] == 1 for k in seen)
+
+
+@pytest.mark.parametrize('bound', ['max_objects', 'max_pages'])
+def test_discovery_overflow_is_explicit(registry, bound):
+    from datetime import timedelta
+    from common.ingest.mrms.discovery import discover_objects, ListingLimitExceeded
+    objects = [discovered(registry), discovered(registry, NAME.replace('000000', '000200'))]
+    class Paginator:
+        async def paginate(self, **kwargs):
+            for obj in objects:
+                yield {'Contents': [{'Key': obj.locator}]}
+    client = MagicMock()
+    client.get_paginator.return_value = Paginator()
+    kwargs = dict(s3=client, io=MagicMock(), max_objects=10, max_pages=10, page_size=1, timeout_seconds=1)
+    kwargs[bound] = 1
+    with pytest.raises(ListingLimitExceeded):
+        asyncio.run(discover_objects(registry.require('NewProduct_01.25'), DT, DT+timedelta(minutes=2), **kwargs))
+
+
+def test_discovery_https_window_includes_late_previous_day(registry, monkeypatch):
+    from datetime import timedelta
+    from common.ingest.mrms.discovery import discover_objects
+    older = discovered(registry, NAME.replace('20260101-000000', '20251231-235800'), 'https')
+    current = discovered(registry, transport='https')
+    async def listing(self, *args):
+        return [older.locator, current.locator, current.locator]
+    monkeypatch.setattr(a.HttpsFileFinder, 'find_files', listing)
+    result = asyncio.run(discover_objects(registry.require('NewProduct_01.25'),
+        DT-timedelta(minutes=3), DT, s3=None, io=MagicMock(), max_objects=10,
+        max_pages=10, page_size=10, timeout_seconds=1))
+    assert [o.logical_identity for o in result] == [older.logical_identity, current.logical_identity]
+
+
+def test_batch_notifies_before_sibling_finishes(registry, transport, monkeypatch):
+    release = asyncio.Event()
+    completed = asyncio.Event()
+    original = a._acquire
+    async def acquire(*args, **kwargs):
+        if args[1].product_id == 'PrecipFlag_00.00':
+            await release.wait()
+        return await original(*args, **kwargs)
+    monkeypatch.setattr(a, '_acquire', acquire)
+    async def run():
+        task = asyncio.create_task(a.acquire_batch(registry, DT, 10,
+            ['NewProduct_01.25', 'PrecipFlag_00.00'], MagicMock(),
+            on_committed=lambda result: completed.set()))
+        await asyncio.wait_for(completed.wait(), 1)
+        assert not task.done()
+        release.set()
+        await task
+    asyncio.run(run())
+
+
+def test_upstream_revision_conflict_does_not_fall_back_or_complete(registry, transport, monkeypatch):
+    from dataclasses import replace
+    first = asyncio.run(a.acquire_object(registry, discovered(registry), MagicMock()))
+    calls = []
+    async def changed(s3, session, source, locator, path, *args, **kwargs):
+        calls.append(source)
+        path.write_bytes(gzip.compress(grib() * 2))
+    monkeypatch.setattr(a, '_fetch', changed)
+    with pytest.raises(a.InputIdentityConflict, match='Conflicting'):
+        asyncio.run(a.acquire_object(registry, replace(discovered(registry), remote_version='new-etag'), MagicMock()))
+    assert calls == ['s3']
+    assert first.record.local_path.read_bytes() == grib()
+
+
+def test_same_product_observations_complete_independently(registry, transport, monkeypatch):
+    from common.ingest.mrms.source import DiscoveredObject
+    product = 'PrecipFlag_00.00'
+    def obj(minute):
+        stamp = DT.replace(minute=minute)
+        return DiscoveredObject(product, stamp, 's3',
+            'CONUS/PrecipFlag_00.00/20260101/' +
+            f'MRMS_PrecipFlag_00.00_20260101-00{minute:02d}00.grib2.gz')
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = a._fetch
+    async def slow(s3, session, source, locator, *args, **kwargs):
+        if '000200' in locator:
+            entered.set()
+            await release.wait()
+        return await original(s3, session, source, locator, *args, **kwargs)
+    monkeypatch.setattr(a, '_fetch', slow)
+    async def run():
+        sibling = asyncio.create_task(a.acquire_object(registry, obj(2), MagicMock()))
+        await entered.wait()
+        first = await asyncio.wait_for(a.acquire_object(registry, obj(0), MagicMock()), 1)
+        assert first.record.analysis_time == DT and not sibling.done()
+        release.set()
+        await sibling
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('kind,parameter', [('etag', 'IfMatch'), ('version_id', 'VersionId')])
+def test_remote_version_uses_correct_s3_constraint(registry, transport, monkeypatch, kind, parameter):
+    from dataclasses import replace
+    calls = []
+    original = S3.get_object
+    async def fetch(self, **kwargs):
+        calls.append(kwargs)
+        return await original(self, **kwargs)
+    monkeypatch.setattr(S3, 'get_object', fetch)
+    obj = replace(discovered(registry), remote_version='remote-version', remote_version_kind=kind)
+    completed = asyncio.run(a.acquire_object(registry, obj, MagicMock()))
+    assert calls[0][parameter] == 'remote-version'
+    assert completed.remote_version == 'remote-version'

@@ -97,3 +97,13 @@ also removed. These paths now return `404 Not Found`, without redirects or
 deprecation headers. Clients must use the v3 resources documented above.
 The operational `/health/live` and `/health/ready` endpoints, root discovery,
 and `/robots.txt` remain available.
+
+## Service diagnostics
+
+`/health/ready` reports `services.ingest`, `services.edgewarn`, `services.ewmrs`,
+and `services.nexrad`, each with `state`, `phase`, `lastSeen`, and
+`degradedChildren`. States are `active`, `stale`, `disabled`, `degraded`, or
+`unsupported-schema`. Readiness still depends on the runtime directories.
+Ingest has no route ownership: its outage does not gate already published
+artifacts. Core, EWMRS, and NEXRAD retain their existing route gates.
+`/health/live` describes API liveness and configuration, without a services block.

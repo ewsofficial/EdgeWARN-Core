@@ -165,3 +165,69 @@ def test_invalid_rap_age_environment_override(monkeypatch, value):
     monkeypatch.setenv(synoptic_config.RAP_MAX_AGE_ENV, value)
     with pytest.raises(ValueError, match="must be a non-negative integer"):
         synoptic_config.get_rap_max_age_minutes()
+
+
+@pytest.mark.asyncio
+async def test_committed_rap_reuse_has_one_identity_and_defers_cleanup(tmp_path, monkeypatch):
+    import base64
+    from pathlib import Path
+    from datetime import timedelta
+    raw = base64.b64decode((Path(__file__).parents[3] / 'fixtures/weather/rap.grib2.b64').read_text())
+    monkeypatch.setattr(synoptic_main.fs, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(synoptic_main.fs, 'RAP_DIR', tmp_path / 'rap')
+    path = tmp_path / 'rap' / _rap_name(13)
+    path.parent.mkdir()
+    async def download(dt, *, preserve_existing):
+        assert preserve_existing
+        if not path.exists(): path.write_bytes(raw)
+        return path
+    monkeypatch.setattr(synoptic_main, '_download_rap', download)
+    monkeypatch.setattr(synoptic_main, '_async_clean_rap_cache', AsyncMock(side_effect=AssertionError('inventory owns cleanup')))
+    first = await synoptic_main.acquire_rap_input(DT)
+    second = await synoptic_main.acquire_rap_input(DT + timedelta(minutes=2))
+    assert first.input_id == second.input_id
+    assert first.record.analysis_time == DT.replace(minute=0)
+    assert not first.reused and second.reused
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['corrupt', 'stale', 'future'])
+async def test_committed_rap_rejects_invalid_input(tmp_path, monkeypatch, case):
+    import base64
+    from pathlib import Path
+    raw = base64.b64decode((Path(__file__).parents[3] / 'fixtures/weather/rap.grib2.b64').read_text())
+    monkeypatch.setattr(synoptic_main.fs, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(synoptic_main.fs, 'RAP_DIR', tmp_path)
+    path = tmp_path / _rap_name(9 if case == 'stale' else 14 if case == 'future' else 13)
+    path.write_bytes(b'partial' if case == 'corrupt' else raw)
+    monkeypatch.setattr(synoptic_main, '_download_rap', AsyncMock(return_value=path))
+    with pytest.raises(ValueError):
+        await synoptic_main.acquire_rap_input(DT)
+
+
+@pytest.mark.asyncio
+async def test_realtime_rap_preserves_corrupt_local_input_for_inventory(tmp_path, monkeypatch):
+    monkeypatch.setattr(synoptic_main.fs, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(synoptic_main.fs, 'RAP_DIR', tmp_path)
+    path = tmp_path / _rap_name(13)
+    path.write_bytes(b'partial')
+    with pytest.raises(ValueError, match='inventory owns repair'):
+        await synoptic_main.acquire_rap_input(DT)
+    assert path.read_bytes() == b'partial'
+
+
+@pytest.mark.asyncio
+async def test_realtime_rap_rejects_escaped_directory_before_acquisition(tmp_path, monkeypatch):
+    base = tmp_path / 'runtime'
+    base.mkdir()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    directory = base / 'rap'
+    directory.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(synoptic_main.fs, 'BASE_DIR', base)
+    monkeypatch.setattr(synoptic_main.fs, 'RAP_DIR', directory)
+    download = AsyncMock(side_effect=AssertionError('acquisition must not start'))
+    monkeypatch.setattr(synoptic_main, '_download_rap', download)
+    with pytest.raises(ValueError, match='directory escapes'):
+        await synoptic_main.acquire_rap_input(DT)
+    download.assert_not_called()
