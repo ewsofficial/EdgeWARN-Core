@@ -1,5 +1,13 @@
 # Independent ingest and incremental rendering: phases 4–6 implementation report
 
+> Follow-up: launcher wiring now includes ingest in package/default supervised
+> topologies, retains it in MRMS-only mode, and checks producer ownership,
+> shared roots, GLM options, and durable handoff before startup. EWMRS now uses
+> its resolved GLM option for the dependency fingerprint. The health schema and
+> operator docs are updated. This report below records the original phases 4–6
+> state; phase 8 release qualification and external report-reader audits remain.
+> `/health/ready` reports four services; `/health/live` has no service block.
+
 Date: 2026-09-30
 Branch: `yuchen-wei3667/decoupled-ingest`
 Plan: [`plans/independent-ingest-incremental-rendering-plan.md`](plans/independent-ingest-incremental-rendering-plan.md)
@@ -451,3 +459,23 @@ The `multiprocessing.Manager()` used by the Core cycle and by the new
 cross-process index-serialization test needs local manager sockets. They work in
 this environment. The phase-3 note records that they were blocked by a sandbox
 elsewhere, so CI should confirm they run outside one.
+
+## Follow-up verification — launcher and agreement fixes (2026-09-30)
+
+- Package dispatch tests: 37 passed, including all five modes and ingest-scoped
+  GLM option propagation.
+- Launcher tests: 29 passed, including MRMS-only topology, preflight rejection,
+  producer-only shutdown, and descendant cleanup.
+- EWMRS registration/dependency tests: 6 passed; input consumer tests: 19 passed.
+- Architecture suite: 243 passed outside the sandbox. The sandboxed broad run
+  stalled in the architecture suite and was interrupted.
+- Packaging suite passed its active tests; the opt-in container smoke test was
+  skipped. The updated installed-wheel suite passed all 6 tests, including
+  `run_ingest` module availability and `edgewarn run ingest --help`.
+- API service registry/OpenAPI tests: 14 passed outside the sandbox, which
+  otherwise prevents Supertest from binding local sockets.
+
+GLM remains an explicit no-mapping input. RAP retains the configured layer
+catalog and bounded job admission. No external operator tooling was available
+for auditing retired realtime report readers. No runtime deployment or phase 8
+release qualification was performed.

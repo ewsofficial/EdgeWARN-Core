@@ -134,13 +134,14 @@ the runtime filesystem.
 
 | Command | Selected services |
 | --- | --- |
-| `edgewarn run` | Primary EdgeWARN, EWMRS/accessories, and NEXRAD |
-| `edgewarn run core` | Primary EdgeWARN only |
-| `edgewarn run ewmrs` | Primary EdgeWARN producer followed by EWMRS/accessories |
+| `edgewarn run` | Ingest, Core, EWMRS/accessories, and NEXRAD |
+| `edgewarn run core` | Ingest and Core |
+| `edgewarn run ewmrs` | Ingest, Core, and EWMRS/accessories |
+| `edgewarn run ingest` | MRMS, RAP, and scan-time GLM acquisition only |
 | `edgewarn run nexrad` | NEXRAD Level-II ingest and NEXRAD rendering |
 
-The EWMRS consumer requires products from the primary service, so `ewmrs`
-intentionally starts both. NEXRAD's launcher owns both of its supervised
+EWMRS consumes ingest notifications independently of Core. The `ewmrs` package
+mode retains Core analysis for compatibility. NEXRAD's launcher owns both of its supervised
 children; it is not ingest-only.
 
 Use `--config-path` to select a complete deployed tree. Forward launcher flags
@@ -164,12 +165,14 @@ the single resolved configuration path itself.
 
 ### Direct source commands
 
-Three independently operable services run from `src/`. Start each in its own
+Four independently operable services run from `src/`. Start each in its own
 shell, service unit, or container; all of them share the configured runtime
 base directory.
 
 ```bash
 cd src
+# Independent acquisition (start in its own shell before consumers):
+python run_ingest.py
 # Primary EdgeWARN service (latency-sensitive analysis cycle):
 python run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
 # EWMRS/accessory service (renders, GOES ABI, METAR/NWS/WPC):
@@ -182,8 +185,8 @@ An optional supervisor starts any subset with one command (it performs no
 ingest, rendering, or coordination work itself):
 
 ```bash
-python run_all.py                                # all three services
-python run_all.py --services edgewarn,ewmrs      # a subset
+python run_all.py                                # all four services
+python run_all.py --services ingest,edgewarn,ewmrs      # a subset
 ```
 
 `run.py` is retired and exits with instructions rather than silently starting
@@ -534,3 +537,22 @@ Historical processing writes its raw cache and generated artifacts beneath
 and API indexes; realtime artifacts at the parent root are not overwritten.
 See [phase readiness and replay](docs/core/configurable-mrms-phase5.md) for
 input leases, optional-completion behavior, and immutable ingest reports.
+
+### Independent ingest agreement
+
+Supervised Core/EWMRS topologies must include exactly one `ingest` service.
+Use `python run_all.py --services ingest,ewmrs` to render with Core stopped.
+Direct `run_edgewarn.py` and `run_ewmrs.py` require a separately managed
+`run_ingest.py` sharing the complete config tree, runtime root, and dependency
+options. Without it they wait with producer diagnostics. The supervisor stops
+all siblings when any child exits; separate service units provide isolation.
+
+`--args ingest '["--disable-goes"]'` propagates GLM disablement to Core and
+EWMRS. Conflicting explicit values or worker runtime roots fail before startup.
+A base directory supplied for one worker applies to the entire topology.
+MRMS-only mode keeps ingest and Core. Durable handoff must be enabled.
+
+Realtime `state/realtime/ingest-reports` snapshots are retired. Monitor
+`state/realtime/ingest/v1/` readiness/outbox records and `poll-status.json`
+instead. Historical ingest reports remain supported. No repository reader uses
+the retired realtime directory; external operator tools must be audited at cutover.

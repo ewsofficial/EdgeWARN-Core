@@ -1,5 +1,9 @@
 # Configurable MRMS phase 5: readiness and replay
 
+> Realtime migration: the independent ingest path no longer writes the realtime
+> report snapshots described below. Use `state/realtime/ingest/v1/` readiness
+> records and `poll-status.json`. Historical snapshots remain supported.
+
 Detection and base Core integration no longer wait for the optional MRMS
 batch. Detection checks every expected protected identity, current role,
 validation result, and analysis timestamp. EWMRS receives one best-effort

@@ -34,7 +34,7 @@ def register_ewmrs_accessories(
     """Add every EWMRS-owned child loop to *supervisor*.
 
     ``goes_ingest_enabled`` gates ABI ingest only; scan-time GLM is acquired by
-    the independent ingest service and rendered by EWMRS's own GOES ABI loop.
+    the independent ingest service for Core integration; it has no ABI layer.
     Accessory loops are optional inputs — stopping one degrades those inputs
     visibly without blocking other products, and a crash-looped child is
     reported as a degraded entry in the EWMRS heartbeat rather than hidden.
@@ -77,6 +77,6 @@ def register_ewmrs_accessories(
         "EWMRS Consumer", ewmrs_consumer_loop,
         enabled=consumer_enabled,
         args=(base_dir, child_log_queue),
-        kwargs={"run_id": run_id},
+        kwargs={"run_id": run_id, "disable_goes": not goes_ingest_enabled},
         daemon=False,
     )

@@ -1,10 +1,9 @@
 # Independent ingest polling and incremental EWMRS rendering
 
-Status: phases 1–6 implemented and verified; phases 7–8 remain pending.
-The producer, Core consumer, and EWMRS consumer exist and are tested, but the
-independent realtime topology is not yet *deployed*: `edgewarn run ingest`,
-container wiring, and the coordinated cutover are phase 7–8 work. Until then the
-released command set still launches the old acquisition path.
+Status: phases 1–6 implemented and verified; phase 7 launcher, dependency
+agreement, container command, and health documentation fixes are implemented.
+Phase 8 coordinated cutover and release qualification remain pending. Package
+commands now start the independent ingestor before their consumers.
 
 ## 1. Required outcome
 

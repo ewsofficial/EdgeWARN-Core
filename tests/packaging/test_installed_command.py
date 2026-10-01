@@ -230,3 +230,11 @@ def test_installed_mrms_apply_and_rollback_with_node(installed_command):
         assert json.loads(result.stdout)['status'] == expected
     assert (config / 'ingest.yaml').read_bytes() == before
     assert (source / 'scan.grib2').read_bytes() == b'fixture'
+
+
+def test_wheel_includes_ingest_worker_and_mode(installed_command):
+    root, python, edgewarn = installed_command
+    result = _run([edgewarn, "run", "ingest", "--help"], cwd=root)
+    assert result.returncode == 0, result.stderr
+    probe = _run([python, "-c", "import importlib.util; assert importlib.util.find_spec('run_ingest') is not None"], cwd=root)
+    assert probe.returncode == 0, probe.stderr

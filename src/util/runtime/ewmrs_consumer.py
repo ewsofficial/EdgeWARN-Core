@@ -179,8 +179,8 @@ class InputRenderConsumer:
             from EWMRS.rap.config import get_rap_uint16_layers
 
             return tuple(sorted(str(layer["name"]) for layer in get_rap_uint16_layers()))
-        # GOES/GLM rendering stays with the EWMRS GOES ABI loop, so a scan-time
-        # GLM input has no layer mapping here and is acknowledged as such.
+        # Scan-time GLM is a Core integration input, not an ABI channel.
+        # It has no render mapping and receives an explicit acknowledgment.
         return ()
 
     def layer_definition(self, name, record):
@@ -429,7 +429,7 @@ class InputRenderConsumer:
             self._pool = None
 
 
-def ewmrs_consumer_loop(base_dir, log_queue, *, stop_event=None, run_id=None):
+def ewmrs_consumer_loop(base_dir, log_queue, *, stop_event=None, run_id=None, disable_goes=False):
     """Supervised child target: render every notified input until stopped.
 
     ``stop_event`` is optional; without it the loop runs until SIGTERM (whose
@@ -450,7 +450,7 @@ def ewmrs_consumer_loop(base_dir, log_queue, *, stop_event=None, run_id=None):
 
     import util.file as fs
 
-    dependencies = get_ingest_dependencies()
+    dependencies = get_ingest_dependencies(disable_goes=disable_goes)
     consumer = InputRenderConsumer(
         base_dir, run_id=run_id or "ewmrs", dependencies=dependencies,
         log=lambda msg: queue_log(log_queue, str(msg)))

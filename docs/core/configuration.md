@@ -161,3 +161,16 @@ readiness. Phase-one baselines live in
 `tests/config_baseline/independent_ingest_{dependencies,settings}.json`;
 `tests/fixtures/ingest/source_arrivals.json` defines missing-check, delayed-layer,
 reused-RAP and disabled-GLM scenarios for subsequent phases.
+
+### Independent input rendering
+
+Scan-time GLM is a Core integration input and receives an explicit `no-mapping`
+render acknowledgment. GOES ABI acquisition/rendering remains owned by EWMRS;
+GLM arrivals do not represent an ABI channel.
+
+Each RAP analysis maps to the configured `ewmrs_pipeline.rap_uint16` layer catalog
+(including templates). The consumer shares one pinned analysis and admits
+per-layer work within `ewmrs_pipeline.input_jobs.pending_max_jobs`, retrying
+failures independently. Size this bound for the configured catalog (currently
+about 46 layers per RAP arrival). Change the configured layers/templates to
+change the rendered set; do not silently omit advertised RAP products.

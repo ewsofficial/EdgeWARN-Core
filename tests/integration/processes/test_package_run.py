@@ -23,9 +23,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def test_topology_table_is_complete_and_ordered():
     assert dict(package_run.TOPOLOGIES) == {
-        "all": ("edgewarn", "ewmrs", "nexrad"),
-        "core": ("edgewarn",),
-        "ewmrs": ("edgewarn", "ewmrs"),
+        "all": ("ingest", "edgewarn", "ewmrs", "nexrad"),
+        "core": ("ingest", "edgewarn"),
+        "ewmrs": ("ingest", "edgewarn", "ewmrs"),
+        "ingest": ("ingest",),
         "nexrad": ("nexrad",),
     }
 
@@ -170,7 +171,7 @@ def test_dispatch_validates_before_building_and_scopes_worker_argv(monkeypatch, 
     )
     monkeypatch.setattr(
         config_loader, "load_config",
-        lambda *args, **kwargs: {"run": {
+        lambda *args, **kwargs: {"handoff": {"enabled": True}, "run": {
             "disable_ctam": False, "disable_stormprob": False,
             "ctam_module_dir": "modules",
         }},
@@ -220,13 +221,13 @@ def test_dispatch_validates_before_building_and_scopes_worker_argv(monkeypatch, 
     ]
     assert events[3][0:4] == (
         "build",
-        ("edgewarn", "ewmrs"),
+        ("ingest", "edgewarn", "ewmrs"),
         {"edgewarn": ("--profile",), "ewmrs": ("--disable-wpc",)},
         str(tmp_path.resolve()),
     )
     assert events[4] == (
         "supervise",
-        {"edgewarn": ["edgewarn"], "ewmrs": ["ewmrs"]},
+        {"ingest": ["ingest"], "edgewarn": ["edgewarn"], "ewmrs": ["ewmrs"]},
     )
 
 
@@ -240,7 +241,7 @@ def test_dispatch_resolves_persisted_topology_before_building(monkeypatch, tmp_p
     monkeypatch.setattr(config_loader, "validate_all_configs", lambda **_kwargs: None)
     monkeypatch.setattr(
         config_loader, "load_config",
-        lambda *args, **kwargs: {"run": {
+        lambda *args, **kwargs: {"handoff": {"enabled": True}, "run": {
             "disable_ctam": False, "disable_stormprob": False,
             "ctam_module_dir": "modules",
         }},
@@ -254,7 +255,7 @@ def test_dispatch_resolves_persisted_topology_before_building(monkeypatch, tmp_p
         "common.config.overlay.resolve_base_dir", lambda *_args, **_kwargs: tmp_path / "runtime"
     )
     monkeypatch.setattr(
-        run_all, "resolve_services", lambda args, requested: ["edgewarn"]
+        run_all, "resolve_services", lambda args, requested: ["ingest", "edgewarn"]
     )
     monkeypatch.setattr(
         run_all,
@@ -264,7 +265,7 @@ def test_dispatch_resolves_persisted_topology_before_building(monkeypatch, tmp_p
     monkeypatch.setattr(run_all, "supervise", lambda commands, *, src_root: 0)
 
     assert cli.main(["run", "all", "--config-path", str(tmp_path)]) == 0
-    assert events == [("edgewarn",)]
+    assert events == [("ingest", "edgewarn")]
 
 
 def test_missing_config_exits_two_before_command_construction(monkeypatch, tmp_path):
@@ -349,6 +350,7 @@ def test_sigterm_to_package_runner_is_forwarded_and_reaped(tmp_path):
         f"sys.path.insert(0, {str(REPO_ROOT / 'src')!r})\n"
         "import run_all\n"
         f"run_all.SERVICE_SCRIPTS['edgewarn'] = {str(sleeper)!r}\n"
+        f"run_all.SERVICE_SCRIPTS['ingest'] = {str(sleeper)!r}\n"
         "from edgewarn_cli.main import main\n"
         f"sys.exit(main(['run', 'core', '--config-path', {str(REPO_ROOT / 'config')!r}]))\n",
         encoding="utf-8",
@@ -368,3 +370,24 @@ def test_sigterm_to_package_runner_is_forwarded_and_reaped(tmp_path):
         if proc.poll() is None:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         raise
+
+
+@pytest.mark.parametrize("mode", ["all", "core", "ewmrs", "ingest", "nexrad"])
+def test_package_modes_launch_the_complete_topology(mode, monkeypatch, tmp_path):
+    launched = []
+    monkeypatch.setattr("EdgeWARN.ctam.preflight.check_core_startup", lambda **_kwargs: None)
+    monkeypatch.setenv("EDGEWARN_BASE_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setattr(run_all, "supervise", lambda commands, **_kwargs: launched.append(commands) or 0)
+    assert cli.main(["run", mode, "--config-path", str(REPO_ROOT / "config")]) == 0
+    assert tuple(launched[0]) == package_run.TOPOLOGIES[mode]
+    assert not (tmp_path / "runtime").exists()
+
+
+def test_package_ingest_args_propagate_dependencies_before_launch(monkeypatch, tmp_path):
+    launched = []
+    monkeypatch.setattr("EdgeWARN.ctam.preflight.check_core_startup", lambda **_kwargs: None)
+    monkeypatch.setenv("EDGEWARN_BASE_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setattr(run_all, "supervise", lambda commands, **_kwargs: launched.append(commands) or 0)
+    assert cli.main(["run", "ewmrs", "--config-path", str(REPO_ROOT / "config"),
+                     "--args", "ingest", '["--disable-goes"]']) == 0
+    assert all("--disable-goes" in command for command in launched[0].values())
