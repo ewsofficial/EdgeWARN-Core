@@ -239,6 +239,24 @@ def test_integration_publication_commits_db_before_json_index(tmp_path, monkeypa
     assert StormProbRepository(tmp_path).index_projection()[0] == ["20240501-120000"]
 
 
+@pytest.mark.parametrize("disable_stormprob, retained", [(False, False), (True, True)])
+def test_publication_prunes_inactive_stormprob_only_when_enabled(
+        tmp_path, monkeypatch, disable_stormprob, retained):
+    import util.file as fs
+    from EdgeWARN.process.integrate import pipeline
+
+    monkeypatch.setattr(fs, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(fs, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(fs, "CELL_DIR", tmp_path / "data" / "cells")
+    monkeypatch.setattr(fs, "STORMCELL_DIR", tmp_path / "data" / "stormcells")
+    monkeypatch.setattr(pipeline, "_update_api_indexes", lambda *args: None)
+    snapshot = fs.STORMCELL_DIR / "stormcells_20240501-120000.json"
+    cell = _cell()
+    pipeline._publish_cycle(None, cell["timestamp"], [cell], snapshot, True,
+                            disable_stormprob=disable_stormprob)
+    assert bool(StormProbRepository(tmp_path).feature_history(101)) is retained
+
+
 def test_pending_recovery_projection_lists_only_restored_files(tmp_path, monkeypatch):
     repo = StormProbRepository(tmp_path)
     cell = _cell()

@@ -595,7 +595,7 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
         stormprob_inactive_cell_max_age_minutes,
     )
     prune_inactive = remove_old_cells_realtime() if remove_old_cells is None else remove_old_cells
-    if prune_inactive:
+    if prune_inactive and not disable_stormprob:
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=stormprob_inactive_cell_max_age_minutes())
         try:
             (
