@@ -92,7 +92,7 @@
         "production_version_label": "2.x",
         "request_timeout_ms": 30000,
         "service_stale_after_seconds": 30,
-        "v3_api_version": "3.0.1"
+        "v3_api_version": "3.0.2"
       },
       "validation": {
         "radar_products": [
@@ -116,7 +116,8 @@
         "remove_old_cells": {
           "historical": false,
           "realtime": true
-        }
+        },
+        "stormprob_inactive_cell_max_age_minutes": 20
       },
       "schema_version": 1
     },
