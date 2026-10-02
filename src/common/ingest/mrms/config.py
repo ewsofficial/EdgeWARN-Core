@@ -391,8 +391,15 @@ def normalize_goes_modifier(spec):
 
 
 def get_ingest_dependencies(*, include_rap=True, include_glm=True,
-                            mrms_core_only=False, disable_goes=False):
-    """Freeze the effective catalog/overlay agreement before starting workers."""
+                            mrms_core_only=False, disable_goes=False,
+                            disable_ctam=False, disable_stormprob=False):
+    """Freeze the effective catalog/overlay agreement before starting workers.
+
+    ``disable_ctam``/``disable_stormprob`` are dependency-shared like
+    ``disable_goes``: with both false, every StormProb MRMS source is a
+    mandatory integration input, and producer and consumers must pass the same
+    values or their fingerprints disagree.
+    """
     from common.ingest.mrms.core_contract import resolve_dependencies
     registry = get_registry()
     if registry is None:
@@ -403,7 +410,8 @@ def get_ingest_dependencies(*, include_rap=True, include_glm=True,
     return resolve_dependencies(registry, enrichment=enrichment, include_rap=include_rap,
                                 include_glm=include_glm, mrms_core_only=mrms_core_only,
                                 disable_goes=disable_goes,
-                                auxiliary_settings=ingest_auxiliary_settings(config_dir=fs.MRMS_CONFIG_DIR))
+                                auxiliary_settings=ingest_auxiliary_settings(config_dir=fs.MRMS_CONFIG_DIR),
+                                require_stormprob_inputs=not (disable_ctam or disable_stormprob))
 
 
 def get_ingest_settings(*, config_dir=None):

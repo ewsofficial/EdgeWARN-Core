@@ -137,10 +137,11 @@
   {
     "name": "RAP_MSLP_Surface",
     "short_names": [
+      "mslma",
       "prmsl"
     ],
     "filter": {
-      "typeOfLevel": "surface",
+      "typeOfLevel": "meanSea",
       "level": 0
     },
     "units": "Pa",
@@ -149,7 +150,7 @@
       "max": 105000.0
     },
     "outdir": "base:gui/RAP/MSLP_Surface",
-    "description": "RAP surface mean sea level pressure"
+    "description": "RAP mean sea level pressure (MAPS system reduction)"
   },
   {
     "name": "RAP_SnowWaterEquivalent_Surface",

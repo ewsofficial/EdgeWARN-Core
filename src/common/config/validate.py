@@ -20,8 +20,16 @@ def main() -> int:
             failures += 1
         else:
             print(f"OK   {name}")
+    if not failures:
+        try:
+            config_loader.validate_catalog_invariants()
+        except config_loader.ConfigError as exc:
+            print(f"FAIL catalog invariants -> {exc}")
+            failures += 1
+        else:
+            print("OK   catalog invariants")
     if failures:
-        print(f"{failures}/{len(config_loader.CONFIG_NAMES)} config file(s) failed validation")
+        print(f"{failures} config validation check(s) failed")
         return 1
     print(f"All {len(config_loader.CONFIG_NAMES)} config files passed validation")
     return 0

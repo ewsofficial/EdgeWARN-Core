@@ -74,9 +74,10 @@ rap_uint16:
     - {name: RAP_ThetaE_Surface, short_names: [papt], filter: {typeOfLevel: surface, level: 0},
        units: K, scale: {min: 250.0, max: 390.0},
        outdir: ThetaE_Surface, description: RAP surface pseudo-adiabatic potential temperature, colormap_key: RAP_ThetaE_Surface}
-    - {name: RAP_MSLP_Surface, short_names: [prmsl], filter: {typeOfLevel: surface, level: 0},
+    # RAP awp130 carries MSLP as mslma (MAPS reduction) at meanSea; prmsl is kept as a fallback name.
+    - {name: RAP_MSLP_Surface, short_names: [mslma, prmsl], filter: {typeOfLevel: meanSea, level: 0},
        units: Pa, scale: {min: 95000.0, max: 105000.0},
-       outdir: MSLP_Surface, description: RAP surface mean sea level pressure}
+       outdir: MSLP_Surface, description: RAP mean sea level pressure (MAPS system reduction)}
     - {name: RAP_SnowWaterEquivalent_Surface, short_names: [sdwe], filter: {typeOfLevel: surface, level: 0},
        units: kg m-2, scale: {min: 0.0, max: 200.0},
        outdir: SnowWaterEquivalent_Surface, description: RAP snow water equivalent, colormap_key: RAP_SnowWaterEquivalent_Surface}

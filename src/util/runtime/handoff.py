@@ -106,8 +106,29 @@ def primary_lease_path(base_dir: str | os.PathLike) -> Path:
     return leases_dir(base_dir) / "primary-active.json"
 
 
+class InputLockTimeout(TimeoutError):
+    """A bounded advisory-lock wait reached its deadline without the lock."""
+
+
+def _lock_contention(exc: OSError) -> bool:
+    """Whether a failed non-blocking lock attempt means "held elsewhere"."""
+    import errno
+
+    return isinstance(exc, BlockingIOError) or exc.errno in {
+        errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES, errno.EDEADLK}
+
+
 class _AdvisoryFileLock:
-    """Cross-platform non-blocking advisory lock used by runtime ownership."""
+    """Cross-platform advisory lock used by runtime ownership.
+
+    ``acquire()`` with no timeout makes exactly one non-blocking attempt, which
+    is the fail-fast ownership semantics :class:`ServiceLock` and the primary
+    lease rely on. A timeout turns it into a bounded mutex wait that polls with
+    short backoff and raises :class:`InputLockTimeout` at the deadline.
+    """
+
+    _POLL_INITIAL_SECONDS = 0.005
+    _POLL_MAX_SECONDS = 0.1
 
     def __init__(self, path: Path):
         self._path = path
@@ -118,7 +139,30 @@ class _AdvisoryFileLock:
             fcntl = None
         self._fcntl = fcntl
 
-    def acquire(self) -> None:
+    def acquire(self, timeout: float | None = None) -> None:
+        if timeout is None:
+            self._try_acquire()
+            return
+        import time
+
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        delay = self._POLL_INITIAL_SECONDS
+        while True:
+            try:
+                self._try_acquire()
+                return
+            except OSError as exc:
+                if not _lock_contention(exc):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise InputLockTimeout(
+                        f"advisory lock {self._path} not acquired within {timeout:g}s"
+                    ) from None
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, self._POLL_MAX_SECONDS)
+
+    def _try_acquire(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = open(self._path, "a+")
         try:

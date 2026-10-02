@@ -351,6 +351,23 @@ class TestPerLayerIndependence:
         assert ack.data["status"] in {"retry", "expired"}
         assert "renderer crashed" in ack.data["reason"]
 
+    def test_a_render_exception_logs_its_stack_trace(self, world, renderer):
+        """test-run-1001 logged only "KeyError: 'render'", which hid the call site."""
+        registry, dependencies, inventory = world
+        pool = FakeLayerPool()
+        consumer = make_consumer(world, pool, retry_initial_seconds=0, retry_max_seconds=0)
+        logged = []
+        consumer._log = logged.append
+
+        def explode(_layers):
+            raise KeyError("render")
+
+        pool.render = explode
+        notify(inventory, commit(inventory, PRECIP_RATE))
+        drain(consumer, registry)
+        traces = [message for message in logged if "Traceback" in message]
+        assert traces and "explode" in traces[0] and "KeyError: 'render'" in traces[0]
+
 
 class TestPartialRapSuccess:
     def test_successful_rap_layers_are_acknowledged_separately(self, world, renderer):
@@ -528,3 +545,19 @@ class TestProducerAgreement:
         payload = json.dumps({"mrms": len(get_mrms_file_list()),
                               "rap": len(get_rap_uint16_layers())})
         assert payload
+
+
+def test_the_default_render_pool_builds_against_the_real_catalog(world, tmp_path):
+    """test-run-1001: _ensure_pool read ``render`` from runtime.yaml (it lives in
+    ewmrs_pipeline.yaml), so every MRMS layer failed with KeyError: 'render'."""
+    from EWMRS.pipeline_config import render_phase_name
+
+    registry, dependencies, inventory = world
+    consumer = InputRenderConsumer(tmp_path, run_id="ewmrs", dependencies=dependencies,
+                                   log=lambda _message: None)
+    try:
+        pool = consumer._ensure_pool()
+        assert pool.phase_name == render_phase_name()
+        assert consumer._ensure_pool() is pool
+    finally:
+        consumer.close()

@@ -10,7 +10,6 @@ from common.ingest.inventory import InputInventory
 from common.ingest.manifest import StagedInput
 from common.ingest.mrms.core_contract import IngestDependencies
 from common.ingest.objects import CommittedInput
-from common.ingest.replay import input_lock
 from common.pipeline.readiness import evaluate_scan
 from util.runtime.handoff import canonical_cycle_id
 from util.runtime.ingest_handoff import IngestHandoff, IngestRecordError, render_job_id
@@ -278,16 +277,21 @@ def test_expiry_terminal_and_core_consumption_are_durable(inventory, dependencie
     assert inventory.reconcile()['pending']  # Late inputs still create render work.
 
 
-def test_retention_protects_pins_and_shared_replay_lock(inventory):
+def test_retention_protects_pins_and_shared_replay_lock(inventory, monkeypatch):
     item = add(inventory)
     no_mapping(inventory, item.input_id)
     h = inventory.handoff
     h.pin('history', [item.input_id])
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     h.release_pin('history')
-    # Cleanup and selection use the same OS lock. Contention defers the operation.
-    with input_lock(inventory.base_dir):
-        with pytest.raises(OSError):
+    # Cleanup and selection use the same OS lock. A foreign holder (another
+    # process, modelled by a separate descriptor) makes both wait a bounded
+    # time and then fail without touching anything.
+    from common.ingest import replay
+    from util.runtime.handoff import InputLockTimeout, _AdvisoryFileLock
+    monkeypatch.setattr(replay, '_lock_timeouts', lambda: (0.2, 60.0))
+    with _AdvisoryFileLock(replay.input_lock_path(inventory.base_dir)):
+        with pytest.raises(InputLockTimeout):
             inventory.cleanup(before=T + timedelta(days=1))
         with pytest.raises(OSError):
             h.pin('new-selection', [item.input_id])
@@ -424,8 +428,10 @@ def test_cleanup_racing_pin_defers_then_observes_reference(inventory, monkeypatc
     worker.start()
     try:
         assert acquired.wait(2)
-        with pytest.raises(OSError):
-            inventory.cleanup(before=T + timedelta(days=1))
+        # Cleanup now waits for the in-progress pin instead of failing, and
+        # then observes the reference the pin published.
+        threading.Timer(0.2, release.set).start()
+        assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     finally:
         release.set()
         worker.join(2)
@@ -532,3 +538,71 @@ def test_reused_rap_is_pinned_by_two_active_scans(tmp_path, dependencies):
     inventory.handoff.disposition('core-state', canonical_cycle_id(T + timedelta(minutes=2)), status='success')
     assert rap.input_id in inventory.cleanup(before=T + timedelta(days=1))
     assert not path.exists()
+
+
+def _stormprob_dependencies(base, *, gate):
+    from common.config.loader import load_config
+    from common.ingest.mrms.core_contract import resolve_dependencies
+    from common.ingest.mrms.registry import _plain, build_registry
+
+    registry = build_registry(_plain(load_config('ingest')['mrms']), base)
+    return resolve_dependencies(registry, include_rap=False, include_glm=False,
+                                auxiliary_settings={'rap': {'max_age_minutes': 180}},
+                                require_stormprob_inputs=gate)
+
+
+def test_integration_waits_for_every_stormprob_source(tmp_path):
+    """test-run-1001 released integration with only AzShear present."""
+    from common.ingest.mrms.core_contract import STORMPROB_INTEGRATION_PRODUCTS
+
+    dependencies = _stormprob_dependencies(tmp_path, gate=True)
+    inventory = InputInventory(tmp_path, fingerprint=dependencies.fingerprint, run_id='first')
+    # Realistic MRMS stamps land ~38 s after the even-minute scan time.
+    stamp = T + timedelta(seconds=38)
+    for product in dependencies.check:
+        add(inventory, product, stamp)
+    *present, missing = STORMPROB_INTEGRATION_PRODUCTS
+    for product in present:
+        add(inventory, product, stamp)
+    key = canonical_cycle_id(T)
+
+    waiting = inventory.publish_scan(T, dependencies, at=T)
+    assert waiting.start is not None and waiting.integration is None
+    assert waiting.missing_integration == (missing,)
+    assert inventory.handoff.read('core-integration-ready', key) is None
+
+    add(inventory, missing, stamp)
+    inventory.publish_scan(T, dependencies, at=T + timedelta(seconds=5))
+    released = inventory.handoff.read('core-integration-ready', key)
+    assert released is not None
+    selected = {r.product for r in released.to_manifest().current_inputs() if r.family == 'mrms'}
+    assert set(STORMPROB_INTEGRATION_PRODUCTS) <= selected
+
+
+def test_without_stormprob_the_integration_gate_is_unchanged(tmp_path):
+    dependencies = _stormprob_dependencies(tmp_path, gate=False)
+    assert dependencies.mandatory_integration == ()
+    inventory = InputInventory(tmp_path, fingerprint=dependencies.fingerprint, run_id='first')
+    for product in dependencies.check:
+        add(inventory, product, T + timedelta(seconds=38))
+    result = inventory.publish_scan(T, dependencies, at=T)
+    assert result.integration is not None
+    assert inventory.handoff.read('core-integration-ready', canonical_cycle_id(T)) is not None
+
+
+def test_cached_records_follow_rewrites_and_deletions(inventory):
+    """Parsed records are reused only while the file version is unchanged."""
+    item = add(inventory)
+    handoff = inventory.handoff
+    key = hashlib.sha256(b'owner').hexdigest()
+    handoff.pin('owner', [item.input_id])
+    first = handoff.read('pin', key)
+    assert handoff.read('pin', key) is first
+    handoff.pin('owner', [])
+    assert handoff.read('pin', key).data['input_ids'] == []
+    handoff.release_pin('owner')
+    assert handoff.read('pin', key) is None
+    assert all(record.key != key for record in handoff.records('pin'))
+    # Another process's view (a fresh handoff) agrees with the cached one.
+    fresh = IngestHandoff(inventory.base_dir, fingerprint=handoff.fingerprint, run_id='other')
+    assert [r.key for r in fresh.records('input')] == [r.key for r in handoff.records('input')]

@@ -84,6 +84,9 @@ def _parse_args(argv=None):
     args.disable_nws = _resolve("disable_nws", run_cfg["disable_nws"], "run.disable_nws")
     args.disable_wpc = _resolve("disable_wpc", run_cfg["disable_wpc"], "run.disable_wpc")
     args.disable_goes = _resolve("disable_goes", run_cfg["disable_goes"], "run.disable_goes")
+    # Dependency-shared with ingest and Core: they set the StormProb gate.
+    args.disable_ctam = _resolve("disable_ctam", run_cfg["disable_ctam"], "run.disable_ctam")
+    args.disable_stormprob = _resolve("disable_stormprob", run_cfg["disable_stormprob"], "run.disable_stormprob")
     args.mrms_core_only = _resolve("mrms_core_only", run_cfg["mrms_core_only"], "run.mrms_core_only")
 
     # Publish the resolved config root so spawned children inherit it,
@@ -161,6 +164,8 @@ def main():
         goes_poll_seconds=goes_coordination["poll_seconds"],
         child_log_queue=child_log_queue,
         run_id=run_id,
+        disable_ctam=args.disable_ctam,
+        disable_stormprob=args.disable_stormprob,
     )
 
     stop_event = threading.Event()

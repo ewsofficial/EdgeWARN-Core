@@ -1,7 +1,7 @@
 {
   "scheduler": {
     "modifier_lookup_max_entries": 20,
-    "s3_lookback_hours": 2,
+    "s3_lookback_hours": 1,
     "slow_check_log_threshold_ms": 2000,
     "ingest_poll_seconds": 10
   },

@@ -116,11 +116,15 @@ class TestFlagRouting:
         # ...primary-only flags stay primary-only...
         for token in (
             "--lat_limits 20.0 55.0", "--lon_limits 230.0 300.0",
-            "--disable-ctam", "--disable-tracking", "--disable-polygon-expansion",
+            "--disable-tracking", "--disable-polygon-expansion",
             "--refl-threshold 25.0", "--min-seed-percentage 15.0", "--drop-offset 1.0",
         ):
             assert token in edgewarn
             assert token not in ewmrs
+        # ...CTAM/StormProb enablement decides the StormProb integration gate,
+        # so it is dependency-shared like --disable-goes...
+        assert "--disable-ctam" in edgewarn
+        assert "--disable-ctam" in ewmrs
         # The resolved topology reaches every child so direct and supervised
         # launches agree even if children inherited a different config root.
         assert "--mrms-core-only" in edgewarn
@@ -522,9 +526,23 @@ def test_preflight_propagates_worker_root_and_glm_setting(tmp_path):
         assert str(tmp_path) in command
 
 
+def test_preflight_propagates_core_stormprob_setting_to_producer_and_consumers(tmp_path):
+    """Core's --disable-stormprob must reach ingest and EWMRS, or the
+    dependency fingerprints (and so every readiness record) disagree."""
+    args = _args()
+    services = ["ingest", "edgewarn", "ewmrs"]
+    forwarded = {"edgewarn": ("--disable-stormprob",)}
+    run_all.preflight_topology(args, services, forwarded)
+    commands = run_all.build_service_commands(args, services, str(tmp_path), service_argv=forwarded)
+    for command in commands.values():
+        assert "--disable-stormprob" in command
+
+
 @pytest.mark.parametrize("forwarded", [
     {"ingest": ("--disable-goes",), "edgewarn": ("--no-disable-goes",)},
     {"ingest": ("--base-dir", "/a"), "edgewarn": ("--base-dir", "/b")},
+    {"ingest": ("--no-disable-ctam",), "edgewarn": ("--disable-ctam",)},
+    {"ingest": ("--disable-stormprob",), "edgewarn": ("--no-disable-stormprob",)},
 ])
 def test_preflight_rejects_conflicting_worker_settings(forwarded):
     with pytest.raises(ValueError, match="conflicting"):

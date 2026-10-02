@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from common.config.loader import load_config
@@ -62,3 +63,39 @@ def test_stormprob_mesh_is_probsevere_derived_and_not_the_raw_mesh_product():
     assert not any(stat["product"] == "MESH_00.50" for stat in integration["stats_datasets"])
     # Lightning enrichment is supported but is not a trained property feature.
     assert "maxCGFlashDensity" not in IMPORTANT_SCALAR_PROPERTY_FEATURES
+
+
+def test_stormprob_sources_are_one_list_across_preflight_and_ingest():
+    from common.ingest.mrms.core_contract import STORMPROB_INTEGRATION_PRODUCTS
+    from EdgeWARN.ctam.preflight import STORMPROB_MRMS_SOURCES
+
+    assert tuple(source.product for source in STORMPROB_MRMS_SOURCES) == \
+        STORMPROB_INTEGRATION_PRODUCTS
+
+
+def test_stormprob_sources_gate_integration_only_when_enabled():
+    """test-run-1001: no product had core_phase="integration", so integration
+    released with only RAP/GLM gating while StormProb inputs were absent."""
+    from common.ingest.mrms.config import get_ingest_dependencies
+    from common.ingest.mrms.core_contract import STORMPROB_INTEGRATION_PRODUCTS
+
+    enabled = get_ingest_dependencies()
+    assert set(STORMPROB_INTEGRATION_PRODUCTS) <= set(enabled.mandatory_integration)
+    assert not set(STORMPROB_INTEGRATION_PRODUCTS) & set(enabled.optional)
+    for flags in ({"disable_ctam": True}, {"disable_stormprob": True}):
+        disabled = get_ingest_dependencies(**flags)
+        assert not set(STORMPROB_INTEGRATION_PRODUCTS) & set(disabled.mandatory_integration)
+        assert disabled.fingerprint != enabled.fingerprint
+
+
+def test_a_disabled_stormprob_source_fails_dependency_preflight():
+    from dataclasses import replace
+    from common.ingest.mrms.config import get_registry
+    from common.ingest.mrms.core_contract import resolve_dependencies
+
+    registry = get_registry()
+    reduced = replace(registry, products=tuple(
+        p for p in registry.products if p.product_id != "VIL_00.50"))
+    with pytest.raises(ValueError, match="VIL_00.50"):
+        resolve_dependencies(reduced, require_stormprob_inputs=True)
+    resolve_dependencies(reduced, require_stormprob_inputs=False)

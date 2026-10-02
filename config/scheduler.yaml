@@ -7,7 +7,9 @@ scheduler:
   modifier_lookup_max_entries: 20
 
   # Fallback window when no cursor exists; larger windows cost more listings.
-  s3_lookback_hours: 2
+  # Must not exceed raw-input retention (runtime.ingest.retention_minutes, else
+  # ingest.mrms.cleanup_max_age_minutes); validation rejects a longer window.
+  s3_lookback_hours: 1
 
   # Diagnostic threshold only; it does not change scheduling behavior.
   slow_check_log_threshold_ms: 2000

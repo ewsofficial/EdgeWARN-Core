@@ -217,6 +217,10 @@ service commands above.
 - Both accept `--base_dir` / `--base-dir`, `--config-dir`, and `--profile`.
 - EWMRS additionally accepts `--disable-metar`, `--disable-nws`,
   `--disable-wpc`, and `--disable-goes` (ABI ingest/render).
+- EWMRS and `run_ingest.py` also accept `--disable-ctam` and
+  `--disable-stormprob`. They only select the dependency agreement (see
+  [Independent ingest agreement](#independent-ingest-agreement)) and must match
+  the primary's values.
 
 Notes:
 
@@ -548,9 +552,30 @@ options. Without it they wait with producer diagnostics. The supervisor stops
 all siblings when any child exits; separate service units provide isolation.
 
 `--args ingest '["--disable-goes"]'` propagates GLM disablement to Core and
-EWMRS. Conflicting explicit values or worker runtime roots fail before startup.
+EWMRS. `--disable-ctam` and `--disable-stormprob` propagate the same way: with
+CTAM and StormProb both enabled, every StormProb MRMS source (VIL, VII, echo
+tops, isothermal reflectivities, AzShear and the others in
+`EdgeWARN.ctam.preflight.STORMPROB_MRMS_SOURCES`) is a mandatory integration
+input, so Core is released into integration only once all of them are local.
+Direct commands must pass the same values to `run_ingest.py`,
+`run_edgewarn.py` and `run_ewmrs.py` (or share `runtime.run`).
+Conflicting explicit values or worker runtime roots fail before startup.
 A base directory supplied for one worker applies to the entire topology.
 MRMS-only mode keeps ingest and Core. Durable handoff must be enabled.
+
+Upgrading to this agreement changes the dependency fingerprint, so readiness
+records written by an earlier release under `state/realtime/ingest/v1/` are
+rejected as a mismatch. Start the first run on a fresh runtime base directory,
+or stop every service and remove `state/realtime/ingest/` (and the Core and
+EWMRS consumer state under `state/realtime/consumers/core-ingest-v1/` and
+`state/realtime/consumers/ewmrs-inputs-v1/`) before restarting.
+
+Realtime ingest acquires check products first, then mandatory integration
+inputs, then everything else, newest observation first within each tier. Core
+processes the newest ready scan and records every older ready scan as
+`skipped` ("superseded"), so a cold start never works forward through stale
+scans. The listing window (`scheduler.s3_lookback_hours`) must not exceed raw
+input retention; configuration validation rejects a longer window.
 
 Realtime `state/realtime/ingest-reports` snapshots are retired. Monitor
 `state/realtime/ingest/v1/` readiness/outbox records and `poll-status.json`

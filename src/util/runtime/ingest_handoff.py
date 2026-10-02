@@ -256,6 +256,10 @@ class IngestHandoff:
         self.run_id = run_id
         self.root = self.base_dir / 'state/realtime/ingest/v1'
         self._verified_files = {}
+        # Parsed records keyed by path and validated against the file's
+        # (inode, size, mtime_ns) on every read. Records are published by
+        # atomic replace, so any rewrite changes the signature and re-parses.
+        self._parsed = {}
 
     def path(self, kind, key):
         if kind not in KINDS or not re.fullmatch(r'[A-Za-z0-9_-]+', key):
@@ -278,27 +282,50 @@ class IngestHandoff:
             raise IngestRecordError('Invalid poll status key')
         return contained(self.base_dir, path)
 
+    @staticmethod
+    def _signature(path):
+        stat = path.stat()
+        return stat.st_ino, stat.st_size, stat.st_mtime_ns
+
     def read(self, kind, key):
         path = self.path(kind, key)
         try:
+            before = self._signature(path)
+            cached = self._parsed.get(path)
+            if cached is not None and cached[0] == before:
+                return cached[1]
             payload = json.loads(path.read_text())
+            after = self._signature(path)
         except FileNotFoundError:
+            self._parsed.pop(path, None)
             return None
         except (OSError, ValueError) as exc:
             raise IngestRecordError(f'Cannot read {path}: {exc}') from exc
         record = IngestRecord.from_dict(payload, self.base_dir, fingerprint=self.fingerprint)
         if record.kind != kind or record.key != key:
             raise IngestRecordError('Record destination mismatch')
+        if before == after:
+            # Only a read that saw one stable file version may be reused.
+            self._parsed[path] = (after, record)
         return record
 
     def records(self, kind):
         if kind in {'core-start-ready', 'core-integration-ready', 'core-final-ready', 'terminal', 'scan-state'}:
-            return tuple(self.read(kind, path.parent.name) for path in
-                         sorted((self.root / 'scans').glob(f'*/{kind}.json')))
+            paths = sorted((self.root / 'scans').glob(f'*/{kind}.json'))
+            self._forget_missing(lambda p: p.name == f'{kind}.json' and p.parent.parent == self.root / 'scans', paths)
+            return tuple(self.read(kind, path.parent.name) for path in paths)
         key = '20000101T000000Z' if kind == 'core-state' else 'poll-status' if kind == 'poll-status' else '0' * 64
         directory = self.path(kind, key).parent
         paths = [self.path(kind, key)] if kind == 'poll-status' else sorted(directory.glob('*.json'))
+        if kind != 'poll-status':
+            self._forget_missing(lambda p: p.parent == directory, paths)
         return tuple(record for path in paths if (record := self.read(kind, path.stem)) is not None)
+
+    def _forget_missing(self, belongs, present):
+        """Drop cached records whose files a full listing no longer contains."""
+        present = {path.resolve() for path in present}
+        for path in [p for p in self._parsed if belongs(p) and p not in present]:
+            del self._parsed[path]
 
     def _write(self, kind, key, data, *, mutable=False):
         record = IngestRecord.from_dict(IngestRecord(kind, key, self.fingerprint, self.run_id,
@@ -435,6 +462,28 @@ class IngestHandoff:
     def release_pin(self, owner):
         with input_lock(self.base_dir):
             self.path('pin', hashlib.sha256(owner.encode()).hexdigest()).unlink(missing_ok=True)
+
+    def release_stale_pins(self, *, prefix, keep=None):
+        """Remove ``<prefix><scan>`` pins for every known scan except ``keep``.
+
+        Pin files are named by owner digest, so the candidate owners are the
+        scan keys present in the scan namespace and the Core consumer state.
+        Returns the released owner names.
+        """
+        consumer = self.path('core-state', '20000101T000000Z').parent
+        keys = {path.name for path in (self.root / 'scans').glob('*') if path.is_dir()}
+        keys.update(path.stem for path in consumer.glob('*.json'))
+        released = []
+        with input_lock(self.base_dir):
+            for key in sorted(keys):
+                owner = f'{prefix}{key}'
+                if owner == keep or not re.fullmatch(r'[A-Za-z0-9_-]+', key):
+                    continue
+                path = self.path('pin', hashlib.sha256(owner.encode()).hexdigest())
+                if path.exists():
+                    path.unlink(missing_ok=True)
+                    released.append(owner)
+        return tuple(released)
 
     def publish_poll_status(self, counts, reasons=()):
         with input_lock(self.base_dir):

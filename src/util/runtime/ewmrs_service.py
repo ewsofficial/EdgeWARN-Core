@@ -30,6 +30,8 @@ def register_ewmrs_accessories(
     goes_poll_seconds,
     child_log_queue,
     run_id=None,
+    disable_ctam=False,
+    disable_stormprob=False,
 ):
     """Add every EWMRS-owned child loop to *supervisor*.
 
@@ -77,6 +79,7 @@ def register_ewmrs_accessories(
         "EWMRS Consumer", ewmrs_consumer_loop,
         enabled=consumer_enabled,
         args=(base_dir, child_log_queue),
-        kwargs={"run_id": run_id, "disable_goes": not goes_ingest_enabled},
+        kwargs={"run_id": run_id, "disable_goes": not goes_ingest_enabled,
+                "disable_ctam": disable_ctam, "disable_stormprob": disable_stormprob},
         daemon=False,
     )

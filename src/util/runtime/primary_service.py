@@ -33,6 +33,7 @@ from util.runtime.cycle import (
     CycleStateStore,
     PrimaryCycleConfig,
     run_primary_cycle_once,
+    sweep_core_pins,
 )
 from util.runtime.config import resolve_file, section
 from util.runtime.ingest_handoff import IngestRecordError, utc
@@ -54,6 +55,8 @@ def build_cycle_config(args):
     dependencies = get_ingest_dependencies(
         mrms_core_only=mrms_core_only,
         disable_goes=args.disable_goes,
+        disable_ctam=args.disable_ctam,
+        disable_stormprob=args.disable_stormprob,
     )
     consumers = section("consumers")
     return PrimaryCycleConfig(
@@ -86,8 +89,8 @@ class LocalReadinessReader:
     Replaces the remote S3/HTTPS timestamp intersection entirely. A scan is a
     candidate only once the ingest service has committed a complete, locally
     valid check set for it, so Core never selects, downloads, or validates a
-    source itself. Candidates are returned oldest first to keep tracking and
-    lineage monotonic.
+    source itself. Candidates are returned oldest first; the realtime loop
+    takes the newest and supersedes the rest.
     """
 
     def __init__(self, *, base_dir, run_id, dependencies, log=None):
@@ -179,7 +182,7 @@ def report_effective_config(config_dir=None):
 
     # Lazy imports keep diagnostics from making optional render dependencies eager
     # at module import time.
-    from common.ingest.mrms.config import get_mrms_modifiers
+    from common.ingest.mrms.config import get_check_modifiers, get_mrms_modifiers
     from EWMRS.render.config import get_mrms_file_list, get_goes_file_list
     from EdgeWARN.process.integrate.config import get_datasets_config
     from EWMRS.rap.config import get_rap_uint16_layers
@@ -262,8 +265,10 @@ def run_primary_cycle_loop(
     """Drive primary cycles from local durable readiness until interrupted.
 
     A scan is selected only when the ingest service has committed a complete,
-    locally valid check set for it, and the oldest pending scan is processed
-    first so tracking and lineage stay monotonic. Waiting for a scan to become
+    locally valid check set for it. Realtime processes the newest pending scan
+    and records every older pending scan as an explicit ``skipped`` terminal
+    disposition ("superseded"), so tracking and lineage stay monotonic and a
+    backlog never delays the freshest analysis. Waiting for a scan to become
     ready costs no analysis retry: an attempt is recorded only once a start
     record actually exists.
 
@@ -312,7 +317,11 @@ def run_primary_cycle_loop(
         run_id=cycle_config.ingest_run_id or uuid.uuid4().hex,
         dependencies=cycle_config.dependencies,
     )
-    max_backlog = int(cycle_settings["max_backlog_cycles"])
+    # One Core instance runs at a time, so any Core pin left by a crashed or
+    # interrupted earlier run is stale and must not block retention.
+    released = sweep_core_pins(reader.handoff)
+    if released:
+        print(f"[Scheduler] Released {len(released)} stale Core input pin(s) from an earlier run")
 
     supervisor_settings = section("supervisor")
 
@@ -343,24 +352,23 @@ def run_primary_cycle_loop(
 
             pending = reader.pending_scans()
             if pending_timestamp is None and pending:
-                # Oldest first, and a newer scan never overtakes an older
-                # candidate except through the explicit backlog cap.
-                selection = pending[0]
+                # Realtime takes the newest ready scan. Every older ready scan
+                # is superseded, so a cold-start backlog never makes Core work
+                # forward through stale data; tracking still only moves forward.
+                selection = pending[-1]
+                for older in pending[:-1]:
+                    reader.skip(
+                        older,
+                        f"superseded by newer ready scan {selection.isoformat()}",
+                    )
                 if selection_cursor is not None and selection <= selection_cursor:
                     reader.skip(
                         selection,
                         "start readiness arrived at or before the processing cursor; "
                         "processing continues forward only",
                     )
-                    pending = reader.pending_scans()
-                    selection = pending[0] if pending else None
+                    selection = None
                 if selection is not None:
-                    if len(pending) > max_backlog:
-                        for expired in pending[:len(pending) - max_backlog]:
-                            reader.skip(
-                                expired,
-                                f"backlog exceeded cycle.max_backlog_cycles={max_backlog}",
-                            )
                     pending_timestamp = selection
                     pending_attempt_count = 0
                     print(

@@ -3,26 +3,103 @@
 The conservative lease protects all raw inputs while selection and processing
 are active. Cleanup acquires the same OS lock, closing the select/delete race;
 a crashed process releases the lease automatically.
+
+The lease is a short cross-process mutex, not an ownership lock: ingest, Core
+and EWMRS all take it briefly. :func:`input_lock` therefore waits a bounded
+time (``runtime.handoff.input_lock_timeout_seconds``) instead of failing on the
+first overlap, and is re-entrant per thread so nested critical sections cannot
+deadlock against themselves. Cleanup stays a single non-blocking attempt so it
+keeps deferring whenever any holder, including the calling thread, is active.
 """
 from contextlib import contextmanager
 from functools import wraps
 import json
 import os
 from pathlib import Path
+import time
 import uuid
 import threading
 
 _deferred_cleanup = {}
 _deferred_lock = threading.Lock()
+_held = threading.local()
 
 
-def input_lock(base_dir):
-    from util.runtime.handoff import _AdvisoryFileLock
+def input_lock_path(base_dir):
     root = Path(base_dir).resolve()
     path = root / "state" / "input-pins.lock"
     if not path.resolve().is_relative_to(root):
         raise ValueError("Input lease escapes runtime root")
-    return _AdvisoryFileLock(path)
+    return path
+
+
+def _lock_timeouts():
+    """(acquire timeout, hold-warning threshold) in seconds, from runtime.yaml."""
+    from util.runtime.config import section
+
+    handoff = section("handoff")
+    return (float(handoff["input_lock_timeout_seconds"]),
+            float(handoff["input_lock_hold_warning_seconds"]))
+
+
+class InputLease:
+    """Thread re-entrant, bounded-wait hold on the shared input lock.
+
+    Only the outermost acquisition in a thread touches the OS lock; nested
+    acquisitions increase a depth counter. Separate threads and processes
+    contend normally, because each outermost hold opens its own descriptor.
+    """
+
+    def __init__(self, path):
+        self._path = str(path)
+
+    @staticmethod
+    def _table():
+        table = getattr(_held, "leases", None)
+        if table is None:
+            table = _held.leases = {}
+        return table
+
+    def acquire(self):
+        from util.runtime.handoff import _AdvisoryFileLock
+
+        table = self._table()
+        entry = table.get(self._path)
+        if entry is not None:
+            entry[0] += 1
+            return
+        timeout, _ = _lock_timeouts()
+        lock = _AdvisoryFileLock(Path(self._path))
+        lock.acquire(timeout=timeout)
+        table[self._path] = [1, lock, time.monotonic()]
+
+    def release(self):
+        table = self._table()
+        entry = table.get(self._path)
+        if entry is None:
+            return
+        entry[0] -= 1
+        if entry[0] > 0:
+            return
+        del table[self._path]
+        held_for = time.monotonic() - entry[2]
+        entry[1].release()
+        _, warn_after = _lock_timeouts()
+        if held_for > warn_after:
+            print(f"[InputLock] WARNING: input lock held for {held_for:.2f}s "
+                  f"(threshold {warn_after:g}s) by thread {threading.current_thread().name}",
+                  flush=True)
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc):
+        self.release()
+
+
+def input_lock(base_dir):
+    return InputLease(input_lock_path(base_dir))
 
 
 def protect_runtime_inputs(function):
@@ -43,7 +120,10 @@ def protect_runtime_inputs(function):
 
 @contextmanager
 def cleanup_permission(base_dir):
-    lock = input_lock(base_dir)
+    # Deliberately one non-blocking attempt on a fresh descriptor, outside the
+    # re-entrant table: a cleanup inside a held lease must defer, not run.
+    from util.runtime.handoff import _AdvisoryFileLock
+    lock = _AdvisoryFileLock(input_lock_path(base_dir))
     try:
         lock.acquire()
     except OSError:

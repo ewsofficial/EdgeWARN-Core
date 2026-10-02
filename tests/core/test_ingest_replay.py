@@ -172,6 +172,105 @@ def test_cycle_lease_protects_inputs_across_processes(monkeypatch, tmp_path):
     assert not path.exists()
 
 
+def _hold_input_lock(base, ready, seconds):
+    from util.runtime.handoff import _AdvisoryFileLock
+    from common.ingest.replay import input_lock_path
+    import time
+    with _AdvisoryFileLock(input_lock_path(base)):
+        ready.set()
+        time.sleep(seconds)
+
+
+def _holder(tmp_path, seconds):
+    context = multiprocessing.get_context("spawn")
+    ready = context.Event()
+    process = context.Process(target=_hold_input_lock, args=(tmp_path, ready, seconds))
+    process.start()
+    assert ready.wait(30), "lock holder never started"
+    return process
+
+
+def test_contended_input_lock_waits_for_another_process_then_succeeds(monkeypatch, tmp_path):
+    """test-run-1001: overlap raised BlockingIOError instead of waiting."""
+    import time
+    from common.ingest import replay
+    monkeypatch.setattr(replay, "_lock_timeouts", lambda: (30.0, 60.0))
+    process = _holder(tmp_path, 0.5)
+    try:
+        started = time.monotonic()
+        with input_lock(tmp_path):
+            waited = time.monotonic() - started
+    finally:
+        process.join(30)
+    assert waited >= 0.2
+    assert process.exitcode == 0
+
+
+def test_input_lock_raises_a_typed_timeout_past_its_deadline(monkeypatch, tmp_path):
+    import time
+    from common.ingest import replay
+    from util.runtime.handoff import InputLockTimeout
+    monkeypatch.setattr(replay, "_lock_timeouts", lambda: (0.3, 60.0))
+    process = _holder(tmp_path, 5)
+    try:
+        started = time.monotonic()
+        with pytest.raises(InputLockTimeout):
+            with input_lock(tmp_path):
+                pass
+        assert 0.25 <= time.monotonic() - started < 4
+    finally:
+        process.kill()
+        process.join(30)
+
+
+def test_nested_input_lock_in_one_thread_does_not_deadlock(monkeypatch, tmp_path):
+    import time
+    from common.ingest import replay
+    from common.ingest.replay import cleanup_permission
+    monkeypatch.setattr(replay, "_lock_timeouts", lambda: (0.5, 60.0))
+    with input_lock(tmp_path):
+        with input_lock(tmp_path):
+            with input_lock(tmp_path):
+                pass
+        # Cleanup never re-enters: it is still deferred while this thread holds
+        # the lease, and it answers immediately instead of waiting.
+        started = time.monotonic()
+        with cleanup_permission(tmp_path) as allowed:
+            assert allowed is False
+        assert time.monotonic() - started < 0.1
+    with cleanup_permission(tmp_path) as allowed:
+        assert allowed is True
+
+
+def test_input_lock_excludes_other_threads_until_released(monkeypatch, tmp_path):
+    import threading
+    import time
+    from common.ingest import replay
+    monkeypatch.setattr(replay, "_lock_timeouts", lambda: (30.0, 60.0))
+    order = []
+
+    def contender():
+        with input_lock(tmp_path):
+            order.append("contender")
+
+    with input_lock(tmp_path):
+        worker = threading.Thread(target=contender)
+        worker.start()
+        time.sleep(0.2)
+        order.append("holder")
+    worker.join(10)
+    assert order == ["holder", "contender"]
+
+
+def test_long_input_lock_hold_is_reported(monkeypatch, tmp_path, capsys):
+    import time
+    from common.ingest import replay
+    monkeypatch.setattr(replay, "_lock_timeouts", lambda: (30.0, 0.05))
+    with input_lock(tmp_path):
+        time.sleep(0.1)
+    assert "input lock held for" in capsys.readouterr().out
+
+
 def test_deferred_cleanup_runs_after_cycle_finishes(monkeypatch, tmp_path):
     monkeypatch.setattr(fs, "BASE_DIR", tmp_path)
     path = tmp_path / "pinned.grib2"

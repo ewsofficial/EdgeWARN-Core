@@ -201,7 +201,9 @@ def settle(service, clock):
     """
     for _ in range(500):
         service.dispatch_pending(clock.value)
-        if idle(service) and service._work.empty():
+        # unfinished_tasks, not empty(): the publisher drains a whole batch
+        # off the queue before it finishes processing (and evaluating) it.
+        if idle(service) and service._work.unfinished_tasks == 0:
             return
         time.sleep(0.01)
     raise AssertionError("the acquisition window and publisher queue never drained")
@@ -393,7 +395,7 @@ class TestCoreReadinessEvaluation:
             later = T + timedelta(seconds=30)
             service._wall = lambda: later
             service._work.put(_work("maintenance"))
-            wait_for(lambda: service._work.empty(), "the maintenance pass never ran")
+            wait_for(lambda: service._work.unfinished_tasks == 0, "the maintenance pass never ran")
         finally:
             service.shutdown()
         terminal = service.inventory.handoff.read("terminal", canonical_cycle_id(T))
@@ -403,6 +405,103 @@ class TestCoreReadinessEvaluation:
         assert PROB_SEVERE in terminal.data["reason"]
         assert service.inventory.handoff.read(
             "core-start-ready", canonical_cycle_id(T)) is None
+
+
+class TestRun1001Regressions:
+    """Acquisition ordering and publisher contention seen in test-run-1001."""
+
+    def test_a_burst_of_completions_evaluates_each_scan_once(self, tmp_path):
+        from util.runtime.ingest_service import _Work
+
+        registry = make_registry(tmp_path)
+        products = (*CHECKS, PRECIP_RATE)
+        source = ScriptedSource(registry, reveal={product: [T] for product in products})
+        service = make_service(tmp_path, source)
+        calls = []
+        original = service.inventory.publish_scan
+
+        def spy(scan, *args, **kwargs):
+            calls.append(scan)
+            return original(scan, *args, **kwargs)
+
+        service.inventory.publish_scan = spy
+        for product in products:
+            discovered = source.discovered(registry.require(product), T)
+            service._work.put(_Work(kind="completion", completed=source.acquirer(discovered)))
+        service._work.put(_Work(kind="shutdown"))
+        # Run the publisher synchronously: the whole burst is one batch.
+        service._publisher_loop()
+
+        assert calls == [T]
+        assert service._metrics["committed"] == len(products)
+        assert service.inventory.handoff.read(
+            "core-start-ready", canonical_cycle_id(T)) is not None
+
+    def test_an_auxiliary_job_is_never_dispatched_as_mrms(self, tmp_path):
+        from util.runtime.ingest_service import AcquisitionJob
+
+        registry = make_registry(tmp_path)
+        source = ScriptedSource(registry)
+        attempts = []
+
+        def auxiliary(kind, target):
+            attempts.append((kind, target))
+            if len(attempts) == 1:
+                raise TimeoutError("GLM upstream timed out")
+            return ()
+
+        service = make_service(tmp_path, source, retry_initial_seconds=0,
+                               retry_max_seconds=0)
+        service._auxiliary = auxiliary
+        submitted = {"ingest-download": [], "ingest-auxiliary": []}
+
+        class Pool:
+            def __init__(self, name):
+                self.name = name
+
+            def submit(self, function, *args):
+                submitted[self.name].append((function, args))
+
+        service._pools = {name: Pool(name) for name in submitted}
+        identity = f"glm:{T.isoformat()}"
+        assert service.ledger.offer(AcquisitionJob(identity=identity, kind="glm",
+                                                   product_id="GLM", target=T))
+
+        service.dispatch_pending(0.0)
+        assert submitted["ingest-download"] == []
+        service._dispatch_auxiliary(T, 0.0)
+        function, args = submitted["ingest-auxiliary"].pop()
+        assert function == service._acquire_auxiliary
+        function(*args)  # first attempt fails and is requeued
+
+        service.dispatch_pending(1e9)
+        assert submitted["ingest-download"] == []
+        service._dispatch_auxiliary(T, 1e9)
+        function, args = submitted["ingest-auxiliary"].pop()
+        function(*args)  # the retry runs on the auxiliary pool and succeeds
+
+        assert attempts == [("glm", T), ("glm", T)]
+        assert service.ledger.state(identity) == ("committed", "")
+        assert service.ledger.counts()["in_flight_jobs"] == 0
+
+    def test_a_cold_start_backlog_fetches_the_newest_scan_first(self, tmp_path):
+        registry = make_registry(tmp_path)
+        scans = [T - timedelta(minutes=2 * step) for step in range(4, -1, -1)]
+        source = ScriptedSource(registry, reveal={product: scans
+                                                  for product in (*CHECKS, PRECIP_RATE)})
+        service = make_service(tmp_path, source, download_concurrency=1)
+        service.start()
+        try:
+            poll_periods(service, 1)
+        finally:
+            service.shutdown()
+        first = source.acquisitions[:len(CHECKS)]
+        assert {product for product, _ in first} == set(CHECKS)
+        assert {at for _, at in first} == {T.isoformat()}
+        # Checks outrank optional products and arrive newest first throughout.
+        checks = [at for product, at in source.acquisitions if product in CHECKS]
+        assert checks == sorted(checks, reverse=True)
+        assert source.acquisitions.index((PRECIP_RATE, T.isoformat())) == len(CHECKS) * len(scans)
 
 
 class TestShutdown:
@@ -456,13 +555,26 @@ class TestIngestEntryPoint:
         assert completed.returncode == 1
         assert "lock" in completed.stdout
 
+    def test_service_lock_still_fails_fast_while_held(self, tmp_path):
+        """Bounded waits are for the input mutex only: ownership stays fail-fast."""
+        holder = ServiceLock(tmp_path, "ingest")
+        holder.acquire()
+        try:
+            started = time.monotonic()
+            with pytest.raises(RuntimeError, match="single-instance lock"):
+                ServiceLock(tmp_path, "ingest").acquire()
+            assert time.monotonic() - started < 0.5
+        finally:
+            holder.release()
+
     def test_the_parser_owns_only_acquisition_and_shared_dependency_flags(self):
         from util import cli
 
         parser = cli.build_service_parser("ingest")
         for argv in (["--base_dir", "/tmp/a"], ["--base-dir", "/tmp/a"],
                      ["--config-dir", "/tmp/c"], ["--profile"], ["--no-profile"],
-                     ["--disable-goes"], ["--mrms-core-only"], ["--no-mrms-core-only"]):
+                     ["--disable-goes"], ["--mrms-core-only"], ["--no-mrms-core-only"],
+                     ["--disable-ctam"], ["--no-disable-stormprob"]):
             assert parser.parse_args(argv) is not None
         for argv in (["--lat_limits", "1", "2"], ["--disable-metar"], ["--disable-ewmrs"],
                      ["--disable-nexrad"], ["--ctam-module-dir", "/tmp/m"],

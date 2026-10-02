@@ -232,3 +232,48 @@ def test_audit_scanners_reject_negative_controls(tmp_path):
     assert _config_path_accesses(tmp_path) == ["x.py"]
     assert _source_catalogs(tmp_path) == ["x.js:products", "x.py:PRODUCTS"]
     assert _operational_numeric_literals(tmp_path) == [("x.js", "<parameter>", "pollInterval"), ("x.py", "<module>", "POLL_INTERVAL_SECONDS"), ("x.py", "wait", "poll_interval")]
+
+
+def _runtime_section_calls():
+    """Yield (path, line, name) for every ``util.runtime.config.section`` call.
+
+    Several modules define their own ``section`` helper for other catalogs, so
+    only names imported from ``util.runtime.config`` (or ``.config`` inside
+    ``util/runtime``) are audited.
+    """
+    for path in production_sources():
+        if path.suffix != ".py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        relative = path.relative_to(SRC).as_posix()
+        local = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            runtime_config = node.module == "util.runtime.config" or (
+                node.level == 1 and node.module == "config"
+                and relative.startswith("util/runtime/"))
+            if runtime_config:
+                local.update(alias.asname or alias.name for alias in node.names
+                             if alias.name == "section")
+        if not local:
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in local and node.args):
+                argument = node.args[0]
+                name = argument.value if isinstance(argument, ast.Constant) else None
+                yield relative, node.lineno, name
+
+
+def test_runtime_section_reads_only_top_level_runtime_keys():
+    """test-run-1001: ``section("render")`` read runtime.yaml, but ``render``
+    belongs to ewmrs_pipeline.yaml, so every MRMS render raised KeyError."""
+    from common.config.loader import load_config
+
+    keys = set(load_config("runtime"))
+    calls = list(_runtime_section_calls())
+    assert calls, "the audit found no runtime section() call sites"
+    offenders = [f"{path}:{line}: section({name!r})" for path, line, name in calls
+                 if name not in keys]
+    assert offenders == []

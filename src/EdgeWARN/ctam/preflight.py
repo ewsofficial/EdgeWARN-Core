@@ -303,13 +303,17 @@ def validate_stormprob_cycle(cells, input_manifest) -> None:
         problems.append("final CTAM input snapshot is missing")
     else:
         cycle_time = input_manifest.cycle_time
+        # A scan's MRMS files are stamped up to two minutes after the normalized
+        # even-minute cycle time (e.g. 23:12:38 for 23:12). Accept the same
+        # directional window the manifest alignment check accepts.
+        max_lead = min(120.0, input_manifest.mrms_tolerance_seconds)
         for source in STORMPROB_MRMS_SOURCES:
             record = input_manifest.latest_for_product(source.product)
             age = ((cycle_time - record.analysis_time).total_seconds()
                    if record is not None else float("inf"))
             if (record is None or record.family != "mrms" or not record.validated
                     or not record.local_path.is_file()
-                    or age < 0 or age > source.max_age_seconds):
+                    or age < -max_lead or age > source.max_age_seconds):
                 problems.append(f"MRMS_{source.product}: unavailable, stale or invalid ({', '.join(source.features)})")
         rap = [record for record in input_manifest.current_inputs(family="rap")
                if record.validated and 0 <= (cycle_time - record.analysis_time).total_seconds()

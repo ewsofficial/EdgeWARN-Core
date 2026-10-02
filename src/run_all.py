@@ -51,8 +51,9 @@ _ROUTING = {
     "--lat_limits": ("edgewarn",),
     "--lon_limits": ("edgewarn",),
     "--profile": ("ingest", "edgewarn", "ewmrs", "nexrad"),
-    "--disable-ctam": ("edgewarn",),
-    "--disable-stormprob": ("edgewarn",),
+    # Dependency-shared: they decide whether StormProb sources gate integration.
+    "--disable-ctam": ("ingest", "edgewarn", "ewmrs"),
+    "--disable-stormprob": ("ingest", "edgewarn", "ewmrs"),
     "--disable-ctam-modules": ("edgewarn",),
     "--disable-tracking": ("edgewarn",),
     "--disable-polygon-expansion": ("edgewarn",),
@@ -128,14 +129,16 @@ def preflight_topology(args, services, service_argv=None):
     if roots:
         args.base_dir = roots.pop()
     participants = {"ingest", "edgewarn", "ewmrs"}.intersection(services)
-    choices = {value.disable_goes for name, value in parsed.items()
-               if name in participants and value.disable_goes is not None}
-    if args.disable_goes is not None:
-        choices.add(args.disable_goes)
-    if len(choices) > 1:
-        raise ValueError("conflicting --disable-goes options change the dependency fingerprint")
-    if choices:
-        args.disable_goes = choices.pop()
+    for attribute in ("disable_goes", "disable_ctam", "disable_stormprob"):
+        choices = {getattr(value, attribute) for name, value in parsed.items()
+                   if name in participants and getattr(value, attribute, None) is not None}
+        if getattr(args, attribute, None) is not None:
+            choices.add(getattr(args, attribute))
+        if len(choices) > 1:
+            flag = "--" + attribute.replace("_", "-")
+            raise ValueError(f"conflicting {flag} options change the dependency fingerprint")
+        if choices:
+            setattr(args, attribute, choices.pop())
 
 
 def _parse_args(argv=None):

@@ -390,7 +390,10 @@ a supplied payload validator, repairs missing notifications, and returns pending
 input IDs. Publication failure leaves the acquisition committed for recovery.
 
 `InputInventory.publish_scan()` uses the shared replay input lease to select
-and pin inputs before retention can delete them. The pure `evaluate_scan()`
+and pin inputs before retention can delete them. The ingest publisher drains
+its queue in batches and evaluates each affected scan once per batch, and
+parsed records are cached per file version, so a backfill does not re-read the
+whole inventory under the lease for every committed file. The pure `evaluate_scan()`
 requires every check product in the normalized scan, selects previous history
 separately, and evaluates mandatory integration and enabled RAP/GLM inputs.
 Frozen auxiliary settings carry the RAP age budget. Start, integration, and
@@ -408,8 +411,14 @@ records that no layer is configured. Artifact and index verification before
 successful acknowledgment belongs to the renderer consumer in phase 6.
 
 Retention protects pending notifications, active Core selections, explicit
-worker pins, and detection/optional history pins. Cleanup uses the same
-nonblocking replay lease; callers retry on lock contention. Only acknowledged,
+worker pins, and detection/optional history pins. Every selection, pin and
+retention pass takes the same replay lease, a thread re-entrant cross-process
+mutex with a bounded wait (`runtime.handoff.input_lock_timeout_seconds`) that
+raises `InputLockTimeout` at its deadline. Filesystem cleanup guarded by
+`guard_cleanup` still makes one non-blocking attempt and defers while any
+holder, including its own thread, is active. Core releases its pins without
+letting a lock failure mask the cycle result; leftover `core:<scan>` pins are
+swept at Core startup and before each cycle. Only acknowledged,
 unreferenced inputs older than the caller's rediscovery cutoff are eligible.
 Identity tombstones precede deletion so reconciliation can finish interrupted
 cleanup and reject conflicting rediscovery. File verification caches use file

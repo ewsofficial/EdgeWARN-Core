@@ -102,6 +102,10 @@ nexrad_coordination:
 # Set false only when intentionally running components independently.
 handoff:
   enabled: true
+  # Bounded wait for the shared raw-input lock in seconds; past it the operation fails and retries. Bound: 1..600.
+  input_lock_timeout_seconds: 30
+  # Warn when one holder keeps the shared raw-input lock longer than this, in seconds. Bound: 0.1..600.
+  input_lock_hold_warning_seconds: 5
 
 # Optional profiler path; null disables profiling overhead.
 profiling:

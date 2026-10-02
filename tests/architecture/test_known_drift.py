@@ -413,7 +413,8 @@ def test_scheduler_lookback_and_perf_gate_have_no_literals():
 
     recorded = _scheduler_yaml()["scheduler"]
     assert modifier_lookup_max_entries() == recorded["modifier_lookup_max_entries"] == 20
-    assert s3_lookback_hours() == recorded["s3_lookback_hours"] == 2
+    # Bounded by the 60-minute raw-input retention (catalog invariant).
+    assert s3_lookback_hours() == recorded["s3_lookback_hours"] == 1
     assert slow_check_log_threshold_ms() == recorded["slow_check_log_threshold_ms"] == 2000
 
     source = (REPO_ROOT / "src/EdgeWARN/schedule/scheduler.py").read_text(encoding="utf-8")

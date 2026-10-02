@@ -134,7 +134,18 @@ path-based editor and require restart when the consuming service is deployed.
 No new CLI flags or environment variables are introduced in these phases.
 
 - `scheduler.ingest_poll_seconds`: 10 seconds, bounded to 1–300. Discovery uses
-  the existing `scheduler.s3_lookback_hours` window.
+  the existing `scheduler.s3_lookback_hours` window (1 hour). That window must
+  not exceed unpinned raw-input retention (`runtime.ingest.retention_minutes`,
+  inheriting `ingest.mrms.cleanup_max_age_minutes`); configuration validation
+  (`validate_all_configs`, `python -m common.config.validate`) rejects a longer
+  window, and the ingest service also clamps its listing to retention.
+- `runtime.handoff.input_lock_timeout_seconds`: 30 seconds, bounded to 1–600.
+  The shared raw-input lock is a short cross-process mutex; an operation waits
+  up to this long for it and then fails with `InputLockTimeout` and retries.
+  Ownership locks (service single-instance locks, the primary lease) still
+  fail fast, and cleanup still makes a single attempt and defers.
+- `runtime.handoff.input_lock_hold_warning_seconds`: 5 seconds, bounded to
+  0.1–600. A holder that keeps the raw-input lock longer logs a warning.
 - `runtime.consumers.core_readiness_seconds` and
   `runtime.consumers.ewmrs_notification_seconds`: 1 second, bounded to 0.1–1.
 - `runtime.ingest`: listing/download/decode/auxiliary concurrency, per-listing
@@ -156,7 +167,11 @@ for RAP and GLM independently of MRMS. The 8192 MiB disk budget is a backpressur
 limit, never permission to delete an actively referenced input.
 
 The frozen dependency fingerprint includes the registry configuration and
-RAP/GLM enablement and effective auxiliary source/freshness settings. Later producers and consumers must compare it before using
+RAP/GLM enablement and effective auxiliary source/freshness settings. With CTAM
+and StormProb enabled it also lists every StormProb MRMS source as a mandatory
+integration input, so `--disable-ctam`/`--disable-stormprob` (or
+`runtime.run.disable_ctam`/`disable_stormprob`) are dependency-shared flags
+that ingest, Core and EWMRS must agree on. Later producers and consumers must compare it before using
 readiness. Phase-one baselines live in
 `tests/config_baseline/independent_ingest_{dependencies,settings}.json`;
 `tests/fixtures/ingest/source_arrivals.json` defines missing-check, delayed-layer,

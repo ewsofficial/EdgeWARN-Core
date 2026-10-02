@@ -46,6 +46,13 @@ from util.runtime.ingest_handoff import IngestRecordError, contained, now, utc
 UTC = timezone.utc
 SETTLED_STATES = ("committed", "abandoned")
 
+#: Acquisition priority tiers, most urgent first. Check products decide whether
+#: a scan can start at all, mandatory-integration products gate Core
+#: integration, and everything else is optional enrichment or rendering.
+TIER_CHECK = 0
+TIER_MANDATORY = 1
+TIER_OPTIONAL = 2
+
 
 class AcquisitionBacklogFull(RuntimeError):
     """The bounded job window is saturated; callers must report backpressure."""
@@ -97,6 +104,16 @@ class IngestResources:
                      "shutdown_timeout_seconds"):
             if getattr(self, name) < 1:
                 raise ValueError(f"ingest resource {name} must be positive")
+
+    @property
+    def listing_window_minutes(self):
+        """Effective listing lookback, never wider than raw-input retention.
+
+        Listing past retention only downloads inputs that maintenance retires
+        as soon as they render. Catalog validation rejects such a lookback; the
+        clamp also protects resources built with explicit overrides.
+        """
+        return min(self.lookback_hours * 60, self.retention_minutes)
 
     @property
     def reserved_slots(self):
@@ -156,7 +173,9 @@ class AcquisitionJob:
     ``identity`` is what the ledger dedupes on. For MRMS it is the discovered
     object's mirror-independent logical identity, so an S3 and an HTTPS
     observation of the same product minute collapse into one job. For RAP it is
-    the analysis hour, and for GLM the validated scan minute.
+    the analysis hour, and for GLM the validated scan minute. ``tier`` orders
+    admission (see ``TIER_*``); ``protected`` marks check products for the
+    reserved-slot rule.
     """
 
     identity: str
@@ -164,6 +183,7 @@ class AcquisitionJob:
     product_id: str
     target: datetime
     protected: bool = False
+    tier: int = TIER_OPTIONAL
     discovered: object | None = None
     attempts: int = 0
     retry_at: float = 0.0
@@ -212,10 +232,15 @@ class AcquisitionLedger:
             return True
 
     def due(self, at_monotonic):
-        """Eligible jobs, check inputs first, then oldest observation first."""
+        """Eligible jobs by tier, newest observation first within a tier.
+
+        Newest-first means a cold-start backlog fetches the freshest complete
+        scan before working back through older history, so realtime readiness
+        never waits behind a window of stale downloads.
+        """
         with self._lock:
             ready = [job for job in self._queued.values() if job.retry_at <= at_monotonic]
-        ready.sort(key=lambda job: (not job.protected, job.target, job.identity))
+        ready.sort(key=lambda job: (job.tier, -job.target.timestamp(), job.identity))
         return tuple(ready)
 
     def waiting_checks(self, at_monotonic):
@@ -423,7 +448,7 @@ class IngestService:
         self._last_poll_at = at
         self._dispatch_listings(monotonic_now, at)
         self._dispatch_acquisitions(monotonic_now)
-        self._dispatch_auxiliary(at)
+        self._dispatch_auxiliary(at, monotonic_now)
         if (self._last_reconcile is None or
                 monotonic_now - self._last_reconcile >= self.resources.reconcile_interval_seconds):
             self._last_reconcile = monotonic_now
@@ -442,12 +467,12 @@ class IngestService:
             self._pools["ingest-listing"].submit(self._list_product, spec, start, end)
 
     def _observation_window(self, at):
-        """Sliding observation lookback, widened to cover pending scans."""
-        start = at - timedelta(hours=self.resources.lookback_hours)
-        for scan in self._tracked_scans():
-            if scan < start:
-                start = scan
-        return start, at
+        """Sliding observation lookback, bounded by the retention horizon.
+
+        It is not widened for older pending scans: a scan older than retention
+        cannot keep its inputs, so listing for it is wasted work.
+        """
+        return at - timedelta(minutes=self.resources.listing_window_minutes), at
 
     def _list_product(self, spec, start, end):
         dispatched = time.monotonic()
@@ -470,7 +495,8 @@ class IngestService:
             identity = "mrms:" + "|".join(str(part) for part in obj.logical_identity)
             job = AcquisitionJob(
                 identity=identity, kind="mrms", product_id=obj.product_id,
-                target=obj.observation_time, protected=spec.discovery, discovered=obj)
+                target=obj.observation_time, protected=spec.discovery,
+                tier=self._tier(spec), discovered=obj)
             try:
                 if self.ledger.offer(job):
                     offered += 1
@@ -483,6 +509,13 @@ class IngestService:
         self._debug(
             f"listed {spec.product_id}: {len(found)} object(s) in window, {offered} newly "
             f"queued, {len(found) - offered} already known")
+
+    def _tier(self, spec):
+        if spec.discovery:
+            return TIER_CHECK
+        if spec.product_id in self.dependencies.mandatory_integration:
+            return TIER_MANDATORY
+        return TIER_OPTIONAL
 
     def _run_listing(self, spec, start, end):
         if self._lister is not None:
@@ -535,7 +568,9 @@ class IngestService:
         if pool is None:
             return
         capacity = self.resources.download_concurrency
-        due = self.ledger.due(monotonic_now)
+        # Auxiliary RAP/GLM jobs share the ledger for dedupe and settlement
+        # only; they are dispatched on their own pool by _dispatch_auxiliary.
+        due = tuple(job for job in self.ledger.due(monotonic_now) if job.kind == "mrms")
         if not due:
             return
         waiting_other = any(not job.protected for job in due)
@@ -596,18 +631,32 @@ class IngestService:
 
     # -- auxiliary sources ----------------------------------------------
 
-    def _dispatch_auxiliary(self, at):
+    def _dispatch_auxiliary(self, at, monotonic_now=None):
+        """Submit due auxiliary retries, then newly offered RAP/GLM targets.
+
+        Every submission first takes the job out of the ledger's queue, so a
+        job is in flight exactly once and the MRMS dispatcher never sees it.
+        """
+        monotonic_now = self._clock() if monotonic_now is None else monotonic_now
+        for job in self.ledger.due(monotonic_now):
+            if job.kind != "mrms":
+                self._submit_auxiliary(job)
         for kind, target in self._auxiliary_targets(at):
             identity = f"{kind}:{target.isoformat()}"
             job = AcquisitionJob(identity=identity, kind=kind,
                                  product_id=kind.upper(), target=target)
             try:
                 if self.ledger.offer(job):
-                    self._pools["ingest-auxiliary"].submit(self._acquire_auxiliary, job)
+                    self._submit_auxiliary(job)
                 else:
                     self._metrics["duplicates"] += 1
             except AcquisitionBacklogFull:
                 self._add_reason(f"auxiliary backlog full; deferred {identity}")
+
+    def _submit_auxiliary(self, job):
+        if self.ledger.take(job.identity) is None:
+            return
+        self._pools["ingest-auxiliary"].submit(self._acquire_auxiliary, job)
 
     def _auxiliary_targets(self, at):
         """Candidate RAP analysis hours and GLM scan times, in that order.
@@ -662,22 +711,62 @@ class IngestService:
     # -- publisher thread ------------------------------------------------
 
     def _publisher_loop(self):
+        """Drain queued work in batches, evaluating each affected scan once.
+
+        A backfill commits many files for the same scan in quick succession.
+        Evaluating the scan after every one re-reads the whole inventory under
+        the shared input lock, so completions only collect their scans and the
+        union is evaluated once before any other kind of work (and at the end
+        of each drained batch), preserving ordering against maintenance.
+        """
         while True:
-            item = self._work.get()
-            if item.kind == "shutdown":
-                self._work.task_done()
-                return
+            batch = [self._work.get()]
+            while True:
+                try:
+                    batch.append(self._work.get_nowait())
+                except queue.Empty:
+                    break
+            pending_scans: set[datetime] = set()
+            stop = False
             try:
-                self._apply(item)
-            except Exception as exc:
-                self._warn(f"publisher {item.kind} failed: {type(exc).__name__}: {exc}")
-                self._add_reason(f"publisher {item.kind} failed: {type(exc).__name__}: {exc}")
+                for item in batch:
+                    if stop:
+                        continue
+                    if item.kind != "completion":
+                        self._flush_evaluations(pending_scans)
+                    if item.kind == "shutdown":
+                        stop = True
+                        continue
+                    try:
+                        scans = self._apply(item)
+                        if scans:
+                            pending_scans.update(scans)
+                    except Exception as exc:
+                        self._warn(f"publisher {item.kind} failed: {type(exc).__name__}: {exc}")
+                        self._add_reason(f"publisher {item.kind} failed: {type(exc).__name__}: {exc}")
+                self._flush_evaluations(pending_scans)
             finally:
-                self._work.task_done()
+                # Acknowledge only after the batch's evaluations ran, so an
+                # observer of ``unfinished_tasks`` sees fully processed work.
+                for _ in batch:
+                    self._work.task_done()
+            if stop:
+                return
+
+    def _flush_evaluations(self, scans):
+        if not scans:
+            return
+        pending = set(scans)
+        scans.clear()
+        try:
+            self._evaluate(pending)
+        except Exception as exc:
+            self._warn(f"publisher evaluation failed: {type(exc).__name__}: {exc}")
+            self._add_reason(f"publisher evaluation failed: {type(exc).__name__}: {exc}")
 
     def _apply(self, item):
         if item.kind == "completion":
-            self._publish_completion(item)
+            return self._publish_completion(item)
         elif item.kind == "startup":
             self._reconcile()
         elif item.kind == "maintenance":
@@ -700,7 +789,8 @@ class IngestService:
             f"committed {completed.record.family}:{completed.record.product} for "
             f"{completed.record.analysis_time.isoformat()} as input {record.key[:12]}"
             f"{' (reused)' if completed.reused else ''}")
-        self._evaluate(self._scans_for(completed.record))
+        # The publisher loop evaluates the union of a batch's scans once.
+        return self._scans_for(completed.record)
 
     def _index_committed(self, key, staged):
         with self._index_lock:

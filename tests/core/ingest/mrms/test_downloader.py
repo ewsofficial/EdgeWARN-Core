@@ -12,14 +12,38 @@ def test_atomic_netcdf_publish_hides_partial_output(tmp_path):
     class Dataset:
         def to_netcdf(self, path, *, engine):
             assert path != destination
-            assert path.name == f".{destination.name}.part"
+            assert path.name.startswith(f".{destination.name}.")
+            assert path.name.endswith(".part")
             assert engine == "netcdf4"
             path.write_bytes(b"complete-netcdf")
 
     ingest_downloader._write_netcdf_atomically(Dataset(), destination)
 
     assert destination.read_bytes() == b"complete-netcdf"
-    assert not (tmp_path / f".{destination.name}.part").exists()
+    assert list(tmp_path.glob("*.part")) == []
+
+
+def test_concurrent_netcdf_writers_never_share_a_temporary_path(tmp_path):
+    """Two writers of one scan (the 4c HDF5 .part race) use distinct temp files."""
+    destination = tmp_path / "OR_GLM-L2-LCFA_merged_20260419-001000.nc"
+    seen = []
+
+    class Dataset:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def to_netcdf(self, path, *, engine):
+            seen.append(path)
+            if len(seen) == 1:
+                # The second writer starts while the first is still writing.
+                ingest_downloader._write_netcdf_atomically(Dataset(b"second"), destination)
+            path.write_bytes(self.payload)
+
+    ingest_downloader._write_netcdf_atomically(Dataset(b"first"), destination)
+
+    assert len(seen) == 2 and seen[0] != seen[1]
+    assert destination.read_bytes() == b"first"
+    assert list(tmp_path.glob("*.part")) == []
 
 
 def test_download_goes_product_filters_to_requested_abi_channel(monkeypatch, tmp_path):

@@ -475,7 +475,34 @@ def reset_cache() -> None:
 
 def validate_all_configs(*, config_dir: str | os.PathLike[str] | None = None) -> tuple[Any, ...]:
     """Validate and cache every catalog before application startup side effects."""
-    return tuple(load_config(name, config_dir=config_dir) for name in CONFIG_NAMES)
+    documents = tuple(load_config(name, config_dir=config_dir) for name in CONFIG_NAMES)
+    validate_catalog_invariants(config_dir=config_dir)
+    return documents
+
+
+def validate_catalog_invariants(*, config_dir: str | os.PathLike[str] | None = None) -> None:
+    """Cross-file rules a single document schema cannot express.
+
+    The realtime ingest listing window (``scheduler.s3_lookback_hours``) must
+    not exceed unpinned raw-input retention (``runtime.ingest.retention_minutes``,
+    inheriting ``ingest.mrms.cleanup_max_age_minutes``). Otherwise every input
+    older than retention is downloaded only to be retired as soon as it renders.
+    """
+    scheduler = load_config("scheduler", config_dir=config_dir)["scheduler"]
+    retention = load_config("runtime", config_dir=config_dir)["ingest"]["retention_minutes"]
+    source = "runtime.yaml ingest.retention_minutes"
+    if retention is None:
+        retention = load_config("ingest", config_dir=config_dir)["mrms"].get("cleanup_max_age_minutes")
+        source = "ingest.yaml mrms.cleanup_max_age_minutes"
+    if retention is None:
+        return
+    lookback_minutes = float(scheduler["s3_lookback_hours"]) * 60
+    if lookback_minutes > float(retention):
+        raise ConfigError(
+            "scheduler.yaml", "scheduler.s3_lookback_hours",
+            f"listing lookback of {lookback_minutes:g} minutes exceeds the {retention:g}-minute "
+            f"raw-input retention ({source}); lower the lookback or raise retention",
+        )
 
 
 def load_config(name: str, *, config_dir: str | os.PathLike[str] | None = None) -> Any:

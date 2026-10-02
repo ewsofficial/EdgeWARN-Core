@@ -66,6 +66,15 @@ class TestIngestResources:
         assert second == min(resolved.retry_max_seconds, resolved.retry_initial_seconds * 2)
         assert resolved.retry_delay(99) == resolved.retry_max_seconds
 
+    def test_listing_window_never_exceeds_raw_input_retention(self):
+        """test-run-1001 listed 2 h but retained 60 min, so files were retired on arrival."""
+        resolved = IngestResources.resolve()
+        assert resolved.listing_window_minutes <= resolved.retention_minutes
+        wide = resolved.with_overrides(lookback_hours=3, retention_minutes=60)
+        assert wide.listing_window_minutes == 60
+        narrow = resolved.with_overrides(lookback_hours=0.5, retention_minutes=60)
+        assert narrow.listing_window_minutes == 30
+
     def test_reserved_slots_never_consume_the_whole_window(self):
         assert IngestResources.resolve().reserved_slots == 1
         single = IngestResources.resolve().with_overrides(download_concurrency=1)
@@ -95,15 +104,30 @@ class TestAcquisitionLedger:
         assert ledger.offer(self.job("mrms:A|2026-01-01T00:00:00+00:00")) is False
         assert ledger.counts()["pending_jobs"] == 1
 
-    def test_due_orders_check_inputs_first_then_oldest_observation(self):
-        ledger = AcquisitionLedger(capacity=8)
-        later = self.job("mrms:B", at=datetime(2026, 1, 1, 0, 2, tzinfo=UTC))
-        earlier = self.job("mrms:C", at=datetime(2026, 1, 1, 0, 0, tzinfo=UTC))
-        check_later = self.job("mrms:D", protected=True, at=datetime(2026, 1, 1, 0, 4, tzinfo=UTC))
-        for job in (later, earlier, check_later):
+    def test_due_orders_check_then_mandatory_then_optional_newest_first(self):
+        """test-run-1001 backfilled oldest-first, so the freshest scan came last."""
+        from util.runtime.ingest_service import TIER_CHECK, TIER_MANDATORY
+
+        ledger = AcquisitionLedger(capacity=16)
+        minute = lambda m: datetime(2026, 1, 1, 0, m, tzinfo=UTC)  # noqa: E731
+        jobs = [
+            self.job("mrms:optional-old", at=minute(0)),
+            self.job("mrms:optional-new", at=minute(4)),
+            self.job("mrms:mandatory-old", at=minute(0)),
+            self.job("mrms:mandatory-new", at=minute(4)),
+            self.job("mrms:check-old", protected=True, at=minute(0)),
+            self.job("mrms:check-new", protected=True, at=minute(4)),
+        ]
+        for job in jobs:
+            if job.protected:
+                job.tier = TIER_CHECK
+            elif "mandatory" in job.identity:
+                job.tier = TIER_MANDATORY
             ledger.offer(job)
         assert [job.identity for job in ledger.due(0.0)] == [
-            "mrms:D", "mrms:C", "mrms:B"]
+            "mrms:check-new", "mrms:check-old",
+            "mrms:mandatory-new", "mrms:mandatory-old",
+            "mrms:optional-new", "mrms:optional-old"]
 
     def test_backlog_is_bounded_and_reported_explicitly(self):
         ledger = AcquisitionLedger(capacity=2)

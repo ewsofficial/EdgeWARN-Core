@@ -36,6 +36,27 @@ CORE_PRODUCTS = (
 PROTECTED_IDS = frozenset(item.product_id for item in CORE_PRODUCTS)
 DISCOVERY_IDS = tuple(item.product_id for item in CORE_PRODUCTS)
 
+# MRMS products StormProb reads at integration. When CTAM and StormProb are both
+# enabled these become mandatory integration dependencies, so Core is never
+# released into integration without them. EdgeWARN.ctam.preflight declares the
+# per-feature mapping (STORMPROB_MRMS_SOURCES); a contract test keeps the two
+# lists identical without making the ingest service import the CTAM stack.
+STORMPROB_INTEGRATION_PRODUCTS = (
+    "Reflectivity_0C_00.50",
+    "Reflectivity_-5C_00.50",
+    "Reflectivity_-15C_00.50",
+    "MergedReflectivityAtLowestAltitude_00.50",
+    "PrecipRate_00.00",
+    "VIL_00.50",
+    "VIL_Density_00.50",
+    "VII_00.50",
+    "EchoTop_18_00.50",
+    "EchoTop_30_00.50",
+    "EchoTop_50_00.50",
+    "MergedAzShear_0-2kmAGL_00.50",
+    "MergedAzShear_3-6kmAGL_00.50",
+)
+
 # Compatibility names only, never an enabled-product catalog. Supported through
 # 3.x; earliest removal is 4.0 with a deprecation notice.
 LEGACY_ALIASES = MappingProxyType({
@@ -118,8 +139,15 @@ class IngestDependencies:
 def resolve_dependencies(registry, *, check=None, detection=None,
                          mandatory_integration=None, enrichment=(),
                          include_rap=True, include_glm=True, mrms_core_only=False,
-                         disable_goes=False, auxiliary_settings=None):
-    """Pure preflight, also usable with explicit future dependency selections."""
+                         disable_goes=False, auxiliary_settings=None,
+                         require_stormprob_inputs=False):
+    """Pure preflight, also usable with explicit future dependency selections.
+
+    ``require_stormprob_inputs`` adds every StormProb MRMS source to the
+    mandatory integration set (the effective CTAM-and-StormProb-enabled
+    state). A disabled source then fails this preflight instead of letting
+    integration start without it.
+    """
     enabled = {p.product_id for p in registry.products}
     def canonical(values):
         # Only the legacy null ProbSevere modifier is normalized. Short product
@@ -131,6 +159,8 @@ def resolve_dependencies(registry, *, check=None, detection=None,
                           (p.product_id for p in registry.for_phase("detection")))
     mandatory = canonical(mandatory_integration if mandatory_integration is not None else
                           (p.product_id for p in registry.for_phase("integration") if p.required))
+    if require_stormprob_inputs:
+        mandatory = canonical((*mandatory, *STORMPROB_INTEGRATION_PRODUCTS))
     enrichment = canonical(enrichment)
     validate_dependency_sets(enabled, check, detection, mandatory, enrichment)
     optional = tuple(sorted(enabled - set(detection) - set(mandatory)))

@@ -33,9 +33,15 @@ def test_primary_loop_records_fatal_cycle_and_exits(tmp_path, monkeypatch):
     monkeypatch.setattr(primary_service, 'require_ingest_producer',
                         lambda *_args, **_kwargs: True)
 
+    class Handoff:
+        @staticmethod
+        def release_stale_pins(**_kwargs):
+            return ()
+
     class Reader:
         def __init__(self, **_kwargs):
             self.skipped = []
+            self.handoff = Handoff()
 
         def pending_scans(self):
             return (cycle_time,)

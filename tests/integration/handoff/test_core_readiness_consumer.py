@@ -402,6 +402,60 @@ class TestPinLifecycle:
             record.key for record in inventory.handoff.records("input")}
 
 
+    def test_a_failing_pin_release_never_turns_a_clean_cycle_into_a_failure(
+            self, producer, tmp_path, worker, monkeypatch):
+        """test-run-1001: a BlockingIOError in release_pin crashed Core with rc=1."""
+        registry, dependencies, inventory = producer
+        for product in CHECKS:
+            notify(inventory, commit(inventory, product))
+        publish(inventory, dependencies)
+
+        def contended(self, owner):
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+
+        monkeypatch.setattr(IngestHandoff, "release_pin", contended)
+        outcome = run_cycle(tmp_path, dependencies)
+        assert outcome.completed
+
+    def test_a_failing_pin_release_never_masks_the_original_exception(
+            self, producer, tmp_path, worker, monkeypatch):
+        from util.runtime import cycle
+
+        registry, dependencies, inventory = producer
+        for product in CHECKS:
+            notify(inventory, commit(inventory, product))
+        publish(inventory, dependencies)
+
+        def contended(self, owner):
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+
+        def interrupted(self, process, name):
+            raise SystemExit("operator shutdown")
+
+        monkeypatch.setattr(IngestHandoff, "release_pin", contended)
+        monkeypatch.setattr(cycle.StartedProcessRegistry, "start", interrupted)
+        with pytest.raises(SystemExit, match="operator shutdown"):
+            run_cycle(tmp_path, dependencies)
+
+    def test_a_pin_left_by_an_earlier_cycle_is_swept(self, producer, tmp_path, worker):
+        registry, dependencies, inventory = producer
+        committed = [notify(inventory, commit(inventory, product)) for product in CHECKS]
+        publish(inventory, dependencies)
+        earlier = canonical_cycle_id(T - timedelta(minutes=2))
+        (inventory.handoff.root / "scans" / earlier).mkdir(parents=True)
+        stale = inventory.handoff.pin(f"core:{earlier}", [committed[0].key])
+        unrelated = inventory.handoff.pin("history", [committed[1].key])
+        before = {pin.key for pin in inventory.handoff.records("pin")}
+        assert {stale.key, unrelated.key} <= before
+
+        outcome = run_cycle(tmp_path, dependencies)
+
+        assert outcome.completed
+        after = {pin.key for pin in inventory.handoff.records("pin")}
+        # The dead cycle's pin is gone; non-Core pins are never touched.
+        assert after == before - {stale.key}
+
+
 class TestHandoffWiring:
     def test_realtime_core_publishes_no_legacy_render_triggers(self, producer, tmp_path,
                                                                 worker):

@@ -339,10 +339,10 @@
             "units": "K"
           },
           {
-            "description": "RAP surface mean sea level pressure",
+            "description": "RAP mean sea level pressure (MAPS system reduction)",
             "filter": {
               "level": 0,
-              "typeOfLevel": "surface"
+              "typeOfLevel": "meanSea"
             },
             "name": "RAP_MSLP_Surface",
             "outdir": "MSLP_Surface",
@@ -351,6 +351,7 @@
               "min": 95000.0
             },
             "short_names": [
+              "mslma",
               "prmsl"
             ],
             "units": "Pa"
@@ -2044,7 +2045,9 @@
         "render_wait_seconds": 30
       },
       "handoff": {
-        "enabled": true
+        "enabled": true,
+        "input_lock_hold_warning_seconds": 5,
+        "input_lock_timeout_seconds": 30
       },
       "identity": {
         "contact": "ewsbackend@gmail.com",
@@ -2130,7 +2133,7 @@
     "scheduler": {
       "scheduler": {
         "modifier_lookup_max_entries": 20,
-        "s3_lookback_hours": 2,
+        "s3_lookback_hours": 1,
         "slow_check_log_threshold_ms": 2000,
         "ingest_poll_seconds": 10
       },

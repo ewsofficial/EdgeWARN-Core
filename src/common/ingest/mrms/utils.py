@@ -59,6 +59,37 @@ def merge_files(file_list, io_manager):
     return merged_dataset
 
 
+# Encoding keys that describe on-disk packing and remain valid after a
+# concatenation changes a variable's length. Chunk/storage layout keys do not.
+_GLM_PACKING_KEYS = ("dtype", "scale_factor", "add_offset", "_FillValue",
+                     "missing_value", "_Unsigned", "zlib", "complevel", "shuffle")
+
+
+def _glm_packing_encoding(source):
+    """Packing encoding to write a merged GLM variable without losing NaNs.
+
+    GLM L2 packs most floating-point fields into (unsigned) integers, and
+    several of them (for example ``event_lat``/``event_lon`` and the time
+    offsets) carry no ``_FillValue``. Writing float data back through an
+    integer encoding without a fill value turns NaNs into integers, so those
+    variables are written unpacked instead. Packing that does declare a fill
+    value is preserved.
+    """
+    import numpy as np
+
+    encoding = {key: source.encoding[key] for key in _GLM_PACKING_KEYS if key in source.encoding}
+    dtype = encoding.get("dtype")
+    if dtype is None:
+        return encoding
+    packs_float = (np.issubdtype(np.dtype(dtype), np.integer)
+                   and np.issubdtype(source.dtype, np.floating))
+    has_fill = encoding.get("_FillValue") is not None or encoding.get("missing_value") is not None
+    if packs_float and not has_fill:
+        for key in ("dtype", "scale_factor", "add_offset", "_Unsigned", "_FillValue", "missing_value"):
+            encoding.pop(key, None)
+    return encoding
+
+
 def merge_glm_files(file_list, io_manager):
     """
     Merge multiple GLM L2 NetCDF files into a single dataset.
@@ -163,6 +194,11 @@ def merge_glm_files(file_list, io_manager):
         # 4. Copy other metadata/attributes from the first dataset
         # (xr.merge might have done some of this, but we ensure global attrs are preserved)
         merged.attrs = datasets[0].attrs
+
+        # Concatenation does not reliably carry each variable's packing, and the
+        # source packing can write NaNs as integers. Set it explicitly.
+        for name in (*event_vars, *group_vars, *flash_vars):
+            merged[name].encoding = _glm_packing_encoding(datasets[0][name])
         
         # Update specific attributes if needed (e.g., time coverage)
         merged.attrs["time_coverage_start"] = str(min_start)

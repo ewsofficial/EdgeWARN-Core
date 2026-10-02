@@ -50,7 +50,8 @@ def _parse_args(argv=None):
 
     Resolution order matches the other direct services: an explicit flag wins,
     then the runtime catalog. Acquisition-only flags belong to this service; the
-    dependency-shared flags (``--mrms-core-only``, ``--disable-goes``) are
+    dependency-shared flags (``--mrms-core-only``, ``--disable-goes``,
+    ``--disable-ctam``, ``--disable-stormprob``) are
     accepted here so the producer's effective dependency agreement is explicit,
     and the launcher propagates the same value to every consumer.
     """
@@ -61,6 +62,8 @@ def _parse_args(argv=None):
     )
     run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
     for flag, key in (("disable_goes", "run.disable_goes"),
+                      ("disable_ctam", "run.disable_ctam"),
+                      ("disable_stormprob", "run.disable_stormprob"),
                       ("mrms_core_only", "run.mrms_core_only"),
                       ("profile", "run.profile")):
         setattr(args, flag, overlay.resolve(
@@ -96,7 +99,8 @@ def main():
         sys.exit(1)
     try:
         dependencies = get_ingest_dependencies(
-            mrms_core_only=args.mrms_core_only, disable_goes=args.disable_goes)
+            mrms_core_only=args.mrms_core_only, disable_goes=args.disable_goes,
+            disable_ctam=args.disable_ctam, disable_stormprob=args.disable_stormprob)
     except ValueError as exc:
         print(f"[Ingest] Dependency preflight failed: {exc}")
         sys.exit(1)

@@ -93,4 +93,5 @@ def test_consumer_builds_dependencies_with_glm_setting(monkeypatch, disable_goes
     monkeypatch.setattr("util.runtime.process_identity.set_parent_death_signal", lambda: None)
     with pytest.raises(StopAfterResolution):
         ewmrs_consumer.ewmrs_consumer_loop("/tmp/unused", object(), disable_goes=disable_goes)
-    assert observed == [{"disable_goes": disable_goes}]
+    assert observed == [{"disable_goes": disable_goes, "disable_ctam": False,
+                         "disable_stormprob": False}]

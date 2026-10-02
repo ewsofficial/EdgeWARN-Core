@@ -118,7 +118,8 @@ def test_default_config_defines_rap_uint16_layers():
 
     expected_surface_layers = {
         "RAP_ThetaE_Surface": {"short_names": ["papt"], "filter": {"typeOfLevel": "surface", "level": 0}},
-        "RAP_MSLP_Surface": {"short_names": ["prmsl"], "filter": {"typeOfLevel": "surface", "level": 0}},
+        # awp130 carries MSLP as mslma at meanSea; prmsl at surface never matched.
+        "RAP_MSLP_Surface": {"short_names": ["mslma", "prmsl"], "filter": {"typeOfLevel": "meanSea", "level": 0}},
         "RAP_SnowDepth_Surface": {"short_names": ["sde"], "filter": {"typeOfLevel": "surface", "level": 0}},
         "RAP_WetBulbZeroHeight": {"short_names": ["gh"], "filter": {"typeOfLevel": "lowestLevelWetBulb0", "level": 0}},
     }
@@ -385,3 +386,21 @@ def test_rap_timestamp_label_comes_from_the_encoded_analysis(tmp_path):
     assert rap_timestamp_label(path) == "20260427-130000"
     assert rap_timestamp_label(path, datetime(2026, 1, 1, tzinfo=timezone.utc)) == \
         "20260427-130000"
+
+
+def test_every_rap_layer_matches_a_message_in_the_awp130_inventory():
+    """test-run-1001: RAP_MSLP_Surface asked for prmsl@surface, which awp130 does
+    not carry (it has mslma@meanSea), so the layer never produced artifacts."""
+    inventory_path = Path(__file__).resolve().parents[2] / "fixtures/rap/awp130_inventory.txt"
+    inventory = set()
+    for line in inventory_path.read_text(encoding="utf-8").splitlines():
+        if line.strip() and not line.startswith("#"):
+            short_name, type_of_level, level = line.split()
+            inventory.add((short_name, type_of_level, int(level)))
+    layers = get_rap_uint16_layers()
+    unmatched = [
+        layer["name"] for layer in layers
+        if not any((short_name, layer["filter"]["typeOfLevel"], int(layer["filter"]["level"]))
+                   in inventory for short_name in layer["short_names"])
+    ]
+    assert layers and unmatched == []

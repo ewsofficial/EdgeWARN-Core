@@ -34,6 +34,7 @@ import json
 import signal
 import sys
 import threading
+import traceback
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -370,6 +371,10 @@ class InputRenderConsumer:
             try:
                 outcome = future.result()
             except Exception as exc:
+                # The exception text alone (e.g. "KeyError: 'render'") does not
+                # locate the failure; keep the stack trace in the service log.
+                self._log(f"[EWMRS] Layer {layer} for input {input_id[:12]} raised:\n"
+                          f"{traceback.format_exc().rstrip()}")
                 attempts = (existing.data["attempts"] + 1) if existing is not None else 1
                 self._fail(input_id, layer, existing, attempts,
                            f"{type(exc).__name__}: {exc}")
@@ -404,8 +409,10 @@ class InputRenderConsumer:
     def _ensure_pool(self):
         if self._pool is None:
             from EWMRS.pipeline import RenderLayerPool
+            from EWMRS.pipeline_config import render_phase_name
 
-            self._pool = RenderLayerPool(phase_name=section("render")["phase_name"])
+            # ``render`` is an ewmrs_pipeline.yaml section, not a runtime.yaml one.
+            self._pool = RenderLayerPool(phase_name=render_phase_name())
         return self._pool
 
     @staticmethod
@@ -429,7 +436,8 @@ class InputRenderConsumer:
             self._pool = None
 
 
-def ewmrs_consumer_loop(base_dir, log_queue, *, stop_event=None, run_id=None, disable_goes=False):
+def ewmrs_consumer_loop(base_dir, log_queue, *, stop_event=None, run_id=None, disable_goes=False,
+                        disable_ctam=False, disable_stormprob=False):
     """Supervised child target: render every notified input until stopped.
 
     ``stop_event`` is optional; without it the loop runs until SIGTERM (whose
@@ -450,7 +458,8 @@ def ewmrs_consumer_loop(base_dir, log_queue, *, stop_event=None, run_id=None, di
 
     import util.file as fs
 
-    dependencies = get_ingest_dependencies(disable_goes=disable_goes)
+    dependencies = get_ingest_dependencies(disable_goes=disable_goes, disable_ctam=disable_ctam,
+                                           disable_stormprob=disable_stormprob)
     consumer = InputRenderConsumer(
         base_dir, run_id=run_id or "ewmrs", dependencies=dependencies,
         log=lambda msg: queue_log(log_queue, str(msg)))

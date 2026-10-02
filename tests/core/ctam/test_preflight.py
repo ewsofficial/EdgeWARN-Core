@@ -134,6 +134,46 @@ def test_stormprob_cycle_requires_final_snapshot_and_complete_features():
         preflight.validate_stormprob_cycle([{'id': '7'}], empty)
 
 
+def _stormprob_manifest(tmp_path, cycle, offset_seconds):
+    from datetime import timedelta
+    from common.ingest.manifest import StagedInput
+
+    inputs = []
+    stamp = cycle + timedelta(seconds=offset_seconds)
+    for source in preflight.STORMPROB_MRMS_SOURCES:
+        path = tmp_path / f"MRMS_{source.product}_{stamp:%Y%m%d-%H%M%S}.grib2"
+        path.write_bytes(b"x")
+        inputs.append(StagedInput(source.product, str(path), stamp, "s3", "mrms"))
+    rap = tmp_path / "RAP.grib2"
+    rap.write_bytes(b"x")
+    inputs.append(StagedInput("RAP", str(rap), cycle.replace(minute=0), "nomads", "rap"))
+    return CycleInputManifest(cycle_time=cycle, inputs=tuple(inputs))
+
+
+def _ready_cell():
+    from EdgeWARN.stormprob import features
+
+    quality = {name: "ok" for name in features.UNIVERSAL_PROPERTY_FEATURES}
+    return {"id": "1", "stormprob": {"observation": {"inference_ready": True, "quality": quality}}}
+
+
+@pytest.mark.parametrize("offset_seconds", [38, 120, -60, -180])
+def test_stormprob_accepts_inputs_stamped_within_the_scan_window(tmp_path, offset_seconds):
+    """MRMS stamps a scan ~38 s after its even minute; the selector picks that
+    file, so the gate must accept it (it rejected any positive offset)."""
+    cycle = datetime(2026, 10, 1, 23, 12, tzinfo=timezone.utc)
+    manifest = _stormprob_manifest(tmp_path, cycle, offset_seconds)
+    assert preflight.validate_stormprob_cycle([_ready_cell()], manifest) is None
+
+
+@pytest.mark.parametrize("offset_seconds", [121, -181])
+def test_stormprob_rejects_inputs_outside_the_scan_window(tmp_path, offset_seconds):
+    cycle = datetime(2026, 10, 1, 23, 12, tzinfo=timezone.utc)
+    manifest = _stormprob_manifest(tmp_path, cycle, offset_seconds)
+    with pytest.raises(preflight.StormProbDependencyError, match="unavailable, stale or invalid"):
+        preflight.validate_stormprob_cycle([_ready_cell()], manifest)
+
+
 def test_stormprob_disable_keeps_external_execution_and_enabled_failure_stops_it(
     tmp_path, monkeypatch,
 ):

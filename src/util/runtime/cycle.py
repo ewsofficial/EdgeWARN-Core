@@ -361,6 +361,39 @@ def readiness_handoff(config: PrimaryCycleConfig):
     )
 
 
+def release_pin_safely(handoff, owner, *, log=print):
+    """Release a Core pin without letting a lock failure change the outcome.
+
+    A failure here must never mask the cycle's own exception or turn a clean
+    cycle into a crash. A pin left behind only delays retention of its inputs;
+    :func:`sweep_core_pins` reclaims it on the next cycle or restart.
+    """
+    try:
+        handoff.release_pin(owner)
+        return True
+    except Exception as exc:
+        log(f"[Readiness] WARNING: could not release pin {owner}; it is left for the "
+            f"next stale-pin sweep: {type(exc).__name__}: {exc}")
+        return False
+
+
+def sweep_core_pins(handoff, *, keep=None, log=print):
+    """Release every Core scan pin except ``keep``'s, tolerating lock failure.
+
+    Core runs one cycle at a time under its single-instance service lock, so a
+    ``core:<scan>`` pin other than the active cycle's belongs to a finished or
+    dead run. Pins are keyed by owner digest, so candidates are derived from
+    the scans the ingest namespace knows about.
+    """
+    try:
+        return handoff.release_stale_pins(
+            prefix="core:", keep=None if keep is None else f"core:{keep}")
+    except Exception as exc:
+        log(f"[Readiness] WARNING: stale Core pin sweep deferred: "
+            f"{type(exc).__name__}: {exc}")
+        return ()
+
+
 def read_ready_phase(handoff, kind, key, dependencies, base_dir, owner):
     """Return a committed phase, verifying its exact pinned bytes, or ``None``.
 
@@ -536,6 +569,7 @@ def run_primary_cycle_once(
     handoff = readiness_handoff(config)
     key = canonical_cycle_id(dt)
     owner = f"core:{key}"
+    sweep_core_pins(handoff, keep=key)
 
     # Freeze the producer generation for the spawned worker, exactly as before.
     from common.ingest.mrms.config import get_registry
@@ -551,7 +585,7 @@ def run_primary_cycle_once(
     start = read_ready_phase(handoff, "core-start-ready", key, config.dependencies,
                              config.base_dir, owner)
     if start is None:
-        handoff.release_pin(owner)
+        release_pin_safely(handoff, owner)
         return _unavailable_outcome(
             dt,
             "No committed start readiness record for this scan; the local check set is "
@@ -560,7 +594,7 @@ def run_primary_cycle_once(
     validate_phase_dependencies(start, config.dependencies)
     detection_manifest = start.to_manifest()
     if detection_manifest is None or detection_manifest.validate_alignment():
-        handoff.release_pin(owner)
+        release_pin_safely(handoff, owner)
         return _unavailable_outcome(
             dt, "The committed start readiness record failed alignment validation")
 
@@ -624,7 +658,7 @@ def run_primary_cycle_once(
         watcher_stop.set()
         if watcher is not None:
             watcher.join(timeout=5)
-        handoff.release_pin(owner)
+        release_pin_safely(handoff, owner)
         started_processes.shutdown()
         raise
     finally:
@@ -639,7 +673,7 @@ def run_primary_cycle_once(
             "ready" if bool(shared_state.get("edgewarn_integration_inputs_ready")) else "unavailable")
     release(optional_complete_event, "optional_complete",
             "complete" if bool(shared_state.get("optional_inputs_complete")) else "failed")
-    handoff.release_pin(owner)
+    release_pin_safely(handoff, owner)
     if watcher is not None and watcher.reason:
         shared_state["errors"] = dict(shared_state.get("errors", {})) | {
             "ingest_readiness": watcher.reason}

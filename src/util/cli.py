@@ -27,6 +27,7 @@ def build_service_parser(service, *, add_help=True):
         add_base_directory_flags(parser)
         parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
         parser.add_argument("--disable-goes", action=argparse.BooleanOptionalAction, default=None)
+        add_stormprob_dependency_flags(parser)
         add_mrms_core_only_flag(parser)
     elif service == "edgewarn":
         add_primary_domain_flags(parser)
@@ -40,6 +41,7 @@ def build_service_parser(service, *, add_help=True):
         parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
         for flag in ("disable-metar", "disable-nws", "disable-wpc", "disable-goes"):
             parser.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None)
+        add_stormprob_dependency_flags(parser)
         add_mrms_core_only_flag(parser)
     elif service == "nexrad":
         add_base_directory_flags(parser)
@@ -82,6 +84,18 @@ def add_primary_processing_flags(parser):
     parser.add_argument("--refl-threshold", type=float, default=None, help="Override the baseline reflectivity threshold used by storm cell detection (default: from detection.yaml)")
     parser.add_argument("--min-seed-percentage", type=float, default=None, help="Override the minimum polygon seed coverage ratio used during gate expansion (default: from detection.yaml)")
     parser.add_argument("--drop-offset", type=float, default=None, help="Override the dynamic reflectivity drop offset used during gate expansion (default: from detection.yaml)")
+
+
+def add_stormprob_dependency_flags(parser):
+    """Dependency-shared CTAM/StormProb switches for ingest and EWMRS.
+
+    With CTAM and StormProb enabled, every StormProb MRMS source is a mandatory
+    integration input, which changes the frozen dependency fingerprint. The
+    producer and every consumer must therefore see the primary's values; the
+    launcher routes them to all three services, like ``--disable-goes``.
+    """
+    parser.add_argument("--disable-ctam", action=argparse.BooleanOptionalAction, default=None, help="Match the primary's CTAM setting so the StormProb integration gate agrees (default: from runtime.yaml)")
+    parser.add_argument("--disable-stormprob", action=argparse.BooleanOptionalAction, default=None, help="Match the primary's StormProb setting so the StormProb integration gate agrees (default: from runtime.yaml)")
 
 
 def add_primary_domain_flags(parser):

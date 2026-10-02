@@ -126,7 +126,7 @@ def _contained(path, root):
 
 def _interlocks(base, stack):
     from util.runtime.handoff import _AdvisoryFileLock, select_pending_records, ConsumerCheckpointStore, phase_record_path
-    from common.ingest.replay import input_lock
+    from common.ingest.replay import input_lock_path
     from util.runtime.services import CANONICAL_SERVICE_NAMES
     for name in CANONICAL_SERVICE_NAMES:
         path = base / 'state/realtime/services' / f'{name}.lock'
@@ -136,7 +136,8 @@ def _interlocks(base, stack):
         except OSError as exc:
             raise ValueError(f'Service {name} must be stopped before migration') from exc
     try:
-        stack.enter_context(input_lock(base))
+        # A single non-blocking attempt: any active holder refuses migration.
+        stack.enter_context(_AdvisoryFileLock(input_lock_path(base)))
     except OSError as exc:
         raise ValueError('Active input pins prevent migration') from exc
     for area in ('cycles', 'consumers', 'leases', 'services'):

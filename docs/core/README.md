@@ -125,7 +125,8 @@ isolated to that layer.
 Current CLI coverage:
 
 - `run_edgewarn.py`: `--lat_limits`, `--lon_limits`, `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-ctam`, `--disable-ctam-modules`, `--ctam-module-dir`, `--list-ctam-modules`, `--check-ctam-modules`, `--disable-tracking`, `--disable-polygon-expansion`, `--disable-goes`, `--disable-ewmrs`, `--disable-metar`, `--disable-nws`, `--disable-wpc`, `--disable-nexrad`, `--mrms-core-only`, `--refl-threshold`, `--min-seed-percentage`, `--drop-offset`
-- `run_ewmrs.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--mrms-core-only`, `--disable-metar`, `--disable-nws`, `--disable-wpc`, `--disable-goes`
+- `run_ewmrs.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--mrms-core-only`, `--disable-metar`, `--disable-nws`, `--disable-wpc`, `--disable-goes`, `--disable-ctam`, `--disable-stormprob` (the last two only select the shared dependency agreement)
+- `run_ingest.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--mrms-core-only`, `--disable-goes`, `--disable-ctam`, `--disable-stormprob`
 - `run_nexrad.py`: `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--mrms-core-only`
 - `run_all.py`: `--services`, the explicitly routed processing flags (`lat/lon`, profile, CTAM/tracking/polygon/GOES/accessory controls, thresholds, and drop offset), plus `--disable-ewmrs` / `--disable-nexrad`; CTAM diagnostic flags are not forwarded
 - `process_historical.py`: `--start`, `--end`, `--lat`, `--lon`, `--base_dir` / `--base-dir`, `--config-dir`, `--profile`, `--disable-ctam`, `--disable-ctam-modules`, `--ctam-module-dir`, `--list-ctam-modules`, `--check-ctam-modules`, `--disable-tracking`, `--disable-polygon-expansion`, `--refl-threshold`, `--min-seed-percentage`, `--drop-offset`

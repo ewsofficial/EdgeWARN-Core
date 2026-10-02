@@ -47,8 +47,9 @@ def _write_netcdf_atomically(dataset, destination: Path) -> None:
     atomically replace the destination only after ``to_netcdf`` succeeds.
     """
     destination = Path(destination)
-    temporary = destination.with_name(f".{destination.name}.part")
-    temporary.unlink(missing_ok=True)
+    # Unique per writer: two concurrent writers of one scan must never share
+    # (and delete or rename) each other's in-progress file.
+    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.part")
     try:
         dataset.to_netcdf(temporary, engine="netcdf4")
         temporary.replace(destination)
