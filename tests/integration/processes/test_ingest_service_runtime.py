@@ -123,7 +123,8 @@ def make_registry(base_dir, additions=(f"MRMS_{PRECIP_RATE}",)):
     return build_registry(catalog, Path(base_dir))
 
 
-def make_service(tmp_path, source, *, clock=None, stop=None, wall=None, **settings):
+def make_service(tmp_path, source, *, clock=None, stop=None, wall=None,
+                 startup_latest_only=True, **settings):
     dependencies = resolve_dependencies(
         source.registry, include_rap=False, include_glm=False,
         auxiliary_settings={"rap": {"max_age_minutes": 180}})
@@ -134,7 +135,8 @@ def make_service(tmp_path, source, *, clock=None, stop=None, wall=None, **settin
         stop_event=stop if stop is not None else threading.Event(), clock=clock,
         wall_clock=wall if wall is not None else (lambda: T), wait=clock.wait,
         resources=IngestResources.resolve().with_overrides(**settings),
-        lister=source.lister, acquirer=source.acquirer, auxiliary=lambda kind, target: ())
+        lister=source.lister, acquirer=source.acquirer, auxiliary=lambda kind, target: (),
+        startup_latest_only=startup_latest_only)
 
 
 def wait_for(predicate, message, *, attempts=1000, delay=0.01):
@@ -329,7 +331,7 @@ class TestDeduplication:
         registry = make_registry(tmp_path)
         previous = T - timedelta(minutes=2)
         source = ScriptedSource(registry, reveal={REFLECTIVITY: [previous, T]})
-        service = make_service(tmp_path, source)
+        service = make_service(tmp_path, source, startup_latest_only=False)
         service.start()
         try:
             poll_periods(service, 2)
@@ -489,7 +491,8 @@ class TestRun1001Regressions:
         scans = [T - timedelta(minutes=2 * step) for step in range(4, -1, -1)]
         source = ScriptedSource(registry, reveal={product: scans
                                                   for product in (*CHECKS, PRECIP_RATE)})
-        service = make_service(tmp_path, source, download_concurrency=1)
+        service = make_service(tmp_path, source, download_concurrency=1,
+                               startup_latest_only=False)
         service.start()
         try:
             poll_periods(service, 1)
@@ -502,6 +505,26 @@ class TestRun1001Regressions:
         checks = [at for product, at in source.acquisitions if product in CHECKS]
         assert checks == sorted(checks, reverse=True)
         assert source.acquisitions.index((PRECIP_RATE, T.isoformat())) == len(CHECKS) * len(scans)
+
+    def test_startup_downloads_only_the_latest_common_scan(self, tmp_path):
+        registry = make_registry(tmp_path)
+        scans = [T - timedelta(minutes=2 * step) for step in range(4, -1, -1)]
+        # PrecipRate has not published the newest scan yet, so the latest
+        # common scan is one step behind T.
+        reveal = {product: scans for product in CHECKS}
+        reveal[PRECIP_RATE] = scans[:-1]
+        source = ScriptedSource(registry, reveal=reveal)
+        service = make_service(tmp_path, source)
+        service.start()
+        try:
+            poll_periods(service, 3)
+        finally:
+            service.shutdown()
+        common = scans[-2].isoformat()
+        assert not [at for _, at in source.acquisitions if at < common]
+        assert {at for _, at in source.acquisitions} <= {common, T.isoformat()}
+        assert (PRECIP_RATE, common) in source.acquisitions
+        assert (PRECIP_RATE, scans[0].isoformat()) not in source.acquisitions
 
 
 class TestShutdown:

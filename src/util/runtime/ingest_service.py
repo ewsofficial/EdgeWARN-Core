@@ -303,7 +303,7 @@ class IngestService:
 
     def __init__(self, *, base_dir, run_id, registry, dependencies, resources=None,
                  io=None, stop_event=None, clock=None, wall_clock=None, wait=None,
-                 lister=None, acquirer=None, auxiliary=None):
+                 lister=None, acquirer=None, auxiliary=None, startup_latest_only=True):
         from common.ingest.inventory import InputInventory
 
         self.base_dir = Path(base_dir).resolve()
@@ -331,6 +331,12 @@ class IngestService:
         self._decode_slots = threading.BoundedSemaphore(max(1, self.resources.decode_concurrency))
         self._s3_local = threading.local()
         self._listing_active: set[str] = set()
+        # Startup selection: the first listing of every product is held back
+        # until all have reported, then only the latest common scan is queued.
+        self._startup_latest_only = bool(startup_latest_only)
+        self._startup_listings: dict[str, tuple] = {}
+        self._startup_floor: datetime | None = None
+        self._startup_resolved = not self._startup_latest_only
         self._outstanding = 0
         self._outstanding_optional = 0
         self._committed_scans: dict[str, set[datetime]] = {}
@@ -482,8 +488,11 @@ class IngestService:
             self._listing_active.discard(spec.product_id)
             self._warn(f"listing {spec.product_id} failed: {type(exc).__name__}: {exc}")
             self._add_reason(f"listing {spec.product_id} failed: {type(exc).__name__}: {exc}")
+            self._apply_startup_selection(spec, ())
             return
         self._listing_active.discard(spec.product_id)
+        resolving = not self._startup_resolved
+        found = self._apply_startup_selection(spec, found)
         if found and time.monotonic() - dispatched > self.resources.listing_timeout_seconds:
             self._metrics["listing_overruns"] += 1
             self._warn(
@@ -506,9 +515,92 @@ class IngestService:
                 self._add_reason(f"acquisition backlog full; deferred {identity}")
                 break
         self._metrics["discovered"] += len(found)
+        if resolving and self._startup_resolved and self._startup_floor is not None:
+            # The startup selection just released its jobs: start downloading now
+            # instead of waiting up to a full poll period for the next tick.
+            self.dispatch_pending(self._clock())
         self._debug(
             f"listed {spec.product_id}: {len(found)} object(s) in window, {offered} newly "
             f"queued, {len(found) - offered} already known")
+
+    def _apply_startup_selection(self, spec, found):
+        """Restrict the cold-start backlog to the latest common scan.
+
+        Until every product has completed its first listing, results are held.
+        The scan chosen is the newest even-minute scan present in every product
+        that listed objects (falling back to the newest scan with the widest
+        product coverage). That scan becomes a floor: this and every later poll
+        only queue objects at or after it, so older history is never fetched.
+        Returns the objects the caller may offer to the ledger now.
+        """
+        if self._startup_resolved:
+            floor = self._startup_floor
+            if floor is None:
+                return found
+            return tuple(o for o in found
+                         if round_to_nearest_even_minute(o.observation_time) >= floor)
+        with self._index_lock:
+            if self._startup_resolved:
+                held = ()
+            else:
+                self._startup_listings[spec.product_id] = tuple(found)
+                if len(self._startup_listings) < len(self.registry.products):
+                    return ()
+                held = self._resolve_startup_locked()
+        floor = self._startup_floor
+        if floor is None:
+            return found
+        # Offer every held product's objects; this call's own product is among them.
+        for product_id, objects in held:
+            if product_id == spec.product_id:
+                continue
+            self._offer_found(product_id, objects)
+        return next((objs for pid, objs in held if pid == spec.product_id), ())
+
+    def _resolve_startup_locked(self):
+        scans: dict[str, set] = {}
+        for product_id, objects in self._startup_listings.items():
+            if objects:
+                scans[product_id] = {round_to_nearest_even_minute(o.observation_time)
+                                     for o in objects}
+        self._startup_resolved = True
+        if not scans:
+            return ()
+        common = set.intersection(*scans.values())
+        if common:
+            floor = max(common)
+        else:
+            coverage: dict = {}
+            for values in scans.values():
+                for scan in values:
+                    coverage[scan] = coverage.get(scan, 0) + 1
+            floor = max(coverage, key=lambda scan: (coverage[scan], scan))
+            self._warn("no common scan across products at startup; using "
+                       f"{floor.isoformat()} with widest coverage")
+        self._startup_floor = floor
+        self._info(f"startup: downloading only latest common scan {floor.isoformat()}")
+        return tuple(
+            (pid, tuple(o for o in objs
+                        if round_to_nearest_even_minute(o.observation_time) == floor))
+            for pid, objs in self._startup_listings.items())
+
+    def _offer_found(self, product_id, objects):
+        spec = next((s for s in self.registry.products if s.product_id == product_id), None)
+        if spec is None:
+            return
+        for obj in objects:
+            identity = "mrms:" + "|".join(str(part) for part in obj.logical_identity)
+            job = AcquisitionJob(
+                identity=identity, kind="mrms", product_id=obj.product_id,
+                target=obj.observation_time, protected=spec.discovery,
+                tier=self._tier(spec), discovered=obj)
+            try:
+                if not self.ledger.offer(job):
+                    self._metrics["duplicates"] += 1
+            except AcquisitionBacklogFull:
+                self._add_reason(f"acquisition backlog full; deferred {identity}")
+                break
+        self._metrics["discovered"] += len(objects)
 
     def _tier(self, spec):
         if spec.discovery:
