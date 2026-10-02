@@ -157,6 +157,76 @@ def _ready_cell():
     return {"id": "1", "stormprob": {"observation": {"inference_ready": True, "quality": quality}}}
 
 
+def test_predicted_track_skips_cell_gate_but_keeps_source_and_observed_gates(tmp_path):
+    cycle = datetime(2026, 10, 2, 17, 24, tzinfo=timezone.utc)
+    manifest = _stormprob_manifest(tmp_path, cycle, 41)
+    predicted = {"id": 901075, "tracking_mode": "predicted",
+                 "stormprob": {"observation": {"inference_ready": False}}}
+    assert preflight.validate_stormprob_cycle([_ready_cell(), predicted], manifest) is None
+    with pytest.raises(preflight.StormProbDependencyError, match="final CTAM input snapshot"):
+        preflight.validate_stormprob_cycle([predicted], None)
+    with pytest.raises(preflight.StormProbDependencyError, match="cell 901075"):
+        preflight.validate_stormprob_cycle([predicted | {"tracking_mode": "active"}], manifest)
+
+
+def test_predicted_only_cycle_skips_inference_without_fatal_supervision(tmp_path, monkeypatch):
+    from EdgeWARN.ctam import builtins
+    from EdgeWARN.ctam.run import _run_builtin_stormprob
+    from EdgeWARN.stormprob import onnx_runtime
+    from EdgeWARN.stormprob.database import StormProbRepository
+
+    cycle = datetime(2026, 10, 2, 17, 24, tzinfo=timezone.utc)
+    manifest = _stormprob_manifest(tmp_path, cycle, 41)
+    cell = {"id": 901075, "timestamp": cycle.isoformat(), "tracking_mode": "predicted"}
+    service = builtins.StormProbCycleService(StormProbRepository(tmp_path / "runtime"))
+    monkeypatch.setattr(builtins, "StormProbCycleService", lambda: service)
+    monkeypatch.setattr(onnx_runtime, "load_sessions", lambda *args: pytest.fail("model loaded"))
+    assert _run_builtin_stormprob([cell], manifest) == (0, 0, 0)
+    outcome = cell["modules"]["StormProb"]
+    assert outcome["status"] == "skipped"
+    assert outcome["reason"] == "predicted-track-no-current-observation"
+    assert len(outcome["leads"]) == 4
+
+
+def test_reacquired_cell_allows_predicted_history_but_rejects_bad_observed_history(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from EdgeWARN.ctam import builtins
+    from EdgeWARN.ctam.run import _run_builtin_stormprob
+
+    cycle = datetime(2026, 10, 2, 17, 26, tzinfo=timezone.utc)
+    manifest = _stormprob_manifest(tmp_path, cycle, 41)
+    cell = _ready_cell() | {"tracking_mode": "active"}
+    history = [cell["stormprob"]["observation"] | {"geometry_status": "ok"},
+               {"analysis_time": "2026-10-02T17:24:41", "inference_ready": False,
+                "lineage": {"tracking_mode": "predicted"}}]
+    repository = SimpleNamespace(model_inputs=lambda *a, **kw: {"history_mask": [True]},
+                                 feature_history=lambda *a, **kw: history)
+    service = SimpleNamespace(repository=repository, preload_previous_alerts=lambda ids: None)
+
+    class Adapter:
+        name = "StormProb"
+
+        def __init__(self, service):
+            pass
+
+        def run_batch(self, cells):
+            for cell in cells:
+                cell["modules"] = {"StormProb": {"status": "success"}}
+
+        def alerts(self, cell):
+            return []
+
+        def publish_alerts(self, alerts):
+            return 0
+
+    monkeypatch.setattr(builtins, "StormProbCycleService", lambda: service)
+    monkeypatch.setattr(builtins, "BuiltinStormProbAdapter", Adapter)
+    assert _run_builtin_stormprob([cell], manifest) == (1, 0, 0)
+    history[1]["lineage"]["tracking_mode"] = "active"
+    with pytest.raises(preflight.StormProbDependencyError, match="invalid committed inputs"):
+        _run_builtin_stormprob([cell], manifest)
+
+
 @pytest.mark.parametrize("offset_seconds", [38, 120, -60, -180])
 def test_stormprob_accepts_inputs_stamped_within_the_scan_window(tmp_path, offset_seconds):
     """MRMS stamps a scan ~38 s after its even minute; the selector picks that

@@ -137,6 +137,8 @@ def _run_builtin_stormprob(cells, input_manifest=None):
     # Validate every candidate's committed feature/history row before the
     # first batch can infer or publish. Padded history slots remain permitted.
     for cell in cells:
+        if cell.get("tracking_mode") == "predicted":
+            continue
         try:
             inputs = service.repository.model_inputs(cell.get("id"), through=cell.get("timestamp"))
             history = service.repository.feature_history(
@@ -144,6 +146,8 @@ def _run_builtin_stormprob(cells, input_manifest=None):
             if not history or not inputs["history_mask"][-1]:
                 raise ValueError("current committed history row is absent")
             for observation in history:
+                if observation.get("lineage", {}).get("tracking_mode") == "predicted":
+                    continue
                 if not observation.get("inference_ready") or observation.get("geometry_status") != "ok":
                     raise ValueError(f"history row {observation['analysis_time']} is invalid")
                 bad = [name for name in UNIVERSAL_PROPERTY_FEATURES
@@ -181,7 +185,9 @@ def _run_builtin_stormprob(cells, input_manifest=None):
             forecast_parts[name] += batch_timing.get(name, 0.0)
         forecast_seconds += time.perf_counter() - forecast_started
     failed = [cell for cell in cells
-              if cell.get("modules", {}).get(adapter.name, {}).get("status") != "success"]
+              if cell.get("modules", {}).get(adapter.name, {}).get("status") != "success"
+              and not (cell.get("tracking_mode") == "predicted"
+                       and cell.get("modules", {}).get(adapter.name, {}).get("status") == "skipped")]
     if failed:
         reasons = "; ".join(
             f"cell {cell.get('id')}: {cell.get('modules', {}).get(adapter.name, {}).get('error', 'inference failed')}"
@@ -191,7 +197,8 @@ def _run_builtin_stormprob(cells, input_manifest=None):
             f"WARNING: Cannot continue Core: StormProb failed before alert publication: {reasons}. "
             "Core is exiting nonzero."
         )
-    success_count = len(cells)
+    success_count = sum(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success"
+                        for cell in cells)
     alerts_started = time.perf_counter()
     for cell_idx, cell in enumerate(cells):
         publish_started = time.perf_counter()

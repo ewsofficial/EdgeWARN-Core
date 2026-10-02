@@ -80,6 +80,12 @@ Tracking is handled by `StormCellTracker` in `track.py` with:
 
 Tracking can be disabled via pipeline flags (`--disable-tracking`).
 
+Predicted-only tracks preserve continuity without a current measured geometry.
+StormProb records an explicit skipped forecast for those cells; they do not
+fail the whole cycle. Their continuity rows remain available to tracking but
+are excluded from model feature and trajectory history after reacquisition.
+Observed cells and shared source dependencies still undergo strict validation.
+
 ## Output Compatibility
 
 Detection outputs feed integration, CTAM, alerting, and API index updates, so the saved stormcell schema and timestamp naming are treated as compatibility-sensitive interfaces.

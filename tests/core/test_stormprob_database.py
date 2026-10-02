@@ -140,6 +140,28 @@ def test_history_model_inputs_and_reprocessing(tmp_path):
     assert repo.legacy_history(101)[-1]["properties"]["revision"] == 2
 
 
+def test_model_history_recovers_after_predicted_only_scan(tmp_path):
+    from EdgeWARN.stormprob.geometry import attach_stormprob_geometry
+
+    repo = StormProbRepository(tmp_path)
+    first = _cell("2026-10-02T17:22:41")
+    predicted = _cell("2026-10-02T17:24:41")
+    predicted["tracking_mode"] = "predicted"
+    attach_stormprob_geometry(predicted, None, None)
+    predicted["stormprob"]["observation"] = build_observation_record(predicted)
+    recovered = _cell("2026-10-02T17:26:41")
+    for cell in (first, predicted, recovered):
+        repo.commit_cycle(cell["timestamp"], cell["timestamp"], [cell])
+    assert len(repo.legacy_history(101)) == 3
+    assert len(repo.feature_history(101)) == 3
+    assert not repo.feature_history(101)[1]["inference_ready"]
+    inputs = repo.model_inputs(101)
+    assert sum(inputs["history_mask"]) == 2
+    assert sum(inputs["trajectory_mask"]) == 2
+    assert inputs["current"][-2:] == [240.0, 2.0]
+    assert len(repo.model_inputs(101, through=predicted["timestamp"])["current"]) == 135
+
+
 def test_batch_legacy_histories_match_individual_reads(tmp_path):
     repo = StormProbRepository(tmp_path)
     for minute in (0, 5, 10):

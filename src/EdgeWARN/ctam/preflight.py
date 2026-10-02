@@ -321,6 +321,10 @@ def validate_stormprob_cycle(cells, input_manifest) -> None:
         if not rap:
             problems.append("RAP environment and wind fields: unavailable or stale")
     for cell in cells:
+        # Kalman continuity deliberately has no current measured geometry.
+        # Its per-cell inference is skipped; shared source gates still apply.
+        if cell.get("tracking_mode") == "predicted":
+            continue
         observation = cell.get("stormprob", {}).get("observation")
         if not isinstance(observation, dict) or not observation.get("inference_ready"):
             problems.append(f"cell {cell.get('id')}: observation unavailable or invalid")

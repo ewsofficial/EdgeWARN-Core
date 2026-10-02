@@ -74,6 +74,8 @@ class BuiltinStormProbAdapter:
         self._sessions = None
 
     def _prepare(self, cell: dict[str, Any]) -> tuple[dict, dict]:
+        if cell.get("tracking_mode") == "predicted":
+            raise InputNotReady("predicted-track-no-current-observation")
         timestamp = cell.get("timestamp")
         if not timestamp:
             raise ValueError("missing-analysis-time")

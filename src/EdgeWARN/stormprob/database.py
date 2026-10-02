@@ -567,6 +567,10 @@ class StormProbRepository:
         # the last 30 rows. Truncating first would reset storm age at row 31.
         history = list(reversed(self.feature_history(cell_id, limit=1_000_000,
                                                       through=through)))
+        # Predicted continuity rows remain in the database for tracking, but
+        # are not measured observations and have no model geometry/centroid.
+        history = [row for row in history
+                   if row.get("lineage", {}).get("tracking_mode") != "predicted"]
         if not history:
             raise ValueError(f"no committed features for cell {cell_id}")
         centroids = [row["centroid"] for row in history]
