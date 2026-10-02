@@ -138,11 +138,6 @@ def main():
         print(f"[Ingest] {exc}")
         sys.exit(1)
 
-    from util.runtime.mrms_registry import publish_ingest_registry
-
-    publish_ingest_registry(registry, run_id,
-                            dependency_fingerprint=dependencies.fingerprint)
-
     stop_event = threading.Event()
     service = IngestService(
         base_dir=fs.BASE_DIR, run_id=run_id, registry=registry,

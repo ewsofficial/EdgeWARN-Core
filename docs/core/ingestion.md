@@ -59,12 +59,30 @@ The ingest service commits validated inputs and durable records beneath
 check inputs are ready locally, then waits for integration and final snapshots.
 The snapshots pin exact paths and timestamps through processing and retention.
 
+At startup, ingest archives handoff and consumer records whose dependency
+fingerprints differ from the current configuration before publishing its new
+producer agreement. Affected directories (`ingest/v1`,
+`consumers/core-ingest-v1`, and `consumers/ewmrs-inputs-v1`) are renamed with a
+unique `.stale-<timestamp>-<id>` suffix under the same runtime parent. Raw weather
+files remain in place, and readiness is rebuilt through normal acquisition and
+validation. Archives are retained for inspection and are not consumed by workers.
+Matching state is reused; corrupt records and live configuration disagreements
+remain errors.
+
 EWMRS runs `InputRenderConsumer`, consuming each `render-ready` notification
 independently of Core readiness. It persists per-layer plans and acknowledgments,
 retries failed layers separately, and releases the input reference after all
 mapped layers have a durable terminal disposition. Each RAP analysis fans out to
 the configured RAP layers. Scan-time GLM is a Core integration input with an
 explicit no-mapping acknowledgment; GOES ABI is acquired/rendered separately.
+
+GLM acquisition follows locally committed CompRefQC
+(`MergedReflectivityQCComposite_00.50`) scans on the ingest polling loop. It
+does not wait for the other MRMS check products. Targets must be within the
+current acquisition window, at or after the startup scan, and not terminal.
+GLM arrivals only reevaluate eligible CompRefQC scans within the alignment
+tolerance; they never create additional scan candidates. Retries stop when
+their radar scan is no longer eligible.
 
 Realtime no longer writes `state/realtime/ingest-reports` or the legacy
 `cycles/<cycle-id>/{mrms-ready,rap-ready}.json` records. Repository readers do
@@ -182,6 +200,10 @@ local filename as S3 files. When the search window is exhausted, the readiness
 error includes the configured limit and failures from both sources. RAP cleanup
 uses the same encoded-time policy and retains at most the newest three eligible
 analyses under `<BASE_DIR>/data/RAP`.
+Realtime inventory retention keeps RAP through its configured analysis-age
+window plus the in-flight scan deadline, independently of the shorter MRMS
+cleanup window. Completed consumer references do not make a still-eligible
+RAP fallback disposable between radar scans.
 
 ## METAR
 
@@ -254,10 +276,15 @@ analysis, and removes old timestamped files:
 ```
 
 TLS certificate verification is required for WPC downloads. The EWMRS WPC
-loop runs on the configured analysis boundary and exposes these artifacts
+loop creates its output directory and fetches immediately at startup, then
+runs on the configured analysis boundary and exposes these artifacts
 through the WPC API routes.
 
 ## Runtime layout
+
+Atomic runtime artifacts honor the producer process umask, like ordinary file
+creation. Use a umask and directory permissions that let the separately deployed
+Node API read heartbeats, indexes, snapshots, and binary products.
 
 All generated data is rooted at the resolved `<BASE_DIR>`:
 

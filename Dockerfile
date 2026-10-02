@@ -9,10 +9,11 @@ WORKDIR /tmp/edgewarn-build
 # environment.yml remains the only runtime dependency authority.  The wheel is
 # built and installed without dependency resolution so pip cannot create a
 # second, divergent runtime environment.
-COPY environment.yml pyproject.toml README.md ./
+COPY environment.yml pyproject.toml README.md package.json package-lock.json ./
 COPY src ./src
 COPY config ./config
 COPY models ./models
+COPY scripts/validate-config.js ./scripts/validate-config.js
 RUN conda env create --file environment.yml \
     && /opt/conda/envs/EdgeWARN/bin/python -m pip wheel \
         --no-deps --no-build-isolation --wheel-dir /tmp/edgewarn-wheel . \

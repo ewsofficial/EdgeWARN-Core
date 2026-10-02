@@ -5,7 +5,11 @@ from util.runtime import background
 import util.runtime.goes as runtime_goes
 
 
-def test_accessory_children_configure_parent_death_signal(monkeypatch):
+def test_accessory_children_configure_parent_death_signal(monkeypatch, tmp_path):
+    import util.file as fs
+
+    monkeypatch.setattr(fs, "WPC_SFC_DIR", tmp_path / "wpc" / "surface_analysis")
+    monkeypatch.setattr(background, "run_wpc_ingest", lambda: None)
     configured = []
     monkeypatch.setattr(
         background, "_configure_process_runtime", configured.append
@@ -50,6 +54,30 @@ def test_accessory_children_configure_parent_death_signal(monkeypatch):
     background.wpc_loop()
 
     assert configured == ["GOES-Ingest", "METAR-Ingest", "NWS-Ingest", "WPC-Ingest"]
+
+
+def test_wpc_fetches_immediately_before_waiting_for_boundary(monkeypatch, tmp_path):
+    import util.file as fs
+
+    output = tmp_path / "wpc" / "surface_analysis"
+    calls = []
+    monkeypatch.setattr(fs, "WPC_SFC_DIR", output)
+    monkeypatch.setattr(background, "_configure_process_runtime", lambda name: None)
+    monkeypatch.setattr(background, "section", lambda name: {
+        "wpc_boundary_minutes": 15, "boundary_wait_interval_seconds": 1})
+
+    def fetch():
+        assert output.is_dir()
+        calls.append("fetch")
+
+    def wait(*args):
+        calls.append("wait")
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(background, "run_wpc_ingest", fetch)
+    monkeypatch.setattr(background, "sleep_until_boundary", wait)
+    background.wpc_loop()
+    assert calls == ["fetch", "wait"]
 
 
 class FakeQueue:

@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 import re
+import uuid
 
 from common.ingest.manifest import CycleInputManifest, StagedInput, parse_file_analysis_time
 from common.ingest.objects import CommittedInput
@@ -93,7 +94,9 @@ class IngestRecord:
                 raise IngestRecordError('Unsupported producer or record kind')
             digest_id(payload['fingerprint'])
             if fingerprint is not None and payload['fingerprint'] != fingerprint:
-                raise IngestRecordError('Dependency fingerprint mismatch')
+                raise IngestRecordError(
+                    f'Dependency fingerprint mismatch: expected {fingerprint}, '
+                    f'found {payload["fingerprint"]}')
             if not isinstance(payload['run_id'], str) or not payload['run_id']:
                 raise IngestRecordError('Producer run ID is required')
             if not isinstance(payload['key'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', payload['key']):
@@ -301,7 +304,10 @@ class IngestHandoff:
             return None
         except (OSError, ValueError) as exc:
             raise IngestRecordError(f'Cannot read {path}: {exc}') from exc
-        record = IngestRecord.from_dict(payload, self.base_dir, fingerprint=self.fingerprint)
+        try:
+            record = IngestRecord.from_dict(payload, self.base_dir, fingerprint=self.fingerprint)
+        except IngestRecordError as exc:
+            raise IngestRecordError(f'Invalid record {path}: {exc}') from exc
         if record.kind != kind or record.key != key:
             raise IngestRecordError('Record destination mismatch')
         if before == after:
@@ -320,6 +326,41 @@ class IngestHandoff:
         if kind != 'poll-status':
             self._forget_missing(lambda p: p.parent == directory, paths)
         return tuple(record for path in paths if (record := self.read(kind, path.stem)) is not None)
+
+    def quarantine_stale(self):
+        """Move aside durable state written under a different dependency agreement.
+
+        Reads stay strict: a mismatched record is an error, never silently
+        ignored. The ingest owner calls this once at startup, before it
+        publishes its own agreement, so a config/code change that alters the
+        fingerprint starts from a clean tree instead of crashing every
+        consumer. The caller must hold the shared input lock. Returns the
+        quarantine directories created; raw weather files are left in place.
+        """
+        consumers = self.base_dir / 'state/realtime/consumers'
+        stamp = f'{now():%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex}'
+        moved = []
+        for tree in (self.root, consumers / 'core-ingest-v1', consumers / 'ewmrs-inputs-v1'):
+            contained(self.base_dir, tree)
+            if not tree.is_dir():
+                continue
+            stale = False
+            for path in tree.rglob('*.json'):
+                contained(self.base_dir, path)
+                try:
+                    found = json.loads(path.read_text()).get('fingerprint')
+                except (OSError, ValueError, AttributeError):
+                    continue
+                if found is not None and found != self.fingerprint:
+                    stale = True
+                    break
+            if stale:
+                target = contained(self.base_dir, tree.with_name(f'{tree.name}.stale-{stamp}'))
+                tree.rename(target)
+                moved.append(target)
+        if moved:
+            self._parsed.clear()
+        return tuple(moved)
 
     def _forget_missing(self, belongs, present):
         """Drop cached records whose files a full listing no longer contains."""

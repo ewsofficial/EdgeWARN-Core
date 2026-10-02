@@ -199,10 +199,11 @@ class InputInventory:
                 references.add(record.key)
         return references
 
-    def cleanup(self, *, before, protected_products=()):
+    def cleanup(self, *, before, protected_products=(), family_before=None):
         """Delete only completed unreferenced inputs older than the rediscovery window.
 
         Keep each requested product's latest observation for previous history.
+        Family-specific cutoffs preserve slower analyses across radar scans.
         Compact inventory/outbox alongside deletion only after both consumer
         dispositions have released their references. No operational directory
         enumeration or arbitrary-path deletion is permitted.
@@ -216,7 +217,8 @@ class InputInventory:
                     references.add(max(candidates, key=lambda r: utc(r.data['input']['analysis_time'])).key)
             removed = []
             for record in records:
-                if record.key in references or utc(record.data['input']['analysis_time']) >= utc(before):
+                cutoff = (family_before or {}).get(record.data['input']['family'], before)
+                if record.key in references or utc(record.data['input']['analysis_time']) >= utc(cutoff):
                     continue
                 path = contained(self.base_dir, record.data['input']['path'])
                 if path.exists() and file_digest(path) != record.data['sha256']:

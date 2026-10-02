@@ -7,8 +7,27 @@ must never leave truncated content visible under the real name.
 """
 
 import json
+import os
+import stat
 
 import pytest
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission contract")
+@pytest.mark.parametrize("mask, expected", [(0o022, 0o644), (0o027, 0o640), (0o077, 0o600)])
+def test_atomic_publication_honors_umask_on_creation_and_replacement(tmp_path, mask, expected):
+    from util.atomic import atomic_write_json
+
+    target = tmp_path / "heartbeat.json"
+    old_mask = os.umask(mask)
+    try:
+        for value in (1, 2):
+            atomic_write_json(target, {"value": value})
+            assert stat.S_IMODE(target.stat().st_mode) == expected
+            assert json.loads(target.read_text()) == {"value": value}
+        assert list(tmp_path.iterdir()) == [target]
+    finally:
+        os.umask(old_mask)
 
 
 class TestNexradManifestWriter:

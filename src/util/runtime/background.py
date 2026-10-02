@@ -316,15 +316,17 @@ def nws_loop():
 
 def wpc_loop():
     _configure_process_runtime("WPC-Ingest")
+    import util.file as fs
+
+    fs.WPC_SFC_DIR.mkdir(parents=True, exist_ok=True)
     try:
         intervals = section("background_intervals")
         boundary_minutes = intervals["wpc_boundary_minutes"]
         while True:
-            sleep_until_boundary(boundary_minutes, intervals["boundary_wait_interval_seconds"])
-
             try:
                 run_wpc_ingest()
             except Exception as exc:
                 print(f"[WPC Loop] Error: {exc}")
+            sleep_until_boundary(boundary_minutes, intervals["boundary_wait_interval_seconds"])
     except KeyboardInterrupt:
         return

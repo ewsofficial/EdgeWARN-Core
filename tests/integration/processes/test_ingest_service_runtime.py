@@ -8,6 +8,7 @@ and that duplicate discoveries create no extra jobs.
 """
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
@@ -124,9 +125,9 @@ def make_registry(base_dir, additions=(f"MRMS_{PRECIP_RATE}",)):
 
 
 def make_service(tmp_path, source, *, clock=None, stop=None, wall=None,
-                 startup_latest_only=True, **settings):
+                 startup_latest_only=True, include_glm=False, **settings):
     dependencies = resolve_dependencies(
-        source.registry, include_rap=False, include_glm=False,
+        source.registry, include_rap=False, include_glm=include_glm,
         auxiliary_settings={"rap": {"max_age_minutes": 180}})
     clock = clock if clock is not None else FixedClock()
     return IngestService(
@@ -137,6 +138,33 @@ def make_service(tmp_path, source, *, clock=None, stop=None, wall=None,
         resources=IngestResources.resolve().with_overrides(**settings),
         lister=source.lister, acquirer=source.acquirer, auxiliary=lambda kind, target: (),
         startup_latest_only=startup_latest_only)
+
+
+def test_retention_keeps_rap_fallback_between_core_cycles(tmp_path):
+    from common.ingest.manifest import StagedInput
+
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source, retention_minutes=60)
+    service.dependencies = replace(service.dependencies, rap_enabled=True)
+    path = tmp_path / "data/RAP/RAP.20260930-11z.awp130pgrbf00.grib2"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"rap")
+    rap = CommittedInput(StagedInput("RAP", str(path), T - timedelta(hours=1),
+                                    "synoptic", "rap"),
+                         hashlib.sha256(b"rap").hexdigest(), str(path))
+    inventory = service.inventory
+    inventory.commit_input(rap)
+    inventory.handoff.publish_render_ready(rap.input_id)
+    fingerprint = "a" * 64
+    inventory.handoff.plan_render(rap.input_id, [], fingerprint)
+    inventory.handoff.acknowledge_input(rap.input_id, fingerprint)
+    # No active consumer pin remains, but subsequent radar scans still need RAP.
+    assert service._retire(T + timedelta(minutes=10)) == ()
+    assert path.exists()
+    assert inventory.valid_inputs()[0].key == rap.input_id
+    # Once beyond analysis age and the in-flight scan deadline, retire normally.
+    assert service._retire(T + timedelta(hours=4)) == (rap.input_id,)
+    assert not path.exists()
 
 
 def wait_for(predicate, message, *, attempts=1000, delay=0.01):
@@ -178,6 +206,138 @@ def record_poll_statuses(service):
 
     handoff.publish_poll_status = capture
     return published
+
+
+def test_start_archives_stale_records_before_publishing_agreement(tmp_path, monkeypatch):
+    from util.runtime import mrms_registry
+    from util.runtime.ingest_handoff import IngestHandoff
+
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source)
+    old = IngestHandoff(tmp_path, fingerprint='f' * 64, run_id='old')
+    old.publish_poll_status({'pending': 1})
+    old._write('scan-state', canonical_cycle_id(T),
+               {'first_seen_at': T.isoformat(), 'optional_started_at': T.isoformat()})
+    mrms_registry.publish_ingest_registry(source.registry, 'old',
+                                         dependency_fingerprint=old.fingerprint)
+    publish = mrms_registry.publish_ingest_registry
+    observed = []
+
+    def checked_publish(registry, run_id, *, dependency_fingerprint):
+        with pytest.raises(mrms_registry.MrmsProducerUnavailable):
+            mrms_registry.read_ingest_agreement(registry, dependency_fingerprint)
+        assert service.inventory.handoff.read('poll-status', 'poll-status') is None
+        assert list(old.root.parent.glob('v1.stale-*/poll-status.json'))
+        observed.append(run_id)
+        return publish(registry, run_id, dependency_fingerprint=dependency_fingerprint)
+
+    monkeypatch.setattr(mrms_registry, 'publish_ingest_registry', checked_publish)
+    try:
+        service.start()
+        service._work.join()
+        assert observed == [service.run_id]
+        assert mrms_registry.read_ingest_agreement(
+            source.registry, service.dependencies.fingerprint) == service.run_id
+        assert service._tracked_scans() == set()
+        service.start()
+        assert observed == [service.run_id]
+    finally:
+        service.shutdown()
+
+
+def test_failed_start_does_not_advertise_agreement_and_can_retry(tmp_path, monkeypatch):
+    from util.runtime.mrms_registry import ingest_descriptor_path
+
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source)
+    handoff = service.inventory.handoff
+    quarantine = handoff.quarantine_stale
+
+    def fail():
+        raise OSError('archive unavailable')
+
+    monkeypatch.setattr(handoff, 'quarantine_stale', fail)
+    with pytest.raises(OSError, match='archive unavailable'):
+        service.start()
+    assert not service._started and service._publisher is None
+    assert not ingest_descriptor_path(tmp_path).exists()
+    monkeypatch.setattr(handoff, 'quarantine_stale', quarantine)
+    try:
+        service.start()
+        assert ingest_descriptor_path(tmp_path).is_file()
+    finally:
+        service.shutdown()
+
+
+def test_glm_waits_for_comprefqc_without_waiting_for_other_checks(tmp_path):
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source, include_glm=True)
+    # Persisted scan state and other MRMS products cannot trigger GLM.
+    service.inventory.publish_scan(T, service.dependencies, at=T)
+    service._publish_completion(_completion(source, PRECIP_FLAG, T))
+    assert service._auxiliary_targets(T) == []
+    service._publish_completion(_completion(source, REFLECTIVITY, T + timedelta(seconds=41)))
+    assert service._ready_scans() == set()
+    assert service._auxiliary_targets(T + timedelta(minutes=1)) == [('glm', T)]
+
+
+def _completion(source, product, at):
+    from util.runtime.ingest_service import _Work
+
+    obj = source.discovered(source.registry.require(product), at)
+    return _Work(kind='completion', completed=source.acquirer(obj))
+
+
+@pytest.mark.parametrize('reason', ['old', 'future', 'terminal', 'before-startup'])
+def test_glm_ignores_ineligible_comprefqc_scans(tmp_path, reason):
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source, include_glm=True)
+    scan = T
+    at = T
+    if reason == 'old':
+        scan -= timedelta(minutes=service.resources.listing_window_minutes + 2)
+    elif reason == 'future':
+        scan += timedelta(minutes=2)
+    service._publish_completion(_completion(source, REFLECTIVITY, scan))
+    if reason == 'terminal':
+        service.inventory.handoff.disposition('terminal', canonical_cycle_id(scan),
+                                              status='expired', reason='deadline')
+    elif reason == 'before-startup':
+        service._startup_floor = T + timedelta(minutes=2)
+    assert service._auxiliary_targets(at) == []
+
+
+def test_glm_completion_cannot_expand_scan_state_or_download_targets(tmp_path):
+    from util.runtime.ingest_service import _Work
+
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source, include_glm=True)
+    service._publish_completion(_completion(source, REFLECTIVITY, T))
+    path = tmp_path / 'data' / f'OR_GLM-L2-LCFA_merged_{T:%Y%m%d-%H%M%S}.nc'
+    path.write_bytes(b'validated GLM')
+    staged = staged_input_from_path('GLM-L2-LCFA', path, source='s3', family='goes')
+    item = CommittedInput(staged, hashlib.sha256(path.read_bytes()).hexdigest(), 's3://glm')
+    scans = service._publish_completion(_Work(kind='completion', completed=item))
+    assert scans == {T}
+    service._evaluate(scans)
+    assert {r.key for r in service.inventory.handoff.records('scan-state')} == {canonical_cycle_id(T)}
+    assert service._auxiliary_targets(T) == [('glm', T)]
+
+
+def test_glm_retry_stops_when_comprefqc_scan_expires(tmp_path):
+    from util.runtime.ingest_service import AcquisitionJob
+
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source, include_glm=True)
+    service._publish_completion(_completion(source, REFLECTIVITY, T))
+    identity = f'glm:{T.isoformat()}'
+    service.ledger.offer(AcquisitionJob(identity, 'glm', 'GLM', T))
+    service.inventory.handoff.disposition('terminal', canonical_cycle_id(T),
+                                          status='expired', reason='deadline')
+    service._dispatch_auxiliary(T, 0.0)
+    assert service.ledger.state(identity)[0] == 'abandoned'
+    assert service.ledger.counts()['pending_jobs'] == 0
+    assert service.ledger.counts()['in_flight_jobs'] == 0
 
 
 def run_fixed(service, clock, stop, *, timeout=60):
@@ -452,8 +612,9 @@ class TestRun1001Regressions:
                 raise TimeoutError("GLM upstream timed out")
             return ()
 
-        service = make_service(tmp_path, source, retry_initial_seconds=0,
+        service = make_service(tmp_path, source, include_glm=True, retry_initial_seconds=0,
                                retry_max_seconds=0)
+        service._publish_completion(_completion(source, REFLECTIVITY, T))
         service._auxiliary = auxiliary
         submitted = {"ingest-download": [], "ingest-auxiliary": []}
 

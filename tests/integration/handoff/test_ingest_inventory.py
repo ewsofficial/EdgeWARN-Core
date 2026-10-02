@@ -606,3 +606,67 @@ def test_cached_records_follow_rewrites_and_deletions(inventory):
     # Another process's view (a fresh handoff) agrees with the cached one.
     fresh = IngestHandoff(inventory.base_dir, fingerprint=handoff.fingerprint, run_id='other')
     assert [r.key for r in fresh.records('input')] == [r.key for r in handoff.records('input')]
+
+
+def test_stale_fingerprint_state_is_quarantined_not_read(inventory):
+    item = add(inventory)
+    path = inventory.handoff.path('input', item.input_id)
+    raw = json.loads(path.read_text())
+    raw['fingerprint'] = 'f' * 64
+    path.write_text(json.dumps(raw))
+    with pytest.raises(IngestRecordError):
+        inventory.handoff.read('input', item.input_id)
+    moved = inventory.handoff.quarantine_stale()
+    assert len(moved) == 1 and moved[0].is_dir()
+    assert inventory.handoff.records('input') == ()
+    assert inventory.handoff.quarantine_stale() == ()
+    assert item.record.local_path.exists()
+
+
+@pytest.mark.parametrize('kind', ['input', 'core-state', 'render-ack'])
+def test_quarantine_handles_each_state_tree_and_repeated_upgrades(inventory, kind, monkeypatch):
+    from common.ingest.replay import input_lock
+    from util.runtime import ingest_handoff
+
+    monkeypatch.setattr(ingest_handoff, 'now', lambda: T)
+    old = IngestHandoff(inventory.base_dir, fingerprint='f' * 64, run_id='old')
+
+    def seed():
+        if kind == 'input':
+            item = add(InputInventory(inventory.base_dir,
+                                     fingerprint=old.fingerprint, run_id='old'))
+            return old.path(kind, item.input_id)
+        if kind == 'core-state':
+            key = canonical_cycle_id(T)
+            old.disposition(kind, key, status='success')
+            return old.path(kind, key)
+        item = add(inventory)
+        no_mapping(inventory, item.input_id)
+        path = next(old.path(kind, '0' * 64).parent.glob('*.json'))
+        payload = json.loads(path.read_text())
+        payload['fingerprint'] = old.fingerprint
+        path.write_text(json.dumps(payload))
+        return path
+
+    archives = []
+    for _ in range(2):
+        path = seed()
+        with input_lock(inventory.base_dir):
+            moved = inventory.handoff.quarantine_stale()
+        assert len(moved) == 1 and not path.exists()
+        archived = moved[0] / 'inputs' / path.name if kind == 'input' else moved[0] / path.name
+        assert archived.is_file()
+        archives.extend(moved)
+    assert archives[0] != archives[1] and all(p.is_dir() for p in archives)
+    assert inventory.handoff.quarantine_stale() == ()
+
+
+def test_matching_state_is_reused_and_corruption_is_not_quarantined(inventory):
+    item = add(inventory)
+    assert inventory.handoff.quarantine_stale() == ()
+    assert inventory.handoff.read('input', item.input_id)
+    path = inventory.handoff.path('input', item.input_id)
+    path.write_text('{partial')
+    assert inventory.handoff.quarantine_stale() == ()
+    with pytest.raises(IngestRecordError, match='Cannot read'):
+        inventory.handoff.read('input', item.input_id)

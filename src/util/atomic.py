@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -39,16 +39,14 @@ def atomic_output_path(destination: str | Path, *, suffix: str = ".part") -> Ite
 
     The existing destination is deliberately left untouched if writing or
     validation fails.  The temporary path is removed on every failure path.
+    Files use normal creation permissions (0666 filtered by the process umask)
+    so an independent API user can read published artifacts.
     """
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_temp = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.name}.",
-        suffix=suffix,
-    )
+    temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}{suffix}"
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
     os.close(fd)
-    temporary = Path(raw_temp)
     try:
         yield temporary
         # "r+b", not "rb": os.fsync on Windows issues FlushFileBuffers, which

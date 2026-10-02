@@ -41,6 +41,7 @@ import threading
 import time
 
 from common.ingest.mrms.timestamp_utils import round_to_nearest_even_minute
+from common.ingest.replay import input_lock
 from util.runtime.ingest_handoff import IngestRecordError, contained, now, utc
 
 UTC = timezone.utc
@@ -379,6 +380,15 @@ class IngestService:
         """Reconcile durable state, then take the first poll immediately."""
         if self._started:
             return
+        from util.runtime.mrms_registry import publish_ingest_registry
+
+        with input_lock(self.base_dir):
+            for moved in self.inventory.handoff.quarantine_stale():
+                self._warn(f"dependency agreement changed; moved stale state to {moved}")
+            # Consumers must not see a matching agreement while incompatible
+            # records from the previous dependency configuration still exist.
+            publish_ingest_registry(self.registry, self.run_id,
+                                    dependency_fingerprint=self.dependencies.fingerprint)
         self._started = True
         self._publisher = threading.Thread(
             target=self._publisher_loop, name="ingest-publisher", daemon=True)
@@ -730,10 +740,17 @@ class IngestService:
         job is in flight exactly once and the MRMS dispatcher never sees it.
         """
         monotonic_now = self._clock() if monotonic_now is None else monotonic_now
+        targets = self._auxiliary_targets(at)
+        glm_targets = {target for kind, target in targets if kind == "glm"}
         for job in self.ledger.due(monotonic_now):
+            if job.kind == "glm" and job.target not in glm_targets:
+                self.ledger.take(job.identity)
+                self.ledger.settle(job.identity, "abandoned",
+                                   "CompRefQC scan is no longer eligible for GLM")
+                continue
             if job.kind != "mrms":
                 self._submit_auxiliary(job)
-        for kind, target in self._auxiliary_targets(at):
+        for kind, target in targets:
             identity = f"{kind}:{target.isoformat()}"
             job = AcquisitionJob(identity=identity, kind=kind,
                                  product_id=kind.upper(), target=target)
@@ -763,9 +780,20 @@ class IngestService:
             if 0 <= (at - analysis).total_seconds() / 60 <= self._rap_max_age_minutes():
                 targets.append(("rap", analysis))
         if self.dependencies.glm_enabled:
-            for scan in sorted(self._tracked_scans() | self._ready_scans()):
+            for scan in sorted(self._glm_scans(at), reverse=True):
                 targets.append(("glm", scan))
         return targets
+
+    def _glm_scans(self, at):
+        """GLM follows committed CompRefQC scans within the acquisition window."""
+        start, end = self._observation_window(at)
+        if self._startup_floor is not None:
+            start = max(start, self._startup_floor)
+        with self._index_lock:
+            scans = set(self._committed_scans.get(
+                "MergedReflectivityQCComposite_00.50", ()))
+        return {scan for scan in scans if start <= scan <= end
+                and self.inventory.handoff.read("terminal", _cycle_key(scan)) is None}
 
     def _rap_max_age_minutes(self):
         settings = json.loads(self.dependencies.auxiliary_settings_json)
@@ -898,12 +926,11 @@ class IngestService:
         return set(self._tracked_scans() | self._ready_scans())
 
     def _scans_around(self, at, tolerance_seconds):
-        anchor = round_to_nearest_even_minute(at)
-        span = int(tolerance_seconds // 60) + 1
+        # A satellite observation can enrich existing radar scans; it cannot
+        # create scan state that then triggers more satellite acquisition.
         return {
             candidate
-            for candidate in (anchor + timedelta(minutes=2 * offset)
-                              for offset in range(-span, span + 1))
+            for candidate in self._glm_scans(self._wall())
             if abs((candidate - at).total_seconds()) <= tolerance_seconds
         }
 
@@ -971,6 +998,9 @@ class IngestService:
         minutes = self.resources.retention_minutes / 2 if aggressive else self.resources.retention_minutes
         removed = self.inventory.cleanup(
             before=at - timedelta(minutes=minutes),
+            family_before={"rap": at - timedelta(
+                minutes=self._rap_max_age_minutes(),
+                seconds=self.resources.scan_deadline_seconds)} if self.dependencies.rap_enabled else {},
             protected_products=self.dependencies.previous_detection)
         if removed:
             self._metrics["retired_inputs"] += len(removed)
