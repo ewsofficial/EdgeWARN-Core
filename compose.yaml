@@ -7,7 +7,7 @@ services:
         # EDGEWARN_SYNC_NWS_ZONES=false to skip; EWMRS requires the assets.
         # BuildKit downloads them in parallel with the runtime Conda solve.
         EDGEWARN_SYNC_NWS_ZONES: ${EDGEWARN_SYNC_NWS_ZONES:-true}
-    image: edgewarn-core:3.0.1
+    image: edgewarn-core:3.0.2
     # Start ingest before Core, EWMRS, and NEXRAD using the package topology.
     command: ["edgewarn", "run", "--config-path", "/etc/edgewarn/config"]
     environment:
@@ -32,7 +32,7 @@ services:
     stop_grace_period: 25s
 
   edgewarn-configure:
-    image: edgewarn-core:3.0.1
+    image: edgewarn-core:3.0.2
     profiles: ["admin"]
     entrypoint: ["edgewarn"]
     command: ["configure", "--config-path", "/etc/edgewarn/config"]
@@ -42,7 +42,7 @@ services:
       - ./config:/etc/edgewarn/config:rw
 
   edgewarn-sync-nws-zones:
-    image: edgewarn-core:3.0.1
+    image: edgewarn-core:3.0.2
     profiles: ["admin"]
     entrypoint: ["edgewarn"]
     command: ["sync-nws-zones", "--apply", "--config-path", "/etc/edgewarn/config"]

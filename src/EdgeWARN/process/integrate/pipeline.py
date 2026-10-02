@@ -3,7 +3,7 @@ import copy
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
@@ -590,19 +590,35 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
     filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
     repository.mark_projection_published(str(timestamp))
-    backup_started = time.perf_counter()
-    try:
-        repository.backup_if_due()
-    except Exception as exc:
-        io_manager.write_warning(f"StormProb daily backup failed: {exc}")
-    backup_seconds = time.perf_counter() - backup_started
+    from EdgeWARN.api_integration.config import (
+        remove_old_cells_realtime,
+        stormprob_inactive_cell_max_age_minutes,
+    )
+    prune_inactive = remove_old_cells_realtime() if remove_old_cells is None else remove_old_cells
+    if prune_inactive:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=stormprob_inactive_cell_max_age_minutes())
+        try:
+            (
+                forecasts_removed,
+                observations_removed,
+                projections_scrubbed,
+                cycles_removed,
+            ) = repository.prune_inactive_cells(cutoff)
+            if forecasts_removed or observations_removed or projections_scrubbed or cycles_removed:
+                io_manager.write_info(
+                    "Pruned inactive StormProb data "
+                    f"forecasts={forecasts_removed} observations={observations_removed} "
+                    f"cycle_projections={projections_scrubbed} cycles={cycles_removed}"
+                )
+                _update_api_indexes(projected_cells, remove_old_cells, timestamp)
+        except Exception as exc:
+            io_manager.write_warning(f"Failed to prune inactive StormProb data: {exc}")
     io_manager.write_info(
         "Publication phases "
         f"cycle_id={timestamp} cells={len(projected_cells)} "
         f"sqlite_transaction_seconds={sqlite_seconds:.6f} "
         f"filesystem_publication_seconds={filesystem_seconds:.6f} "
         f"api_index_seconds={index_seconds:.6f} "
-        f"backup_seconds={backup_seconds:.6f} "
         f"total_seconds={time.perf_counter() - publication_started:.6f}"
     )
 
