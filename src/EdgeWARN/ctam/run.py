@@ -129,7 +129,7 @@ def _run_builtin_stormprob(cells, input_manifest=None):
     crosses the same narrow host-service boundary.
     """
     from .builtins import BuiltinStormProbAdapter, StormProbCycleService
-    from .preflight import StormProbDependencyError, validate_stormprob_cycle
+    from .preflight import StormProbScanUnavailable, validate_stormprob_cycle
     from EdgeWARN.stormprob.features import UNIVERSAL_PROPERTY_FEATURES
     from EdgeWARN.stormprob.onnx_runtime import BATCH_SIZE
     service = StormProbCycleService()
@@ -157,9 +157,9 @@ def _run_builtin_stormprob(cells, input_manifest=None):
                         f"history row {observation['analysis_time']} has missing features "
                         + ", ".join(bad[:8]))
         except Exception as exc:
-            raise StormProbDependencyError(
-                f"WARNING: Cannot continue Core: StormProb cell {cell.get('id')} "
-                f"has invalid committed inputs: {exc}. Core is exiting nonzero."
+            raise StormProbScanUnavailable(
+                f"WARNING: StormProb cell {cell.get('id')} has invalid committed "
+                f"inputs: {exc}. This scan is skipped without forecasts or alerts."
             ) from exc
     alert_lookup_started = time.perf_counter()
     service.preload_previous_alerts(cell.get("id") for cell in cells)
@@ -193,9 +193,9 @@ def _run_builtin_stormprob(cells, input_manifest=None):
             f"cell {cell.get('id')}: {cell.get('modules', {}).get(adapter.name, {}).get('error', 'inference failed')}"
             for cell in failed[:8]
         )
-        raise StormProbDependencyError(
-            f"WARNING: Cannot continue Core: StormProb failed before alert publication: {reasons}. "
-            "Core is exiting nonzero."
+        raise StormProbScanUnavailable(
+            f"WARNING: StormProb failed before alert publication: {reasons}. "
+            "This scan is skipped without alerts."
         )
     success_count = sum(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success"
                         for cell in cells)

@@ -687,15 +687,6 @@ def run_primary_cycle_once(
         from EdgeWARN.ctam.preflight import StormProbDependencyError
 
         raise StormProbDependencyError(shared_state["fatal_dependency"])
-    if not config.disable_ctam and not config.disable_stormprob and not (
-            shared_state.get("edgewarn_integration_inputs_ready")):
-        from EdgeWARN.ctam.preflight import StormProbDependencyError
-
-        raise StormProbDependencyError(
-            "WARNING: Cannot continue Core: StormProb required inputs are unavailable: "
-            "the committed integration readiness snapshot never arrived. Core is exiting "
-            "nonzero."
-        )
 
     errors = tuple(dict(shared_state.get("errors", {})).items())
     integration_ready = bool(shared_state.get("edgewarn_integration_inputs_ready"))
@@ -706,7 +697,15 @@ def run_primary_cycle_once(
             or ("Core integration readiness snapshot unavailable",)),
     )
     stages = {"ingest": ingest_stage, "edgewarn": edgewarn_stage}
-    retryable = any(
+    stormprob_skip = shared_state.get("stormprob_unavailable")
+    if stormprob_skip:
+        stages["stormprob"] = CycleStageResult(
+            CycleStatus.UNAVAILABLE, errors=(str(stormprob_skip),))
+    # A terminal ingest disposition or a StormProb gate over committed,
+    # immutable inputs gives the same answer on every retry, so the scan is
+    # skipped at once instead of re-running detection against it.
+    scan_terminal = bool(watcher is not None and watcher.reason)
+    retryable = not (scan_terminal or stormprob_skip) and any(
         stage.status in {CycleStatus.UNAVAILABLE, CycleStatus.FAILED}
         for stage in stages.values()
     )

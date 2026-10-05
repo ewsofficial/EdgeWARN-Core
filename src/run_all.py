@@ -3,7 +3,7 @@
 A thin subprocess supervisor only. It starts the four direct services with
 ``subprocess.Popen`` using explicit argument lists and the current Python
 executable, forwards SIGINT/SIGTERM, and exits nonzero if a started child
-exits unexpectedly.
+exits. One child exiting does not stop its siblings.
 
 It performs no ingest, scientific work, or rendering; imports no pipeline
 module; creates no ``multiprocessing.Manager``, queues, readiness events,
@@ -247,8 +247,10 @@ def build_service_commands(args, services, src_root, *, service_argv=None):
 def supervise(commands, *, src_root, stop_event=None):
     """Start every command, forward signals, and wait; returns an exit code.
 
-    A child exiting unexpectedly stops the launcher with a nonzero code after
-    terminating the remaining children. A signal-driven shutdown exits zero
+    A child exiting is reported and its process group reaped, but the other
+    children keep running; the launcher returns nonzero once every child has
+    exited or a signal stops it after any child exit. A signal-driven shutdown
+    exits zero
     when every service leader reports clean termination; bounded escalation of
     a leftover descendant is successful containment, not a service failure.
     """
@@ -272,25 +274,27 @@ def supervise(commands, *, src_root, stop_event=None):
 
     def _terminate_children(force=False):
         for proc in processes.values():
-            signum = signal.SIGKILL if force else signal.SIGTERM
-            try:
-                if os.name == "posix":
-                    # Every service is a session/process-group leader. Signal
-                    # the group even if that leader has already exited: CTAM
-                    # modules and other descendants may still be running.
-                    os.killpg(proc.pid, signum)
-                elif proc.poll() is None:
+            _signal_tree(proc, signal.SIGKILL if force else signal.SIGTERM)
+
+    def _signal_tree(proc, signum):
+        try:
+            if os.name == "posix":
+                # Every service is a session/process-group leader. Signal
+                # the group even if that leader has already exited: CTAM
+                # modules and other descendants may still be running.
+                os.killpg(proc.pid, signum)
+            elif proc.poll() is None:
+                proc.send_signal(signum)
+        except ProcessLookupError:
+            # Test doubles and a concurrently reaped group can have no
+            # process group; retain direct-child behavior when possible.
+            if proc.poll() is None:
+                try:
                     proc.send_signal(signum)
-            except ProcessLookupError:
-                # Test doubles and a concurrently reaped group can have no
-                # process group; retain direct-child behavior when possible.
-                if proc.poll() is None:
-                    try:
-                        proc.send_signal(signum)
-                    except OSError:
-                        pass
-            except OSError:
-                pass
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     def _tree_is_alive(proc):
         # Reap an exited leader before probing its group. Otherwise the leader
@@ -353,8 +357,16 @@ def supervise(commands, *, src_root, stop_event=None):
                 break
         print(f"[Launcher] Started: {', '.join(f'{s} (pid {p.pid})' for s, p in processes.items())}")
 
+        # A service that exits is reported and its orphaned descendants are
+        # reaped, but its siblings keep running: the services coordinate only
+        # through durable records, so EWMRS and NEXRAD stay useful without
+        # Core. The launcher stops once every service has exited.
+        exited: set[str] = set()
+        orphan_deadlines: dict[str, float] = {}
         while not stop_event.is_set():
             for service, proc in processes.items():
+                if service in exited:
+                    continue
                 code = proc.poll()
                 if code is None:
                     continue
@@ -365,12 +377,22 @@ def supervise(commands, *, src_root, stop_event=None):
                 )
                 print(
                     f"[Launcher] Service '{service}' exited {detail}; "
-                    "stopping the remaining children"
+                    "the remaining services keep running"
                 )
                 exit_code = 1
-                stop_event.set()
-                break
-            if stop_event.is_set():
+                exited.add(service)
+                _signal_tree(proc, signal.SIGTERM)
+                orphan_deadlines[service] = time.monotonic() + STOP_GRACE_SECONDS
+            for service, deadline in list(orphan_deadlines.items()):
+                proc = processes[service]
+                if not _tree_is_alive(proc):
+                    del orphan_deadlines[service]
+                elif time.monotonic() >= deadline:
+                    print(f"[Launcher] Escalating to SIGKILL for orphans of '{service}'")
+                    _signal_tree(proc, signal.SIGKILL)
+                    del orphan_deadlines[service]
+            if processes and len(exited) == len(processes):
+                print("[Launcher] Every service has exited; stopping")
                 break
             time.sleep(0.5)
 

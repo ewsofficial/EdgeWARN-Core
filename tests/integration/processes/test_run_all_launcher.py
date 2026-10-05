@@ -205,8 +205,40 @@ def _sleeper(tmp_path, *, name="sleeper.py", code=None, trap=False):
     return str(path)
 
 
+def _supervise_until_stopped(commands, src_root, *, observe_seconds=3.0):
+    """Run the launcher, let one child exit, then report sibling liveness.
+
+    Returns ``(exit_code, siblings_alive)``, where *siblings_alive* records
+    whether some child was still running after *observe_seconds*.
+    """
+    stop = threading.Event()
+    started = []
+    real_popen = subprocess.Popen
+
+    def popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        started.append(proc)
+        return proc
+
+    result = {}
+
+    def run():
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(run_all.subprocess, "Popen", popen)
+            result["code"] = run_all.supervise(commands, src_root=src_root, stop_event=stop)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    time.sleep(observe_seconds)
+    alive = thread.is_alive() and any(proc.poll() is None for proc in started)
+    stop.set()
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "launcher did not stop after the stop request"
+    return result["code"], alive
+
+
 class TestSupervision:
-    def test_child_startup_exit_returns_nonzero_and_reaps_other_children(
+    def test_child_startup_exit_keeps_siblings_and_returns_nonzero(
         self, tmp_path, src_root, monkeypatch
     ):
         sleeper = _sleeper(tmp_path)
@@ -219,6 +251,18 @@ class TestSupervision:
         commands = run_all.build_service_commands(
             _args(), ["edgewarn", "ewmrs"], src_root
         )
+
+        code, alive_after_exit = _supervise_until_stopped(commands, src_root)
+
+        assert alive_after_exit
+        assert code == 1
+
+    def test_launcher_stops_once_every_child_has_exited(
+        self, tmp_path, src_root, monkeypatch
+    ):
+        quitter = _sleeper(tmp_path, name="quitter.py", code=3)
+        monkeypatch.setattr(run_all, "SERVICE_SCRIPTS", {"edgewarn": quitter, "ewmrs": quitter})
+        commands = run_all.build_service_commands(_args(), ["edgewarn", "ewmrs"], src_root)
 
         assert run_all.supervise(commands, src_root=src_root) == 1
 
@@ -396,21 +440,21 @@ class TestSupervision:
 
         assert code == 1
 
-    def test_unexpected_child_exit_is_nonzero(self, tmp_path, src_root, monkeypatch):
+    def test_unexpected_child_exit_does_not_stop_siblings(
+        self, tmp_path, src_root, monkeypatch
+    ):
         quitter = _sleeper(tmp_path, name="quitter.py", code=3)
         sleeper = _sleeper(tmp_path)
         monkeypatch.setattr(run_all, "SERVICE_SCRIPTS", {
-            "edgewarn": sleeper, "ewmrs": quitter, "nexrad": sleeper,
+            "edgewarn": quitter, "ewmrs": sleeper, "nexrad": sleeper,
         })
         commands = run_all.build_service_commands(_args(), list(run_all.SERVICE_SCRIPTS), src_root)
 
-        started = time.time()
-        code = run_all.supervise(commands, src_root=src_root)
-        elapsed = time.time() - started
+        code, alive_after_exit = _supervise_until_stopped(commands, src_root)
 
+        # EWMRS and NEXRAD outlived Core; the exit is still reported on stop.
+        assert alive_after_exit
         assert code == 1
-        # The remaining children were torn down promptly, not waited out.
-        assert elapsed < 20
 
     def test_survivors_are_escalated_to_sigkill_within_grace(
         self, tmp_path, src_root, monkeypatch

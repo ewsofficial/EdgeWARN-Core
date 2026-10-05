@@ -274,7 +274,9 @@ def run_primary_cycle_loop(
 
     ``last_successful`` and the selection cursor advance only after a validated
     ``CycleOutcome``. A failed scan retries with bounded exponential backoff and
-    is abandoned explicitly after ``max_attempts``; a start record that arrives
+    is abandoned explicitly after ``max_attempts``, or at once when its outcome
+    is not retryable (a terminal scan or a StormProb input gap is skipped and
+    Core continues with the next scan); a start record that arrives
     behind the processing cursor is recorded as an explicit skip and never
     rewinds tracking. The supervisor is optional: the primary service owns no
     accessory children, so it is None for the standalone primary.
@@ -432,7 +434,8 @@ def run_primary_cycle_loop(
                         f"{len(outcome.produced_artifacts)} validated artifact(s)"
                     )
                 else:
-                    abandon = pending_attempt_count >= retry_policy.max_attempts
+                    abandon = (not outcome.retryable
+                               or pending_attempt_count >= retry_policy.max_attempts)
                     cycle_state_store.record_outcome(
                         outcome,
                         pending_attempt_count,
@@ -450,7 +453,7 @@ def run_primary_cycle_loop(
                         retry_not_before = 0.0
                         print(
                             f"[Scheduler] Primary cycle for {dt} was explicitly "
-                            f"abandoned after {retry_policy.max_attempts} attempts; "
+                            f"abandoned after {pending_attempt_count} attempt(s); "
                             f"errors={list(outcome.errors)}"
                         )
                     else:

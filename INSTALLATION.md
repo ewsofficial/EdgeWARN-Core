@@ -548,8 +548,10 @@ Supervised Core/EWMRS topologies must include exactly one `ingest` service.
 Use `python run_all.py --services ingest,ewmrs` to render with Core stopped.
 Direct `run_edgewarn.py` and `run_ewmrs.py` require a separately managed
 `run_ingest.py` sharing the complete config tree, runtime root, and dependency
-options. Without it they wait with producer diagnostics. The supervisor stops
-all siblings when any child exits; separate service units provide isolation.
+options. Without it they wait with producer diagnostics. When one supervised
+child exits, the supervisor reports it and reaps its process group, but the other
+services keep running. The supervisor exits nonzero once every child has exited,
+or on shutdown after any child exited. Separate service units provide full isolation.
 
 `--args ingest '["--disable-goes"]'` propagates GLM disablement to Core and
 EWMRS. `--disable-ctam` and `--disable-stormprob` propagate the same way: with
@@ -557,6 +559,10 @@ CTAM and StormProb both enabled, every StormProb MRMS source (VIL, VII, echo
 tops, isothermal reflectivities, AzShear and the others in
 `EdgeWARN.ctam.preflight.STORMPROB_MRMS_SOURCES`) is a mandatory integration
 input, so Core is released into integration only once all of them are local.
+If any of them, RAP or GLM is still missing when the ingest scan deadline
+expires, or the StormProb gate rejects the scan's inputs, Core skips that scan
+without publishing forecasts or alerts and continues with the next one. Only
+startup preflight failures (missing model assets or source products) stop Core.
 Direct commands must pass the same values to `run_ingest.py`,
 `run_edgewarn.py` and `run_ewmrs.py` (or share `runtime.run`).
 Conflicting explicit values or worker runtime roots fail before startup.

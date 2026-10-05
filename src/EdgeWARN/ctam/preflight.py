@@ -26,6 +26,15 @@ class StormProbDependencyError(RuntimeError):
     """Fatal, process-wide StormProb input failure (never a module skip)."""
 
 
+class StormProbScanUnavailable(StormProbDependencyError):
+    """StormProb cannot run for one scan; realtime Core skips that scan.
+
+    Raised before any forecast or alert is published for the scan. It remains a
+    :class:`StormProbDependencyError` so integration still aborts and
+    historical processing still stops; only the realtime loop downgrades it.
+    """
+
+
 @dataclass(frozen=True)
 class StormProbSource:
     product: str
@@ -335,7 +344,7 @@ def validate_stormprob_cycle(cells, input_manifest) -> None:
             problems.append(f"cell {cell.get('id')}: missing or invalid features {', '.join(bad[:12])}"
                             + (f" (+{len(bad)-12} more)" if len(bad) > 12 else ""))
     if problems:
-        raise StormProbDependencyError(
-            "WARNING: Cannot continue Core: StormProb dependency failure: "
-            + "; ".join(problems) + ". Core is exiting with a nonzero status."
+        raise StormProbScanUnavailable(
+            "WARNING: StormProb dependency failure: "
+            + "; ".join(problems) + ". This scan is skipped without forecasts or alerts."
         )

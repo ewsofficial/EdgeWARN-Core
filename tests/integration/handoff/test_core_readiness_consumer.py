@@ -136,9 +136,10 @@ class StubWorker:
     process boundary exactly as a real worker's durable effects would.
     """
 
-    def __init__(self, log_path, *, integration=True):
+    def __init__(self, log_path, *, integration=True, stormprob_skip=None):
         self.log_path = log_path
         self.integration = integration
+        self.stormprob_skip = stormprob_skip
 
     def _note(self, entry):
         with open(self.log_path, "a", encoding="utf-8") as handle:
@@ -154,6 +155,14 @@ class StubWorker:
         integration_ready_event.wait()
         self._note(["integration_manifest",
                     bool(shared_state.get("integration_manifest"))])
+        if self.stormprob_skip is not None:
+            # What the real worker publishes when the StormProb gate rejects a scan.
+            shared_state["stormprob_unavailable"] = self.stormprob_skip
+            shared_state["edgewarn_stage"] = {
+                "status": "unavailable", "produced_artifacts": [],
+                "errors": [self.stormprob_skip],
+            }
+            return None
         shared_state["edgewarn_stage"] = {
             "status": "completed" if self.integration else "unavailable",
             "produced_artifacts": ["stormcells.json"],
@@ -308,10 +317,47 @@ class TestIntegrationWait:
         finally:
             timer.cancel()
         assert not outcome.completed
-        assert outcome.retryable
+        # A terminal disposition never changes, so the scan is not retried.
+        assert not outcome.retryable
         assert outcome.stages["ingest"].status.value == "unavailable"
         assert any("terminal ingest disposition" in error
                    for error in outcome.stages["ingest"].errors)
+
+    def test_a_terminal_scan_with_stormprob_enabled_is_skipped_not_fatal(
+            self, producer, tmp_path, worker):
+        """Missing StormProb integration inputs skip one scan; Core keeps running."""
+        registry, dependencies, inventory = producer
+        for product in CHECKS:
+            notify(inventory, commit(inventory, product))
+        publish(inventory, dependencies)
+        inventory.handoff.disposition(
+            "terminal", canonical_cycle_id(T), status="expired",
+            reason="incomplete scan expired; missing ['GLM']")
+
+        outcome = run_cycle(tmp_path, dependencies, overrides={
+            "disable_ctam": False, "disable_ctam_modules": False,
+            "disable_stormprob": False})
+
+        assert not outcome.completed
+        assert not outcome.retryable
+        assert outcome.stages["ingest"].status.value == "unavailable"
+
+    def test_a_stormprob_gate_failure_skips_the_scan(self, producer, tmp_path,
+                                                    worker_factory):
+        registry, dependencies, inventory = producer
+        for product in CHECKS:
+            notify(inventory, commit(inventory, product))
+        publish(inventory, dependencies)
+        worker_factory(stormprob_skip="WARNING: StormProb dependency failure: MRMS_VII")
+
+        outcome = run_cycle(tmp_path, dependencies, overrides={
+            "disable_ctam": False, "disable_ctam_modules": False,
+            "disable_stormprob": False})
+
+        assert not outcome.completed
+        assert not outcome.retryable
+        assert outcome.stages["stormprob"].status.value == "unavailable"
+        assert "MRMS_VII" in outcome.stages["stormprob"].errors[0]
 
     def test_a_worker_restart_after_a_partial_wait_still_installs_the_snapshot(
             self, producer, tmp_path, worker_factory):

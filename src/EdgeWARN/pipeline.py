@@ -336,10 +336,10 @@ def edgewarn_cycle_worker(
             optional_complete_event.wait()
             if not shared_state.get("optional_inputs_complete", False):
                 if not disable_ctam and not disable_stormprob:
-                    from EdgeWARN.ctam.preflight import StormProbDependencyError
-                    raise StormProbDependencyError(
-                        "WARNING: Cannot continue Core: StormProb optional input acquisition "
-                        "did not reach a final snapshot. Core is exiting nonzero."
+                    from EdgeWARN.ctam.preflight import StormProbScanUnavailable
+                    raise StormProbScanUnavailable(
+                        "WARNING: StormProb optional input acquisition did not reach a "
+                        "final snapshot. This scan is skipped without forecasts or alerts."
                     )
                 raise RuntimeError("Optional acquisition did not finish cleanly")
             final = CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
@@ -375,7 +375,14 @@ def edgewarn_cycle_worker(
         publish_stage("completed", artifacts=(generated_file,))
         log("INFO: EdgeWARN worker completed successfully")
     except Exception as exc:
-        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        from EdgeWARN.ctam.preflight import StormProbDependencyError, StormProbScanUnavailable
+        if isinstance(exc, StormProbScanUnavailable):
+            # Integration aborted before any forecast or alert was published;
+            # the parent skips this scan and Core keeps running.
+            shared_state["stormprob_unavailable"] = str(exc)
+            publish_stage("unavailable", errors=(str(exc),))
+            log(f"WARNING: {exc}")
+            return
         if isinstance(exc, StormProbDependencyError):
             shared_state["fatal_dependency"] = str(exc)
         publish_stage("failed", errors=(str(exc),))

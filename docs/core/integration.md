@@ -102,4 +102,6 @@ with `get_datasets_config(include_inactive=True)`; disabled entries have no raw
 path. Current MRMS manifest selection uses family/product/role, so a previous
 record or a different family's record cannot satisfy current enrichment. Missing
 pinned input skips its statistic without scanning another file. The dedicated
-StormProb gate still determines whether incomplete enrichment is fatal to Core.
+StormProb gate still decides whether a scan with incomplete enrichment is
+skipped: a rejected scan publishes no forecasts or alerts, and Core continues
+with the next scan.
