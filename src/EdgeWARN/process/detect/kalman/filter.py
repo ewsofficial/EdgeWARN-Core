@@ -153,10 +153,10 @@ class KalmanFilter:
         # Use the previous-cycle StormProb 15-minute forecast when available.
         modules = cell.get('modules', {})
         stormprob = modules.get('StormProb', {})
-        if stormprob.get('status') == 'success':
+        if stormprob.get('status') in {'success', 'partial'}:
             lead = next((item for item in stormprob.get('leads', [])
                          if item.get('lead_minutes') == 15), None)
-            if lead and lead.get('east_km') is not None and lead.get('north_km') is not None:
+            if lead and lead.get('status') == 'ok' and lead.get('east_km') is not None and lead.get('north_km') is not None:
                 u, v = float(lead['east_km']) * 1000 / 900, float(lead['north_km']) * 1000 / 900
         
         self.initialize(lat, lon, u, v, timestamp=timestamp)

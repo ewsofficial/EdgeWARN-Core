@@ -119,9 +119,19 @@ class BuiltinStormProbAdapter:
             lat, lon = map(float, original_centroid)
             lon += east / (111.0 * math.cos(math.radians(lat)))
             lat += north / 111.0
-            polygon = postprocess.operational_envelope(
-                original_polygon, original_centroid, displacement[0, index],
-                radii[0, :, index], calibrator, index)
+            try:
+                polygon = postprocess.operational_envelope(
+                    original_polygon, original_centroid, displacement[0, index],
+                    radii[0, :, index], calibrator, index)
+            except (ValueError, ArithmeticError) as exc:
+                forecasts.append({
+                    "cell_id": str(cell["id"]), "analysis_time": timestamp,
+                    "lead_minutes": lead, "model_version": MODEL_VERSION,
+                    "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
+                    "status": "error", "reason": "geometry-failed", "error": str(exc),
+                    "metadata": {"postprocess_version": postprocess.VERSION},
+                })
+                continue
             forecasts.append({
                 "cell_id": str(cell["id"]), "analysis_time": timestamp,
                 "lead_minutes": lead, "model_version": MODEL_VERSION,
@@ -137,7 +147,8 @@ class BuiltinStormProbAdapter:
                               "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
                               "postprocess_version": postprocess.VERSION},
             })
-        return {"status": "success", "model_version": MODEL_VERSION,
+        status = "success" if all(lead["status"] == "ok" for lead in forecasts) else "partial"
+        return {"status": status, "model_version": MODEL_VERSION,
                 "analysis_time": timestamp, "leads": forecasts,
                 "initial_wind_mps": [initial["u"], initial["v"]]}
 
@@ -241,9 +252,11 @@ class BuiltinStormProbAdapter:
 
     def alerts(self, cell: dict[str, Any]) -> list[AlertPayload]:
         result = cell.get("modules", {}).get(self.name, {})
-        if result.get("status") != "success":
+        if result.get("status") not in {"success", "partial"}:
             return []
         leads = {int(item["lead_minutes"]): item for item in result["leads"]}
+        if any(leads.get(lead, {}).get("status") != "ok" for lead in (15, 30)):
+            return []
         sweep = swept_envelope_0_30(current_polygon=_geojson_polygon(cell),
                                     lead_15=leads[15].get("polygon"),
                                     lead_30=leads[30].get("polygon"))

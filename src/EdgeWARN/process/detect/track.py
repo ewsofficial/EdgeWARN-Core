@@ -816,10 +816,10 @@ class StormCellTracker:
     def _get_stormprob_velocity(self, cell: Dict) -> Tuple[Optional[float], Optional[float]]:
         modules = cell.get('modules', {})
         result = modules.get('StormProb', {})
-        if result.get('status') == 'success':
+        if result.get('status') in {'success', 'partial'}:
             lead = next((item for item in result.get('leads', [])
                          if item.get('lead_minutes') == 15), None)
-            if lead:
+            if lead and lead.get('status') == 'ok':
                 return (float(lead['east_km']) * 1000 / 900,
                         float(lead['north_km']) * 1000 / 900)
         return None, None

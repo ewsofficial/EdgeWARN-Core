@@ -97,3 +97,9 @@ external CTAM history read scope while its contract migrates. CTAM
 readiness still validates the derived JSON file because the current external
 module file descriptor schema promises a readable file; that contract must be
 updated before the projection is removed.
+
+Forecast geometry failures are recorded per lead as `status: error` with
+`reason: geometry-failed`. The module reports `partial` and retains successful
+leads. Alerts require successful 15- and 30-minute leads; tracking requires a
+successful 15-minute lead. Nonpositive calibrated rays terminate at the forecast
+centroid. They never create opposite-direction boundary points.

@@ -352,7 +352,7 @@ class TestKalmanFilterWithCell:
             'modules': {
                 'StormProb': {
                     'status': 'success',
-                    'leads': [{'lead_minutes': 15, 'east_km': 13.5,
+                    'leads': [{'lead_minutes': 15, 'status': 'ok', 'east_km': 13.5,
                                'north_km': 9.0}]
                 }
             }

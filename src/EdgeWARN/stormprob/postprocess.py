@@ -71,7 +71,7 @@ def occupancy_probability(radii, displacement_km):
         frac = angle - floor
         distance = np.sqrt(dx * dx + dy * dy)
         for member in range(ENSEMBLE_SIZE):
-            profile = radii[0, member, lead]
+            profile = np.maximum(radii[0, member, lead], 0.0)
             interpolated = profile[lo] + (profile[hi] - profile[lo]) * frac
             counts[lead] += distance <= interpolated
     return counts.astype(np.float32) / np.float32(ENSEMBLE_SIZE)
@@ -275,8 +275,11 @@ def calibrated_radial_boundary(radii_km, calibrator, lead_index, *,
     above the threshold therefore selects the corresponding order statistic.
     """
     radii = np.asarray(radii_km, dtype=np.float64)
-    if radii.shape != (ENSEMBLE_SIZE, 64):
-        raise ValueError("invalid ensemble radial shape")
+    if radii.shape != (ENSEMBLE_SIZE, 64) or not np.all(np.isfinite(radii)):
+        raise ValueError("invalid ensemble radial shape or values")
+    # A nonpositive extent terminates at the forecast centroid, never on
+    # the opposite ray. Apply the same rule to occupancy and contours.
+    radii = np.maximum(radii, 0.0)
     levels = np.asarray(calibrator["parameters"][lead_index][
         "calibrated_probabilities"], dtype=np.float64)
     if levels.shape != (ENSEMBLE_SIZE + 1,) or not np.all(np.isfinite(levels)):

@@ -192,7 +192,7 @@ def _run_builtin_stormprob(cells, input_manifest=None):
             forecast_parts[name] += batch_timing.get(name, 0.0)
         forecast_seconds += time.perf_counter() - forecast_started
     failed = [cell for cell in cells
-              if cell.get("modules", {}).get(adapter.name, {}).get("status") != "success"
+              if cell.get("modules", {}).get(adapter.name, {}).get("status") not in {"success", "partial"}
               and not (cell.get("tracking_mode") == "predicted"
                        and cell.get("modules", {}).get(adapter.name, {}).get("status") == "skipped")]
     error_count = len(failed)
@@ -200,7 +200,7 @@ def _run_builtin_stormprob(cells, input_manifest=None):
         cell.setdefault("stormprob", {}).update(
             status="unavailable", reason=cell.get("modules", {}).get(adapter.name, {}).get("error", "inference failed"))
     print(f"[StormProb] unavailable_cells={error_count} total_cells={len(cells)}")
-    success_count = sum(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success"
+    success_count = sum(cell.get("modules", {}).get(adapter.name, {}).get("status") in {"success", "partial"}
                         for cell in cells)
     alerts_started = time.perf_counter()
     for cell_idx, cell in enumerate(cells):
