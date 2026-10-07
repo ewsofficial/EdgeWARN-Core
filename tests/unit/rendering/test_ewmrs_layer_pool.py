@@ -219,3 +219,22 @@ class TestSelectedLayerRendering:
             assert results == {"A": False}
         finally:
             pool.shutdown()
+
+
+def _die(layer):
+    import os
+    if layer["name"] == "crash":
+        os._exit(1)
+    return _record(layer)
+
+
+def test_pool_recovers_after_worker_process_dies(monkeypatch):
+    monkeypatch.setattr(pipeline, "_render_layer", _die)
+    pool = pipeline.RenderLayerPool(max_workers=1)
+    old = pool._executor
+    try:
+        assert pool.render([{"name": "crash"}]) == {"crash": None}
+        assert pool._executor is not old
+        assert pool.render([{"name": "healthy"}]) == {"healthy": "healthy.png"}
+    finally:
+        pool.shutdown()

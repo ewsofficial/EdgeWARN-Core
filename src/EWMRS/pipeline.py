@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+import threading
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -295,21 +296,48 @@ class RenderLayerPool:
         self._executor = ProcessPoolExecutor(
             max_workers=max(1, self.max_workers), initializer=_worker_initializer)
         self._closed = False
+        self._lock = threading.Lock()
+
+    def _recover(self, executor):
+        from concurrent.futures import ProcessPoolExecutor
+
+        with self._lock:
+            if self._closed or self._executor is not executor:
+                return
+            executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = ProcessPoolExecutor(
+                max_workers=max(1, self.max_workers), initializer=_worker_initializer)
 
     def render(self, layers) -> Dict[str, RenderOutput]:
         """Render the given layers and report each one's validated outcome."""
         from concurrent.futures import as_completed
 
+        from concurrent.futures.process import BrokenProcessPool
+
+        layers = tuple(layers)
         results: Dict[str, RenderOutput] = {}
-        if self._closed:
-            raise RuntimeError("the render layer pool is shut down")
-        futures = {self._executor.submit(_render_layer, layer): layer for layer in layers}
+        futures = {}
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("the render layer pool is shut down")
+            executor = self._executor
+            try:
+                for layer in layers:
+                    futures[executor.submit(_render_layer, layer)] = layer
+            except BrokenProcessPool:
+                broken = True
+            else:
+                broken = False
+        if broken:
+            self._recover(executor)
+            return {str(layer.get("name")): None for layer in layers}
         for future in as_completed(futures):
             layer = futures[future]
             try:
                 name, output = future.result()
             except Exception as exc:
-                # A crashed or cancelled worker is a failed job, not a lost one.
+                if isinstance(exc, BrokenProcessPool):
+                    self._recover(executor)
                 io_manager.write_error(
                     f"Error processing layer {layer.get('name')}: {exc}")
                 results[str(layer.get("name"))] = None
@@ -318,10 +346,12 @@ class RenderLayerPool:
         return results
 
     def shutdown(self, *, wait: bool = True, cancel_futures: bool = True) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        self._executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            executor = self._executor
+        executor.shutdown(wait=wait, cancel_futures=cancel_futures)
 
 
 def pinned_layer(layer, input_path, *, source_type="mrms"):

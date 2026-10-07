@@ -36,6 +36,7 @@ import sys
 import threading
 import traceback
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from util.io import QueueWriter
@@ -126,6 +127,7 @@ class InputRenderConsumer:
         self.handoff = IngestHandoff(base_dir, fingerprint=dependencies.fingerprint,
                                      run_id=run_id)
         self._pool = pool
+        self._pool_lock = threading.Lock()
         self._owns_pool = pool is None
         self._fingerprint = None
         # A long render must never delay accepting the next notification, so
@@ -407,13 +409,13 @@ class InputRenderConsumer:
                    if record.data["status"] not in TERMINAL_STATUSES)
 
     def _ensure_pool(self):
-        if self._pool is None:
-            from EWMRS.pipeline import RenderLayerPool
-            from EWMRS.pipeline_config import render_phase_name
+        with self._pool_lock:
+            if self._pool is None:
+                from EWMRS.pipeline import RenderLayerPool
+                from EWMRS.pipeline_config import render_phase_name
 
-            # ``render`` is an ewmrs_pipeline.yaml section, not a runtime.yaml one.
-            self._pool = RenderLayerPool(phase_name=render_phase_name())
-        return self._pool
+                self._pool = RenderLayerPool(phase_name=render_phase_name())
+            return self._pool
 
     @staticmethod
     def _job_workers():
