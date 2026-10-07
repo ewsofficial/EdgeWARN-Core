@@ -21,8 +21,9 @@ eligibility require a restart.
 
 StormProb has a separate all-input gate after the final optional input and
 enrichment snapshot. Missing required MRMS/RAP inputs skip the affected realtime scan without
-forecast or alert publication; Core continues to the next scan. Startup
-configuration and asset preflight remains fatal. Abandoned acquisitions become
+forecast or alert publication; Core continues to the next scan. A cell with unusable features or committed history receives
+`stormprob.status: unavailable` and a reason; other cells continue to inference
+and alert publication. Startup configuration and asset preflight remains fatal. Abandoned acquisitions become
 eligible for rediscovery after `ingest.retry_max_seconds`, while their scan is
 still within its acquisition window. Set `runtime.run.disable_stormprob: true` or use
 `--disable-stormprob` to skip its dependency and asset checks, inference, and

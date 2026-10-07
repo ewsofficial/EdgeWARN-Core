@@ -134,12 +134,18 @@ def _run_builtin_stormprob(cells, input_manifest=None):
     from EdgeWARN.stormprob.onnx_runtime import BATCH_SIZE
     service = StormProbCycleService()
     validate_stormprob_cycle(cells, input_manifest)
+    from .builtins.stormprob import BuiltinStormProbAdapter as FailureAdapter, InputNotReady
+
+    candidates = []
     # Validate every candidate's committed feature/history row before the
     # first batch can infer or publish. Padded history slots remain permitted.
     for cell in cells:
         if cell.get("tracking_mode") == "predicted":
+            candidates.append(cell)
             continue
         try:
+            if cell.get("stormprob", {}).get("status") == "unavailable":
+                raise InputNotReady(cell["stormprob"]["reason"])
             inputs = service.repository.model_inputs(cell.get("id"), through=cell.get("timestamp"))
             history = service.repository.feature_history(
                 cell.get("id"), limit=30, through=cell.get("timestamp"))
@@ -157,10 +163,11 @@ def _run_builtin_stormprob(cells, input_manifest=None):
                         f"history row {observation['analysis_time']} has missing features "
                         + ", ".join(bad[:8]))
         except Exception as exc:
-            raise StormProbScanUnavailable(
-                f"WARNING: StormProb cell {cell.get('id')} has invalid committed "
-                f"inputs: {exc}. This scan is skipped without forecasts or alerts."
-            ) from exc
+            cell.setdefault("stormprob", {}).update(status="unavailable", reason=str(exc))
+            FailureAdapter._record_failure(cell, InputNotReady(str(exc)), time.perf_counter())
+            print(f"[StormProb] Skipped cell {cell.get('id')}: {exc}")
+        else:
+            candidates.append(cell)
     alert_lookup_started = time.perf_counter()
     service.preload_previous_alerts(cell.get("id") for cell in cells)
     alert_lookup_seconds = time.perf_counter() - alert_lookup_started
@@ -176,8 +183,8 @@ def _run_builtin_stormprob(cells, input_manifest=None):
         "inference_seconds": 0.0,
         "postprocess_seconds": 0.0,
     }
-    for batch_start in range(0, len(cells), BATCH_SIZE):
-        batch = cells[batch_start:batch_start + BATCH_SIZE]
+    for batch_start in range(0, len(candidates), BATCH_SIZE):
+        batch = candidates[batch_start:batch_start + BATCH_SIZE]
         forecast_started = time.perf_counter()
         adapter.run_batch(batch)
         batch_timing = getattr(adapter, "last_batch_timing", {})
@@ -188,19 +195,17 @@ def _run_builtin_stormprob(cells, input_manifest=None):
               if cell.get("modules", {}).get(adapter.name, {}).get("status") != "success"
               and not (cell.get("tracking_mode") == "predicted"
                        and cell.get("modules", {}).get(adapter.name, {}).get("status") == "skipped")]
-    if failed:
-        reasons = "; ".join(
-            f"cell {cell.get('id')}: {cell.get('modules', {}).get(adapter.name, {}).get('error', 'inference failed')}"
-            for cell in failed[:8]
-        )
-        raise StormProbScanUnavailable(
-            f"WARNING: StormProb failed before alert publication: {reasons}. "
-            "This scan is skipped without alerts."
-        )
+    error_count = len(failed)
+    for cell in failed:
+        cell.setdefault("stormprob", {}).update(
+            status="unavailable", reason=cell.get("modules", {}).get(adapter.name, {}).get("error", "inference failed"))
+    print(f"[StormProb] unavailable_cells={error_count} total_cells={len(cells)}")
     success_count = sum(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success"
                         for cell in cells)
     alerts_started = time.perf_counter()
     for cell_idx, cell in enumerate(cells):
+        if cell.get("modules", {}).get(adapter.name, {}).get("status") not in {"success", "partial"}:
+            continue
         publish_started = time.perf_counter()
         published = adapter.publish_alerts(adapter.alerts(cell))
         alert_count += published

@@ -304,7 +304,7 @@ def check_core_startup(
 
 
 def validate_stormprob_cycle(cells, input_manifest) -> None:
-    """Gate all candidate cells before any forecast or alert publication."""
+    """Gate shared sources and mark individual unusable observations."""
     if not cells:
         return
     problems = []
@@ -330,19 +330,22 @@ def validate_stormprob_cycle(cells, input_manifest) -> None:
         if not rap:
             problems.append("RAP environment and wind fields: unavailable or stale")
     for cell in cells:
-        # Kalman continuity deliberately has no current measured geometry.
-        # Its per-cell inference is skipped; shared source gates still apply.
         if cell.get("tracking_mode") == "predicted":
             continue
         observation = cell.get("stormprob", {}).get("observation")
+        reason = None
         if not isinstance(observation, dict) or not observation.get("inference_ready"):
-            problems.append(f"cell {cell.get('id')}: observation unavailable or invalid")
-            continue
-        bad = [name for name in features.UNIVERSAL_PROPERTY_FEATURES
-               if observation.get("quality", {}).get(name) != "ok"]
-        if bad:
-            problems.append(f"cell {cell.get('id')}: missing or invalid features {', '.join(bad[:12])}"
-                            + (f" (+{len(bad)-12} more)" if len(bad) > 12 else ""))
+            reason = "observation unavailable or invalid"
+        else:
+            bad = [name for name in features.UNIVERSAL_PROPERTY_FEATURES
+                   if observation.get("quality", {}).get(name) != "ok"]
+            if bad:
+                reason = "missing or invalid features: " + ", ".join(bad[:12])
+        if reason:
+            cell.setdefault("stormprob", {}).update(status="unavailable", reason=reason)
+        else:
+            cell.setdefault("stormprob", {}).pop("status", None)
+            cell["stormprob"].pop("reason", None)
     if problems:
         raise StormProbScanUnavailable(
             "WARNING: StormProb dependency failure: "

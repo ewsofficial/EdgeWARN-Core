@@ -165,8 +165,9 @@ def test_predicted_track_skips_cell_gate_but_keeps_source_and_observed_gates(tmp
     assert preflight.validate_stormprob_cycle([_ready_cell(), predicted], manifest) is None
     with pytest.raises(preflight.StormProbDependencyError, match="final CTAM input snapshot"):
         preflight.validate_stormprob_cycle([predicted], None)
-    with pytest.raises(preflight.StormProbDependencyError, match="cell 901075"):
-        preflight.validate_stormprob_cycle([predicted | {"tracking_mode": "active"}], manifest)
+    observed = predicted | {"tracking_mode": "active"}
+    preflight.validate_stormprob_cycle([observed], manifest)
+    assert observed["stormprob"]["status"] == "unavailable"
 
 
 def test_predicted_only_cycle_skips_inference_without_fatal_supervision(tmp_path, monkeypatch):
@@ -223,8 +224,8 @@ def test_reacquired_cell_allows_predicted_history_but_rejects_bad_observed_histo
     monkeypatch.setattr(builtins, "BuiltinStormProbAdapter", Adapter)
     assert _run_builtin_stormprob([cell], manifest) == (1, 0, 0)
     history[1]["lineage"]["tracking_mode"] = "active"
-    with pytest.raises(preflight.StormProbDependencyError, match="invalid committed inputs"):
-        _run_builtin_stormprob([cell], manifest)
+    assert _run_builtin_stormprob([cell], manifest) == (0, 1, 0)
+    assert cell["stormprob"]["status"] == "unavailable"
 
 
 @pytest.mark.parametrize("offset_seconds", [38, 120, -60, -180])
@@ -316,3 +317,14 @@ def test_ctam_metadata_is_limited_to_declared_selectors(tmp_path):
     with pytest.raises(APIError) as commit_error:
         service.commit_transaction('hail', idempotency_key='attempt')
     assert commit_error.value.code == 'requirement_unmet'
+
+
+def test_bad_cell_feature_does_not_block_good_cells(tmp_path):
+    cycle = datetime(2026, 10, 2, 17, 24, tzinfo=timezone.utc)
+    manifest = _stormprob_manifest(tmp_path, cycle, 41)
+    cells = [_ready_cell() | {"id": str(i)} for i in range(3)]
+    quality = cells[2]["stormprob"]["observation"]["quality"]
+    quality[next(iter(quality))] = "match_error"
+    preflight.validate_stormprob_cycle(cells, manifest)
+    assert all(cell["stormprob"].get("status") != "unavailable" for cell in cells[:2])
+    assert cells[2]["stormprob"]["status"] == "unavailable"
