@@ -20,6 +20,7 @@ this module never imports.
 """
 
 import multiprocessing
+import math
 from datetime import datetime, timezone
 import time
 import uuid
@@ -420,7 +421,9 @@ def run_primary_cycle_loop(
                                 ),
                                 pending_attempt_count,
                             )
-                        raise
+                            raise
+                        outcome = CycleOutcome(dt, {"edgewarn": CycleStageResult(
+                            CycleStatus.FAILED, errors=(f"{type(exc).__name__}: {exc}",))}, retryable=True)
                     finally:
                         if primary_lease is not None:
                             primary_lease.release()
@@ -504,7 +507,9 @@ def run_primary_cycle_loop(
 
 
 def _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings):
-    for _ in range(supervisor_settings["check_ticks"]):
+    ticks = supervisor_settings["check_ticks"] if supervisor is not None else max(1, math.ceil(
+        section("consumers")["core_readiness_seconds"] / supervisor_settings["tick_seconds"]))
+    for _ in range(ticks):
         if stop_event is not None and stop_event.is_set():
             break
         time.sleep(supervisor_settings["tick_seconds"])

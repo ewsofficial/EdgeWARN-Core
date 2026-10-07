@@ -8,8 +8,9 @@
     "input_jobs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pending_max_jobs", "max_age_minutes", "retry_max_attempts", "retry_initial_seconds", "retry_max_seconds"],
+      "required": ["render_timeout_seconds", "pending_max_jobs", "max_age_minutes", "retry_max_attempts", "retry_initial_seconds", "retry_max_seconds"],
       "properties": {
+        "render_timeout_seconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 7200 },
         "pending_max_jobs": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum pending input/layer jobs."},
         "max_age_minutes": {"type": "integer", "minimum": 1, "maximum": 10080, "description": "Maximum pending job age in minutes, matching GUI retention default."},
         "retry_max_attempts": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum attempts per input/layer job."},

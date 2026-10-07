@@ -487,7 +487,12 @@ def solve_assignment(cost_matrix: np.ndarray,
     n_rows, n_cols = cost_matrix.shape
     
     # Run Hungarian algorithm
-    row_inds, col_inds = linear_sum_assignment(cost_matrix)
+    # Infeasible gated matrices still have useful finite partial matches.
+    finite = cost_matrix[np.isfinite(cost_matrix)]
+    if not finite.size:
+        return [], list(range(n_rows)), list(range(n_cols))
+    penalty = max(1.0, float(np.max(np.abs(finite)))) * (n_rows + n_cols + 1)
+    row_inds, col_inds = linear_sum_assignment(np.where(np.isfinite(cost_matrix), cost_matrix, penalty))
     
     # Process results
     matched_pairs = []

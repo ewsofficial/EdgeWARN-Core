@@ -8,6 +8,13 @@ services:
         # BuildKit downloads them in parallel with the runtime Conda solve.
         EDGEWARN_SYNC_NWS_ZONES: ${EDGEWARN_SYNC_NWS_ZONES:-true}
     image: edgewarn-core:3.0.2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "util.runtime.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5m
+      retries: 3
     # Start ingest before Core, EWMRS, and NEXRAD using the package topology.
     command: ["edgewarn", "run", "--config-path", "/etc/edgewarn/config"]
     environment:
@@ -15,6 +22,7 @@ services:
       # receives the mounted container path through its supported environment
       # contract, so every supervised worker uses the same runtime root.
       EDGEWARN_BASE_DIR: /var/lib/edgewarn
+      EDGEWARN_CONFIG_DIR: /etc/edgewarn/config
       # Operator-owned CTAM modules.  Resolution precedence is CLI flag >
       # this variable > runtime.yaml run.ctam_module_dir; the absolute path
       # here skips the relative-path repo-root guessing entirely.

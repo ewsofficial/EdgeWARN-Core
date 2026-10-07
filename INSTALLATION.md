@@ -587,3 +587,10 @@ Realtime `state/realtime/ingest-reports` snapshots are retired. Monitor
 `state/realtime/ingest/v1/` readiness/outbox records and `poll-status.json`
 instead. Historical ingest reports remain supported. No repository reader uses
 the retired realtime directory; external operator tools must be audited at cutover.
+
+The supplied Compose service restarts after exit and checks enabled Python
+producer heartbeats. Match `api.server.enabled_services` to your deployment.
+Container logs use the bounded circular budget in `runtime.logging`; the active
+file is linked as `edgewarn.current.log`. See
+[production failure recovery](docs/core/production_hardening.md) for restart,
+worker timeout, alert freshness, and storage-maintenance behavior.

@@ -92,7 +92,8 @@ def download_alerts(dt: datetime):
         current_time = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         new_count, updated_count, seen_ids = _process_nws_file_with_registry(temp_path, registry, current_time)
 
-        reconciled_removed_count = registry.reconcile_with_active_ids(seen_ids, current_time)
+        # Empty/entirely malformed pulls must not erase still-valid warnings.
+        reconciled_removed_count = registry.reconcile_with_active_ids(seen_ids or registry.get_active_ids(), current_time)
         removed_count = registry.cleanup_expired(current_time)
         registry.save()
 
@@ -166,7 +167,8 @@ async def download_alerts_async(dt: datetime):
             current_time,
         )
 
-        reconciled_removed_count = registry.reconcile_with_active_ids(seen_ids, current_time)
+        # Empty/entirely malformed pulls must not erase still-valid warnings.
+        reconciled_removed_count = registry.reconcile_with_active_ids(seen_ids or registry.get_active_ids(), current_time)
         removed_count = registry.cleanup_expired(current_time)
         registry.save()
 
@@ -216,29 +218,37 @@ def _process_nws_file_with_registry(
 
     try:
         with open(input_path, 'r', encoding='utf-8') as infile:
-            # Stream parsing
+            # Validate the entire stream before mutating the singleton.
+            for _ in ijson.parse(infile):
+                pass
+            infile.seek(0)
             features = ijson.items(infile, 'features.item')
 
             for feature in features:
-                props = feature.get('properties', {})
-                event = props.get('event')
-
-                if event in dropped:
+                if not isinstance(feature, dict) or not isinstance(feature.get('properties'), dict):
+                    io_manager.write_warning("Skipping malformed NWS feature")
+                    if isinstance(feature, dict) and isinstance(feature.get('id'), str):
+                        seen_ids.add(feature['id'])
                     continue
-
-                # Apply GeoMapper Logic
-                processed_feature = process_warning(feature)
-                
-                # Process through registry (handles deduplication)
-                is_new, alert_id = registry.process_alert(processed_feature, current_time)
-                
+                props = feature['properties']
+                if props.get('event') in dropped:
+                    continue
+                try:
+                    processed_feature = process_warning(feature)
+                    is_new, alert_id = registry.process_alert(processed_feature, current_time)
+                except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                    io_manager.write_warning(f"Skipping malformed NWS feature: {exc}")
+                    alert_id = props.get('id') or feature.get('id')
+                    if isinstance(alert_id, str):
+                        seen_ids.add(alert_id)
+                    continue
                 if alert_id:
                     seen_ids.add(alert_id)
                     if is_new:
                         new_count += 1
                     else:
                         updated_count += 1
-        
+
         return new_count, updated_count, seen_ids
         
     except Exception as e:

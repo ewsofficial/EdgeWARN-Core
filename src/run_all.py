@@ -246,12 +246,12 @@ def build_service_commands(args, services, src_root, *, service_argv=None):
     return commands
 
 
-def supervise(commands, *, src_root, stop_event=None):
+def supervise(commands, *, src_root, stop_event=None, restart_policy=None):
     """Start every command, forward signals, and wait; returns an exit code.
 
-    A child exiting is reported and its process group reaped, but the other
-    children keep running; the launcher returns nonzero once every child has
-    exited or a signal stops it after any child exit. A signal-driven shutdown
+    A failed child's process group is reaped before a bounded-backoff restart.
+    Siblings continue running. Exhausted restart bursts enter a cooldown while
+    siblings are alive; if every service stops, the launcher exits nonzero. A signal-driven shutdown
     exits zero
     when every service leader reports clean termination; bounded escalation of
     a leftover descendant is successful containment, not a service failure.
@@ -259,6 +259,9 @@ def supervise(commands, *, src_root, stop_event=None):
     if stop_event is None:
         stop_event = threading.Event()
 
+    restart_policy = restart_policy if restart_policy is not None else config_loader.load_config("runtime")["supervisor"]
+    restart_times = {service: [] for service in commands}
+    restart_due = {}
     previous_handlers = {}
     original_int = signal.getsignal(signal.SIGINT)
 
@@ -383,6 +386,19 @@ def supervise(commands, *, src_root, stop_event=None):
                 )
                 exit_code = 1
                 exited.add(service)
+                now = time.monotonic()
+                times = restart_times[service]
+                times[:] = [stamp for stamp in times if now - stamp < restart_policy["restart_window_seconds"]]
+                if len(times) < restart_policy["max_restarts"]:
+                    times.append(now)
+                    delay = min(restart_policy["max_backoff_seconds"],
+                                restart_policy["base_backoff_seconds"] * 2 ** (len(times) - 1))
+                    restart_due[service] = now + delay
+                    print(f"[Launcher] Restarting '{service}' after {delay:g}s")
+                elif restart_policy["max_restarts"] > 0 and any(
+                        other != service and child.poll() is None for other, child in processes.items()):
+                    restart_due[service] = now + restart_policy["restart_window_seconds"]
+                    print(f"[Launcher] '{service}' restart burst exhausted; cooling down")
                 _signal_tree(proc, signal.SIGTERM)
                 orphan_deadlines[service] = time.monotonic() + STOP_GRACE_SECONDS
             for service, deadline in list(orphan_deadlines.items()):
@@ -393,7 +409,20 @@ def supervise(commands, *, src_root, stop_event=None):
                     print(f"[Launcher] Escalating to SIGKILL for orphans of '{service}'")
                     _signal_tree(proc, signal.SIGKILL)
                     del orphan_deadlines[service]
-            if processes and len(exited) == len(processes):
+            for service, due in list(restart_due.items()):
+                if service in orphan_deadlines or time.monotonic() < due:
+                    continue
+                try:
+                    processes[service] = subprocess.Popen(
+                        commands[service], cwd=src_root, start_new_session=True,
+                        preexec_fn=set_parent_death_signal if os.name == "posix" else None)
+                except OSError as exc:
+                    print(f"[Launcher] Restart failed for '{service}': {exc}")
+                    del restart_due[service]
+                    continue
+                exited.discard(service)
+                del restart_due[service]
+            if processes and len(exited) == len(processes) and not restart_due:
                 print("[Launcher] Every service has exited; stopping")
                 break
             time.sleep(0.5)

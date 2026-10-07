@@ -450,3 +450,22 @@ def test_prune_station_scan_dirs_ignores_elevation_directories(tmp_path):
     assert (site_dir / "0.5").exists()
     assert (site_dir / "0.9").exists()
     assert (site_dir / "1.3").exists()
+
+
+def test_runtime_cleanup_yields_to_active_site(tmp_path):
+    from util.runtime.handoff import _AdvisoryFileLock
+    import util.file as fs
+    fs.initialize_filesystem(tmp_path)
+    directory = runtime_dir("KTLH")
+    directory.mkdir(parents=True, exist_ok=True)
+    old = directory / "KTLH_999.ar2v"
+    old.write_bytes(b"active")
+    lock = _AdvisoryFileLock(directory / ".locks/site.lock")
+    lock.acquire()
+    try:
+        prune_runtime_volumes("KTLH", "1000")
+        assert old.exists()
+    finally:
+        lock.release()
+    prune_runtime_volumes("KTLH", "1000")
+    assert not old.exists()

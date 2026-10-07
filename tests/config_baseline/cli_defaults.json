@@ -245,6 +245,12 @@
       "action": {
         "@repr": "<not a literal>"
       }
+    },
+    "--render-consumer": {
+      "default": null,
+      "action": {
+        "@repr": "<not a literal>"
+      }
     }
   },
   "util/io.py": {

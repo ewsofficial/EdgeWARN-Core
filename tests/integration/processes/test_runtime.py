@@ -332,3 +332,19 @@ def test_supervisor_restarts_alive_process_with_stale_heartbeat(tmp_path):
     health = json.loads((tmp_path / "health.json").read_text(encoding="utf-8"))
     assert "stale heartbeat" in health["NEXRAD Ingest"]["last_error"]
     supervisor.shutdown()
+
+
+def test_crash_loop_child_reenabled_after_cooldown(monkeypatch):
+    from util.runtime.processes import AccessorySupervisor
+    from types import SimpleNamespace
+    supervisor = AccessorySupervisor(max_restarts=0, restart_window_seconds=60)
+    info = {"name": "crashy", "enabled": True, "process": SimpleNamespace(exitcode=1)}
+    supervisor._process_info = [info]
+    supervisor._handle_death(info, 0)
+    assert not info["enabled"]
+    restarted = []
+    monkeypatch.setattr(supervisor, "_restart", lambda value: restarted.append(value))
+    monkeypatch.setattr("util.runtime.processes.time.monotonic", lambda: 61)
+    supervisor.check()
+    assert info["enabled"]
+    assert restarted == [info]

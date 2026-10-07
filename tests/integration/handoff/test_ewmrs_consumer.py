@@ -561,3 +561,20 @@ def test_the_default_render_pool_builds_against_the_real_catalog(world, tmp_path
         assert consumer._ensure_pool() is pool
     finally:
         consumer.close()
+
+
+def test_initial_render_admission_is_bounded_and_newest_first(world, renderer):
+    registry, _, inventory = world
+    gate = threading.Event()
+    pool = FakeLayerPool(gate=gate)
+    consumer = make_consumer(world, pool, pending_max_jobs=1)
+    old = notify(inventory, commit(inventory, PRECIP_RATE, T))
+    new = notify(inventory, commit(inventory, PRECIP_RATE, T + timedelta(minutes=2)))
+    try:
+        consumer.poll_once(registry)
+        assert len(consumer.in_flight) == 1
+        assert consumer.in_flight[0][0] == new.key
+        assert old.key != new.key
+    finally:
+        gate.set()
+        consumer.close()

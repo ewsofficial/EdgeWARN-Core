@@ -339,11 +339,8 @@ class StormProbRepository:
                 projections_removed,
                 cycle_cursor.rowcount,
             )
-        if any(result):
-            # VACUUM must run outside the writer transaction; it rebuilds the
-            # file so deleted rows release disk space instead of leaving
-            # free pages for reuse only.
-            self.vacuum()
+        # Deleted pages are reused by later cycles. VACUUM is an explicit
+        # maintenance operation, not latency-sensitive per-scan work.
         return result
 
     def vacuum(self) -> None:

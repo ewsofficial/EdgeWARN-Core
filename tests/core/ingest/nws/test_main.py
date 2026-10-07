@@ -276,8 +276,8 @@ class TestDownloadAlerts:
             assert snapshot_ids == {"urn:oid:test-alert-b"}
             assert snapshot_data["count"] == 1
 
-    def test_download_reconciles_empty_successful_payload_to_zero(self, mock_io, tmp_path):
-        """A successful empty payload should remove previously active saved alerts."""
+    def test_empty_feed_preserves_unexpired_alerts(self, mock_io, tmp_path):
+        """An empty pull preserves unexpired alerts until their normal expiration."""
         cycle_one = MagicMock()
         cycle_one.read.return_value = json.dumps({
             "features": [
@@ -312,11 +312,27 @@ class TestDownloadAlerts:
             download_alerts(datetime(2023, 10, 15, 14, 32, tzinfo=timezone.utc))
 
             registry = _get_registry()
-            assert registry.get_active_ids() == []
+            assert registry.get_active_ids() == ["urn:oid:test-alert-a"]
 
             latest_snapshot = tmp_path / "timestamps" / "20231015-143200.json"
             with open(latest_snapshot, 'r', encoding='utf-8') as f:
                 snapshot_data = json.load(f)
 
-            assert snapshot_data["count"] == 0
-            assert snapshot_data["alerts"] == []
+            assert snapshot_data["count"] == 1
+            assert snapshot_data["alerts"][0]["id"] == "urn:oid:test-alert-a"
+
+
+def test_malformed_feature_does_not_block_valid_feature(tmp_path, monkeypatch):
+    from common.ingest.nws import main
+    from common.ingest.nws.registry import AlertRegistry
+    path = tmp_path / "feed.json"
+    path.write_text(json.dumps({"features": [
+        {"id": "bad", "properties": None},
+        {"id": "good", "properties": {"id": "good", "event": "Tornado Warning",
+         "expires": "2026-10-07T19:00:00Z"}, "geometry": None}]}))
+    registry = AlertRegistry(tmp_path / "registry")
+    monkeypatch.setattr(main, "process_warning", lambda feature: feature)
+    _, _, seen = main._process_nws_file_with_registry(path, registry,
+        datetime(2026, 10, 7, 18, tzinfo=timezone.utc))
+    assert "good" in seen
+    assert "good" in registry.get_active_ids()

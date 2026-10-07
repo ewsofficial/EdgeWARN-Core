@@ -40,7 +40,8 @@ export async function createApp(options = {}) {
   app.get('/', (req, res) => res.json({ service: 'EdgeWARN Unified API', version: exposedVersion, links: { api: '/api/v3', openapi: '/api/v3/openapi.json' } }));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send("# No clankers\nUser-agent: *\nDisallow: /\n"));
   app.get('/health/live', (req, res) => res.json({ status: 'ok', requestId: req.requestId, config: config.diagnostics }));
-  app.get('/health/ready', async (req, res) => {
+  app.get('/health/ready', async (req, res, next) => {
+    try {
     const checks = await Promise.all([config.dataDir, config.guiDir, config.wpcDir].map(async (dir) => { try { return (await fs.stat(dir)).isDirectory(); } catch { return false; } }));
     const services = await servicesSummary();
     const healthy = config.api.server.enabled_services.every((name) => ['active', 'degraded'].includes(services[name]?.state));
@@ -51,6 +52,7 @@ export async function createApp(options = {}) {
       config: config.diagnostics,
       services,
     });
+    } catch (error) { next(error); }
   });
   const analysis = createAnalysisService(repository); const renders = createRenderService(repository, config.api.render_defaults, config.api.artifacts.chunk_length_slack_bytes); const ancillary = createAncillaryServices(repository, { validation: config.api.validation, wpc: config.wpc });
   const modules = createModulesService(repository);

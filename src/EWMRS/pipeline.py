@@ -287,9 +287,11 @@ class RenderLayerPool:
     contract, which the consumer awaits explicitly.
     """
 
-    def __init__(self, *, max_workers: int | None = None, phase_name: str = "Layer"):
+    def __init__(self, *, max_workers: int | None = None, phase_name: str = "Layer", timeout_seconds=None):
         from concurrent.futures import ProcessPoolExecutor
 
+        from common.config.loader import load_config
+        self._timeout_seconds = timeout_seconds if timeout_seconds is not None else load_config("ewmrs_pipeline")["input_jobs"]["render_timeout_seconds"]
         self.phase_name = phase_name
         self.max_workers = max_workers if max_workers is not None else render_worker_budget(
             phase_name)
@@ -298,12 +300,21 @@ class RenderLayerPool:
         self._closed = False
         self._lock = threading.Lock()
 
-    def _recover(self, executor):
+    def _recover(self, executor, *, terminate=False):
         from concurrent.futures import ProcessPoolExecutor
 
         with self._lock:
             if self._closed or self._executor is not executor:
                 return
+            if terminate:
+                from util.runtime.config import section
+                for process in tuple((getattr(executor, "_processes", None) or {}).values()):
+                    if process.is_alive():
+                        process.terminate()
+                for process in tuple((getattr(executor, "_processes", None) or {}).values()):
+                    process.join(timeout=section("supervisor")["stop_kill_join_timeout_seconds"])
+                    if process.is_alive():
+                        process.kill()
             executor.shutdown(wait=False, cancel_futures=True)
             self._executor = ProcessPoolExecutor(
                 max_workers=max(1, self.max_workers), initializer=_worker_initializer)
@@ -331,18 +342,24 @@ class RenderLayerPool:
         if broken:
             self._recover(executor)
             return {str(layer.get("name")): None for layer in layers}
-        for future in as_completed(futures):
-            layer = futures[future]
-            try:
-                name, output = future.result()
-            except Exception as exc:
-                if isinstance(exc, BrokenProcessPool):
-                    self._recover(executor)
-                io_manager.write_error(
-                    f"Error processing layer {layer.get('name')}: {exc}")
-                results[str(layer.get("name"))] = None
-                continue
-            results[name] = output
+        from concurrent.futures import TimeoutError as RenderTimeout
+        try:
+            for future in as_completed(futures, timeout=self._timeout_seconds):
+                layer = futures[future]
+                try:
+                    name, output = future.result()
+                except Exception as exc:
+                    if isinstance(exc, BrokenProcessPool):
+                        self._recover(executor)
+                    io_manager.write_error(
+                        f"Error processing layer {layer.get('name')}: {exc}")
+                    results[str(layer.get("name"))] = None
+                    continue
+                results[name] = output
+        except RenderTimeout:
+            self._recover(executor, terminate=True)
+            for layer in layers:
+                results.setdefault(str(layer.get("name")), None)
         return results
 
     def shutdown(self, *, wait: bool = True, cancel_futures: bool = True) -> None:

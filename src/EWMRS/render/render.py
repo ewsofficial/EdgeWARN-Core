@@ -277,6 +277,17 @@ class GUIValueWriter:
             io_manager.write_error(f"Failed to update index.json in {timestamp_dir}: {e}")
 
     def _update_index(self, new_timestamp, tile_grid=None):
+        from util.runtime.handoff import _AdvisoryFileLock
+        self.outdir.mkdir(parents=True, exist_ok=True)
+        lock = _AdvisoryFileLock(self.outdir / ".index.lock")
+        from util.runtime.config import section
+        lock.acquire(timeout=section("handoff")["input_lock_timeout_seconds"])
+        try:
+            return self._update_index_locked(new_timestamp, tile_grid)
+        finally:
+            lock.release()
+
+    def _update_index_locked(self, new_timestamp, tile_grid=None):
         from .config import chunk_format_descriptor, chunk_schema_version
         index_file = self.outdir / "index.json"
         timestamps = []

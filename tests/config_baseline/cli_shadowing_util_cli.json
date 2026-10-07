@@ -24,6 +24,7 @@
     "--min-seed-percentage",
     "--mrms-core-only",
     "--profile",
-    "--refl-threshold"
+    "--refl-threshold",
+    "--render-consumer"
   ]
 }

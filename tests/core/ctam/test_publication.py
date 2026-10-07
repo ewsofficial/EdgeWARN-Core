@@ -100,3 +100,22 @@ def test_recovery_quarantines_journal_when_remaining_part_is_corrupt(tmp_path):
     part = next(tmp_path.glob(".target.json.bad.ctam-part")); part.write_text("not json")
     assert CTAMPublicationCoordinator(journal).recover() == []
     assert (journal / "quarantine" / "bad.json").exists()
+
+
+def test_corrupt_journal_does_not_abort_recovery(tmp_path):
+    journals = tmp_path / "journals"
+    journals.mkdir()
+    (journals / "bad.json").write_text("truncated {")
+    coordinator = CTAMPublicationCoordinator(journals)
+    coordinator.publish({tmp_path / "good.json": {"ok": True}}, transaction_id="good")
+    assert coordinator.recover() == []
+    assert (journals / "quarantine/bad.json").exists()
+    assert json.loads((tmp_path / "good.json").read_text()) == {"ok": True}
+
+
+def test_committed_journals_age_out(tmp_path):
+    coordinator = CTAMPublicationCoordinator(tmp_path / "journals")
+    journal = coordinator.publish({tmp_path / "good.json": []})
+    os.utime(journal, (0, 0))
+    coordinator.recover()
+    assert not journal.exists()

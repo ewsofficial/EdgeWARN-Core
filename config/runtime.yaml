@@ -2,6 +2,11 @@
 
 schema_version: 1
 
+# Container log disk budget: circular files are replaced after this count.
+logging:
+  retention_files: 32
+  max_file_mb: 64
+
 # Request metadata sent to upstream weather services.
 identity:
   contact: ewsbackend@gmail.com

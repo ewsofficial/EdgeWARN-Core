@@ -350,16 +350,16 @@ See [Phase 8 migration and qualification](configurable-mrms-phase8.md) for upgra
 
 ## Independent ingest foundations (phases 1–2)
 
-The current services still use the staged cycle coordinator. The independent
-service, inventory/outbox, and per-layer consumer cutover are later phases of
-`plans/independent-ingest-incremental-rendering-plan.md`.
+Realtime uses the independent service, inventory/outbox, and per-layer
+consumers. Historical processing retains the staged cycle coordinator. The
+implementation plan is `plans/independent-ingest-incremental-rendering-plan.md`.
 
 `resolve_dependencies()` in `common.ingest.mrms.core_contract` freezes the
 registry's full manifest IDs and dependency policy. The default check and
 detection sets are composite reflectivity, PrecipFlag, and `ProbSevere` (the
 legacy null modifier). Empty checks, disabled references, and detection outside
-the check set fail preflight. There are currently no additional mandatory MRMS
-integration products. Enabled RAP and scan-time GLM remain separate integration
+the check set fail preflight. Enabling StormProb adds its declared MRMS products
+to mandatory integration. Enabled RAP and scan-time GLM remain separate integration
 requirements; `mrms_core_only` disables both and `disable_goes` disables GLM.
 Previous detection history is the latest validated strictly earlier observation,
 when available; it is pinned independently from current checks.
@@ -371,11 +371,11 @@ snapshot: the unchanged detection/history and integration selections, plus
 aligned successful optional current inputs and validated optional history.
 Every optional product has a terminal outcome, including unavailable/expired
 ones. Late arrivals after that boundary must not revise this snapshot. They can
-still supply independent rendering in the later inventory phase. StormProb's
-existing preflight and fatal per-cycle source/feature checks remain authoritative;
-an optional acquisition failure does not make a required StormProb feature
-optional. Missing final optional completion is also fatal when both CTAM and
-StormProb are enabled.
+still supply independent rendering through the inventory. StormProb preflight
+remains authoritative, and an optional acquisition failure cannot supply a
+required feature. Realtime skips a scan with unavailable required sources or a
+missing final snapshot and isolates cells with invalid features. Historical
+processing retains its fail-closed dependency checks.
 
 `discover_objects()` and `discover_objects_sync()` in
 `common.ingest.mrms.discovery` list a bounded observation-time window across day

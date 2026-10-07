@@ -840,3 +840,36 @@ def test_timer_coalesces_maintenance_while_publisher_is_blocked(tmp_path, monkey
         service._tick(tick * 10)
     assert service._work.qsize() == 2
     assert service._last_reconcile is None
+
+
+def test_rap_fallback_does_not_settle_the_new_analysis_hour(tmp_path):
+    from common.ingest.manifest import StagedInput
+    from util.runtime.ingest_service import _Work, AcquisitionJob
+    service = make_service(tmp_path, ScriptedSource(make_registry(tmp_path)))
+    service.dependencies = replace(service.dependencies, rap_enabled=True)
+    analysis = T - timedelta(hours=1)
+    path = tmp_path / f"data/RAP/RAP.{analysis:%Y%m%d-%H}z.awp130pgrbf00.grib2"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"rap")
+    item = CommittedInput(StagedInput("RAP", str(path), analysis, "synoptic", "rap"),
+                          hashlib.sha256(b"rap").hexdigest(), str(path))
+    job = AcquisitionJob("rap-current-hour", "rap", "RAP", T)
+    service.ledger.offer(job)
+    service.ledger.take(job.identity)
+    service._apply(_Work(kind="completion", completed=(item,), job=job))
+    assert service.ledger.state(job.identity) is None
+    assert service.ledger.counts()["pending_jobs"] == 1
+    assert service.inventory.handoff.read("render-ready", item.input_id) is not None
+
+
+def test_ingest_recovers_from_timer_path_exception(tmp_path, monkeypatch):
+    service = make_service(tmp_path, ScriptedSource(make_registry(tmp_path)))
+    calls = []
+    def tick(*args):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError("injected record read failure")
+        service._stop.set()
+    monkeypatch.setattr(service, "_tick", tick)
+    service.run()
+    assert len(calls) == 2

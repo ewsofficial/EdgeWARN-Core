@@ -238,3 +238,23 @@ def test_pool_recovers_after_worker_process_dies(monkeypatch):
         assert pool.render([{"name": "healthy"}]) == {"healthy": "healthy.png"}
     finally:
         pool.shutdown()
+
+
+def _hang(layer):
+    import time
+    time.sleep(60)
+    return _record(layer)
+
+
+def test_render_timeout_terminates_hung_workers_and_recovers(monkeypatch):
+    import time
+    monkeypatch.setattr(pipeline, "_render_layer", _hang)
+    pool = pipeline.RenderLayerPool(max_workers=1, timeout_seconds=0.05)
+    try:
+        started = time.monotonic()
+        old = pool._executor
+        assert pool.render([{"name": "hang"}]) == {"hang": None}
+        assert time.monotonic() - started < 3
+        assert pool._executor is not old
+    finally:
+        pool.shutdown()

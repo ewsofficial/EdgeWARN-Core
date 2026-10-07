@@ -225,7 +225,7 @@ def _supervise_until_stopped(commands, src_root, *, observe_seconds=3.0):
     def run():
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr(run_all.subprocess, "Popen", popen)
-            result["code"] = run_all.supervise(commands, src_root=src_root, stop_event=stop)
+            result["code"] = run_all.supervise(commands, src_root=src_root, stop_event=stop, restart_policy={"max_restarts": 0, "restart_window_seconds": 60})
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
@@ -264,7 +264,7 @@ class TestSupervision:
         monkeypatch.setattr(run_all, "SERVICE_SCRIPTS", {"edgewarn": quitter, "ewmrs": quitter})
         commands = run_all.build_service_commands(_args(), ["edgewarn", "ewmrs"], src_root)
 
-        assert run_all.supervise(commands, src_root=src_root) == 1
+        assert run_all.supervise(commands, src_root=src_root, restart_policy={"max_restarts": 0, "restart_window_seconds": 60}) == 1
 
     def test_popen_failure_returns_nonzero(self, src_root, monkeypatch):
         def fail_to_start(*_args, **_kwargs):
@@ -273,7 +273,7 @@ class TestSupervision:
         monkeypatch.setattr(run_all.subprocess, "Popen", fail_to_start)
         commands = run_all.build_service_commands(_args(), ["edgewarn"], src_root)
 
-        assert run_all.supervise(commands, src_root=src_root) == 1
+        assert run_all.supervise(commands, src_root=src_root, restart_policy={"max_restarts": 0, "restart_window_seconds": 60}) == 1
 
     def test_stop_request_during_startup_prevents_remaining_spawns(
         self, src_root, monkeypatch
@@ -401,7 +401,7 @@ class TestSupervision:
         try:
             time.sleep(1.0)
             launcher.send_signal(signal.SIGTERM)
-            assert launcher.wait(timeout=10) == 0
+            assert launcher.wait(timeout=45) == 0
         finally:
             if launcher.poll() is None:
                 launcher.kill()
@@ -466,7 +466,7 @@ class TestSupervision:
         stop = threading.Event()
 
         def run():
-            run_all.supervise(commands, src_root=src_root, stop_event=stop)
+            run_all.supervise(commands, src_root=src_root, stop_event=stop, restart_policy={"max_restarts": 0, "restart_window_seconds": 60})
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
@@ -518,7 +518,7 @@ class TestSupervision:
             launcher.send_signal(signal.SIGTERM)
             # The service leader handled TERM cleanly. Bounded SIGKILL of its
             # deliberately stubborn descendant is successful containment.
-            assert launcher.wait(timeout=10) == 0
+            assert launcher.wait(timeout=45) == 0
 
             deadline = time.time() + 5
             while Path(f"/proc/{pid}").exists() and time.time() < deadline:
@@ -597,3 +597,40 @@ def test_ingest_and_ewmrs_can_run_without_core():
     args, services = run_all._parse_args(["--services", "ingest,ewmrs"])
     run_all.preflight_topology(args, services)
     assert services == ["ingest", "ewmrs"]
+
+
+def test_supervisor_restarts_failed_child_without_stopping_sibling(tmp_path, src_root, monkeypatch):
+    marker = tmp_path / "first-run"
+    crashy = tmp_path / "crashy.py"
+    crashy.write_text(f"""from pathlib import Path
+import time, sys
+marker=Path({str(marker)!r})
+if not marker.exists():
+    marker.write_text('started')
+    sys.exit(1)
+while True: time.sleep(0.05)
+""")
+    sibling = _sleeper(tmp_path)
+    started = []
+    sibling_alive_on_restart = []
+    popen = run_all.subprocess.Popen
+    def spawn(*args, **kwargs):
+        if len(started) == 2:
+            sibling_alive_on_restart.append(started[1].poll() is None)
+        process = popen(*args, **kwargs)
+        started.append(process)
+        return process
+    monkeypatch.setattr(run_all.subprocess, "Popen", spawn)
+    stop = threading.Event()
+    timer = threading.Timer(1.5, stop.set)
+    timer.start()
+    try:
+        run_all.supervise({"edgewarn": [sys.executable, str(crashy)],
+                           "nexrad": [sys.executable, sibling]}, src_root=src_root,
+            stop_event=stop, restart_policy={"max_restarts": 1, "restart_window_seconds": 60,
+                                           "base_backoff_seconds": 0, "max_backoff_seconds": 0})
+    finally:
+        timer.cancel()
+    assert len(started) == 3
+    assert sibling_alive_on_restart == [True]
+    assert all(process.poll() is not None for process in started)

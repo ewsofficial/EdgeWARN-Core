@@ -83,5 +83,5 @@ def atomic_write_text(destination: str | Path, payload: str, *, encoding="utf-8"
 
 
 def atomic_write_json(destination: str | Path, value, *, indent=None, default=None) -> Path:
-    payload = json.dumps(value, indent=indent, default=default)
+    payload = json.dumps(value, indent=indent, default=default, allow_nan=False)
     return atomic_write_text(destination, payload)

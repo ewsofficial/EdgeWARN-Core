@@ -36,7 +36,6 @@ import sys
 import threading
 import traceback
 import time
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from util.io import QueueWriter
@@ -223,7 +222,8 @@ class InputRenderConsumer:
         if registry is not None and self.require_producer(registry) is None:
             return dict(self.metrics)
         self._collect_finished(at)
-        notifications = self.handoff.records("render-ready")
+        notifications = sorted(self.handoff.records("render-ready"),
+                               key=lambda record: record.data["input"]["analysis_time"], reverse=True)
         plans = []
         for notification in notifications:
             plan = self._plan(notification)
@@ -270,7 +270,7 @@ class InputRenderConsumer:
                 continue
             if existing is not None and not existing.retry_eligible(at):
                 continue
-            if self._pending_jobs() >= self.settings.pending_max_jobs:
+            if existing is None and self._pending_jobs() >= self.settings.pending_max_jobs:
                 self.metrics["rejected"] += 1
                 self._log(f"[EWMRS] Per-layer job window is full; deferring {layer} for "
                           f"input {input_id[:12]}")
@@ -405,8 +405,9 @@ class InputRenderConsumer:
             self._maybe_acknowledge_input(record.data["input_id"])
 
     def _pending_jobs(self):
-        return sum(1 for record in self.handoff.records("render-ack")
-                   if record.data["status"] not in TERMINAL_STATUSES)
+        pending = {record.key for record in self.handoff.records("render-ack")
+                   if record.data["status"] not in TERMINAL_STATUSES}
+        return len(pending | set(self._inflight))
 
     def _ensure_pool(self):
         with self._pool_lock:

@@ -62,3 +62,25 @@ def test_record_volume_and_maybe_recycle_can_be_disabled(monkeypatch):
 
     assert worker_pool._POOL is pool
     assert worker_pool._VOLUME_COUNT == 0
+
+
+def test_recycle_releases_global_lock_before_waiting(monkeypatch):
+    import threading
+    entered, finish = threading.Event(), threading.Event()
+    class Pool:
+        def shutdown(self, wait=True):
+            entered.set()
+            finish.wait(3)
+    monkeypatch.setenv("NEXRAD_WORKER_RECYCLE_INTERVAL", "1")
+    monkeypatch.setattr(worker_pool, "_POOL", Pool())
+    monkeypatch.setattr(worker_pool, "_VOLUME_COUNT", 0)
+    thread = threading.Thread(target=worker_pool.record_volume_and_maybe_recycle)
+    thread.start()
+    try:
+        assert entered.wait(1)
+        assert worker_pool._LOCK.acquire(blocking=False)
+        worker_pool._LOCK.release()
+    finally:
+        finish.set()
+        thread.join(timeout=2)
+    assert not thread.is_alive()

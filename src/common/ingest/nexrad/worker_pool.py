@@ -41,6 +41,7 @@ _LOCK = threading.Lock()
 
 
 def _initialize_worker_name() -> None:
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
     process = multiprocessing.current_process()
     name = f"NEXRAD-Parser-{process.pid}"
     process.name = name
@@ -174,6 +175,8 @@ class NexradWorkerPool:
         wrapped: Future[WorkerParseResult] = Future()
 
         def _callback(f: Future) -> None:
+            if wrapped.cancelled():
+                return
             try:
                 wrapped.set_result(_dict_to_result(f.result()))
             except Exception as exc:
@@ -220,17 +223,29 @@ def record_volume_and_maybe_recycle(max_workers: int | None = None) -> None:
         if _POOL is None or _VOLUME_COUNT < recycle_interval:
             return
 
-        _POOL.shutdown(wait=True)
+        old_pool = _POOL
         _POOL = None
         _POOL_SIZE = 0
         _VOLUME_COUNT = 0
+    # Never hold the global pool lock while draining old workers.
+    old_pool.shutdown(wait=True)
 
 
-def shutdown_nexrad_pool(wait: bool = True) -> None:
+def shutdown_nexrad_pool(wait: bool = True, *, expected_pool=None) -> None:
     global _POOL, _POOL_SIZE, _VOLUME_COUNT
     with _LOCK:
-        if _POOL is not None:
-            _POOL.shutdown(wait=wait)
+        pool = expected_pool if expected_pool is not None else _POOL
+        if pool is _POOL:
             _POOL = None
             _POOL_SIZE = 0
-        _VOLUME_COUNT = 0
+            _VOLUME_COUNT = 0
+    if pool is None:
+        return
+    if not wait:
+        # Cancel does not stop a running parse. Terminate the retired generation
+        # so timed-out workers cannot keep exporting or accumulating processes.
+        executor = getattr(pool, "_executor", None)
+        for process in tuple((getattr(executor, "_processes", None) or {}).values()):
+            if process.is_alive():
+                process.terminate()
+    pool.shutdown(wait=wait)

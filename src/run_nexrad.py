@@ -174,7 +174,10 @@ def main():
                 last_successful_activity=activity,
                 degraded_children=tuple(supervisor.disabled_names()),
             )
-            write_heartbeat(beat, heartbeat_destination)
+            try:
+                write_heartbeat(beat, heartbeat_destination)
+            except OSError as exc:
+                print(f"[Heartbeat] Publication failed; retrying: {exc}")
             for _ in range(check_ticks):
                 # Bounded-backoff restarts, crash-loop disabling, and
                 # heartbeat-staleness checks all happen here; without this

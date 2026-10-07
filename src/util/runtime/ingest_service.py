@@ -436,7 +436,12 @@ class IngestService:
                     self._metrics["coalesced_ticks"] += behind
                     self._debug(f"coalesced {behind} missed poll deadline(s)")
                 index = int((current - origin) // self.resources.poll_seconds) + 1
-                self._tick(current)
+                try:
+                    self._tick(current)
+                except Exception as exc:
+                    self._phase = "degraded"
+                    self._warn(f"poll failed; retrying next tick: {type(exc).__name__}: {exc}")
+                    self._add_reason(f"poll failed: {exc}")
         except KeyboardInterrupt:
             self._info("CTRL+C detected, stopping ingest service...")
         finally:
@@ -707,9 +712,10 @@ class IngestService:
                 admitted_checks += 1
             if self.ledger.take(job.identity) is None:
                 continue
-            self._outstanding += 1
-            if not job.protected:
-                self._outstanding_optional += 1
+            with self._index_lock:
+                self._outstanding += 1
+                if not job.protected:
+                    self._outstanding_optional += 1
             pool.submit(self._acquire_mrms, job)
 
     def _acquire_mrms(self, job):
@@ -719,9 +725,10 @@ class IngestService:
         except Exception as exc:
             self._fail(job, f"{type(exc).__name__}: {exc}")
         finally:
-            self._outstanding -= 1
-            if not job.protected:
-                self._outstanding_optional -= 1
+            with self._index_lock:
+                self._outstanding -= 1
+                if not job.protected:
+                    self._outstanding_optional -= 1
         if completed is not None:
             self._work.put(_Work(kind="completion", completed=completed, job=job))
 
@@ -909,7 +916,11 @@ class IngestService:
             for completed in completions:
                 scans.update(self._publish_completion(_Work(kind="completion", completed=completed)))
             if item.job is not None:
-                self.ledger.settle(item.job.identity, "committed")
+                if (item.job.kind == "rap" and all(
+                        completed.record.analysis_time < item.job.target for completed in completions)):
+                    self._fail(item.job, "current RAP hour unavailable; fallback committed")
+                else:
+                    self.ledger.settle(item.job.identity, "committed")
             return scans
         elif item.kind == "startup":
             self._reconcile()
@@ -1025,6 +1036,8 @@ class IngestService:
         self._retire(at)
         self._prune_rap()
         self._collect_staging(at)
+        from common.ingest.replay import flush_deferred_cleanup
+        flush_deferred_cleanup()
         pressure = self._disk_pressure()
         if pressure:
             # Report pressure before releasing anything, then age the window.

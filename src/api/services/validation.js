@@ -1,3 +1,4 @@
+import { ArtifactError } from '../repositories/artifactRepository.js';
 const TIMESTAMP = /^\d{8}-\d{6}$/;
 const CELL_ID = /^[1-9][0-9]*$/;
 const ALERT_ID = /^[A-Za-z0-9_.:-]{1,200}$/;
@@ -17,7 +18,9 @@ export const isLayerId = (value) => typeof value === 'string' && LAYER_ID.test(v
 function serializedId(item) { const value = item && typeof item === 'object' && 'id' in item ? item.id : item; return String(value); }
 export function page(items, { cursor, limit } = {}, { default_limit: defaultLimit, max_limit: maxLimit }) {
   const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, maxLimit) : defaultLimit;
-  const start = cursor ? Math.max(0, items.findIndex((item) => serializedId(item) === String(cursor)) + 1) : 0;
+  const cursorIndex = cursor ? items.findIndex((item) => serializedId(item) === String(cursor)) : -1;
+  if (cursor && cursorIndex < 0) throw new ArtifactError('INVALID_PATH', 'Cursor no longer exists; restart pagination');
+  const start = cursor ? cursorIndex + 1 : 0;
   const data = items.slice(start, start + safeLimit);
   return { data, nextCursor: start + safeLimit < items.length ? serializedId(data.at(-1)) : null };
 }

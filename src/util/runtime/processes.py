@@ -149,7 +149,16 @@ class AccessorySupervisor:
         import multiprocessing
         now = time.monotonic()
         for info in self._process_info:
-            if not info["enabled"] or self._stop_event.is_set():
+            if self._stop_event.is_set():
+                continue
+            if not info["enabled"]:
+                cooldown = info.get("cooldown_until")
+                if cooldown is None or now < cooldown:
+                    continue
+                info["enabled"] = True
+                info["cooldown_until"] = None
+                self._restart_times[info["name"]].clear()
+                self._restart(info)
                 continue
             proc = info.get("process")
             if proc is None or not proc.is_alive():
@@ -220,6 +229,7 @@ class AccessorySupervisor:
                     f"in {self.restart_window_seconds}s; disabling restarts"
                 )
                 info["enabled"] = False
+                info["cooldown_until"] = now + self.restart_window_seconds
                 self._record_health(name, "crashed", error=f"crashed {attempt} times")
                 return
 
@@ -273,12 +283,8 @@ class AccessorySupervisor:
             if attempt is not None:
                 entry["restart_attempt"] = attempt
             current[name] = entry
-            temporary = self.health_path + ".tmp"
-            with open(temporary, "w") as f:
-                json.dump(current, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(temporary, self.health_path)
+            from util.atomic import atomic_write_json
+            atomic_write_json(self.health_path, current, indent=2)
         except Exception:
             pass
 

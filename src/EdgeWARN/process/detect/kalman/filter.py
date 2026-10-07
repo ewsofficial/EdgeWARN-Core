@@ -287,10 +287,10 @@ class KalmanFilter:
             lon_scale2 = lat_scale2
         
         F = np.array([
-            [1, 0, lat_scale, 0, lat_scale2, 0],                  # lat' = lat + v_lat*dt + 0.5*a_lat*dt²
-            [0, 1, 0, lon_scale, 0, lon_scale2],                   # lon' = lon + v_lon*dt + 0.5*a_lon*dt²  (cos(lat) corrected)
-            [0, 0, 1, 0, dt, 0],                                   # u' = u + a_lat*dt
-            [0, 0, 0, 1, 0, dt],                                   # v' = v + a_lon*dt
+            [1, 0, 0, lat_scale, lat_scale2, 0],                  # lat' = lat + v_lat*dt + 0.5*a_lat*dt²
+            [0, 1, lon_scale, 0, 0, lon_scale2],                   # lon' = lon + v_lon*dt + 0.5*a_lon*dt²  (cos(lat) corrected)
+            [0, 0, 1, 0, 0, dt],                                   # u' = u + a_lat*dt
+            [0, 0, 0, 1, dt, 0],                                   # v' = v + a_lon*dt
             [0, 0, 0, 0, 1, 0],                                    # a_lat' = a_lat
             [0, 0, 0, 0, 0, 1]                                     # a_lon' = a_lon
         ], dtype=np.float64)
@@ -326,10 +326,10 @@ class KalmanFilter:
         ], dtype=np.float64) * q_a
         
         # State layout is interleaved: [lat, lon, u, v, a_lat, a_lon]
-        # Lat axis → indices 0, 2, 4     Lon axis → indices 1, 3, 5
+        # North axis → indices 0, 3, 4     East axis → indices 1, 2, 5
         Q = np.zeros((6, 6), dtype=np.float64)
-        lat_idx = [0, 2, 4]
-        lon_idx = [1, 3, 5]
+        lat_idx = [0, 3, 4]
+        lon_idx = [1, 2, 5]
         for ri in range(3):
             for ci in range(3):
                 Q[lat_idx[ri], lat_idx[ci]] = blk[ri, ci]

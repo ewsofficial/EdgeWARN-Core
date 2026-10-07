@@ -239,6 +239,11 @@ class APIIndexManager:
             timestamps, cell_timestamps = projection
             self.stormcell_timestamps = set(timestamps)
             self.cell_timestamps = dict(cell_timestamps)
+            # SQLite pruning may already have removed an inactive cell from
+            # its projection. Include orphan files in the age-based cleanup.
+            for path in fs.CELL_DIR.glob("*.json"):
+                if path.stem.isdigit() and path.stem not in self.cell_timestamps:
+                    self.cell_timestamps[path.stem] = path.stat().st_mtime
 
         snapshot = fs.STORMCELL_DIR / f"stormcells_{timestamp}.json"
         if snapshot.exists():

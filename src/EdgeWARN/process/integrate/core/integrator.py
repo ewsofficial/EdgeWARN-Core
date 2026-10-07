@@ -322,7 +322,7 @@ class StormCellIntegrator:
 
             except Exception as e:
                 self.io_manager.write_error(f"Process cell {cell.get('id')}: {e}")
-                target.update(zero_results)
+                target.update({key: "PROCESSING_ERROR" for key in zero_results})
 
         ds.close()
         del ds

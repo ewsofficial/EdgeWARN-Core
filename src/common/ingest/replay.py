@@ -102,6 +102,20 @@ def input_lock(base_dir):
     return InputLease(input_lock_path(base_dir))
 
 
+def flush_deferred_cleanup():
+    with _deferred_lock:
+        pending = tuple(_deferred_cleanup.values())
+        _deferred_cleanup.clear()
+    for cleanup, args, kwargs in pending:
+        try:
+            cleanup(*args, **kwargs)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning('Deferred cleanup failed: %s', exc)
+            with _deferred_lock:
+                _deferred_cleanup[(cleanup.__name__, str(args[0] if args else kwargs))] = (cleanup, args, kwargs)
+
+
 def protect_runtime_inputs(function):
     @wraps(function)
     def protected(*args, **kwargs):
@@ -110,11 +124,7 @@ def protect_runtime_inputs(function):
             with input_lock(fs.BASE_DIR):
                 return function(*args, **kwargs)
         finally:
-            with _deferred_lock:
-                pending = tuple(_deferred_cleanup.values())
-                _deferred_cleanup.clear()
-            for cleanup, cleanup_args, cleanup_kwargs in pending:
-                cleanup(*cleanup_args, **cleanup_kwargs)
+            flush_deferred_cleanup()
     return protected
 
 

@@ -8,6 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 import shutil
+import uuid
 
 import util.file as fs
 from common.ingest.nexrad import config as nexrad_config
@@ -287,15 +288,25 @@ class NexradIngestService:
 
         state_path = self._runtime_state_path(site, volume_id)
         if not state_path.exists():
+            runtime_path.write_bytes(b"")
             return {}
 
         try:
             data = json.loads(state_path.read_text(encoding="utf-8"))
         except Exception:
+            runtime_path.write_bytes(b"")
             return {}
 
         if not isinstance(data, dict):
-            return {}
+            data = {}
+        committed_size = data.get("bytes_written", 0)
+        if not isinstance(committed_size, int) or not 0 <= committed_size <= runtime_path.stat().st_size:
+            data, committed_size = {}, 0
+        if "bytes_written" not in data:
+            data = {}
+        # Roll back an incomplete pass before replaying its uncommitted chunks.
+        with runtime_path.open("r+b") as handle:
+            handle.truncate(committed_size)
         return data
 
     def _save_runtime_state(
@@ -309,6 +320,7 @@ class NexradIngestService:
         first_elevation_timestamp: str | None,
         scan_timestamp: str | None,
         download_started_at: str | None,
+        bytes_written: int = 0,
     ) -> None:
         state_path = self._runtime_state_path(site, volume_id)
         payload = {
@@ -317,6 +329,7 @@ class NexradIngestService:
             "scan_timestamp": scan_timestamp,
             "download_started_at": download_started_at,
             "downloaded_chunk_keys": sorted(downloaded_chunk_keys),
+            "bytes_written": bytes_written,
             "seen_elevation_exports": seen_elevation_exports,
             "seen_elevation_keys": sorted(seen_elevation_exports),
             "elevation_timestamps_by_id": elevation_timestamps_by_id,
@@ -429,7 +442,17 @@ class NexradIngestService:
             f"(chunks={len(chunks)})"
         )
 
-    def _stream_ingest_volume(
+    def _stream_ingest_volume(self, site, volume_id, chunks, **kwargs):
+        from util.runtime.handoff import _AdvisoryFileLock
+        from util.runtime.config import section
+        lock = _AdvisoryFileLock(self.elevation_store.runtime_dir(site) / ".locks" / "site.lock")
+        lock.acquire(timeout=section("handoff")["input_lock_timeout_seconds"])
+        try:
+            return self._stream_ingest_volume_locked(site, volume_id, chunks, **kwargs)
+        finally:
+            lock.release()
+
+    def _stream_ingest_volume_locked(
         self,
         site: str,
         volume_id: str,
@@ -447,7 +470,7 @@ class NexradIngestService:
         sorted_chunks = sorted(chunks, key=lambda c: (c.chunk_number, c.chunk_type))
 
         runtime_path = runtime_scan_path(site_upper, volume_id)
-        prune_runtime_volumes(site_upper, volume_id)
+        prune_runtime_volumes(site_upper, volume_id, assume_locked=True)
         persisted_state = self._load_runtime_state(site_upper, volume_id, runtime_path)
         downloaded_chunk_keys = set(persisted_state.get("downloaded_chunk_keys", []))
         download_started_at = persisted_state.get("download_started_at") or _utc_now_timestamp()
@@ -486,10 +509,10 @@ class NexradIngestService:
                 downloaded_chunk_keys.add(self._chunk_identity(chunk))
 
                 found_boundary, boundary_offset = detect_next_volume_offset(
-                    previous_tail, payload, stream_has_started,
+                    previous_tail, payload, stream_has_started, chunk_type=chunk.chunk_type,
                 )
 
-                if found_boundary and boundary_offset > 0:
+                if found_boundary and boundary_offset >= 0:
                     before, after = split_at_boundary(payload, boundary_offset)
                     del payload
                     if before:
@@ -639,6 +662,7 @@ class NexradIngestService:
                 site_upper,
                 volume_id,
                 downloaded_chunk_keys=downloaded_chunk_keys,
+                bytes_written=current_state.bytes_written,
                 seen_elevation_exports=seen_elevation_exports,
                 elevation_timestamps_by_id=elevation_timestamps_by_id,
                 first_elevation_timestamp=first_elevation_timestamp,
@@ -693,9 +717,12 @@ class NexradIngestService:
         pool = get_nexrad_pool()
         submit_started_at = time.perf_counter()
 
+        snapshot_path = Path(state.file_path).with_name(
+            Path(state.file_path).stem + f".snapshot-{uuid.uuid4().hex}.ar2v")
+        shutil.copyfile(state.file_path, snapshot_path)
         try:
             future = pool.submit(
-                volume_path=state.file_path,
+                volume_path=str(snapshot_path),
                 output_root=str(output_root),
                 site=site,
                 volume_id=volume_id,
@@ -720,6 +747,9 @@ class NexradIngestService:
 
             if result.buffer_trimmed and result.runtime_size is not None:
                 state.bytes_written = max(0, int(result.runtime_size))
+                with snapshot_path.open("rb") as source, Path(state.file_path).open("r+b") as target:
+                    shutil.copyfileobj(source, target)
+                    target.truncate(state.bytes_written)
 
             if result.parse_error:
                 state.parse_errors.append(result.parse_error)
@@ -754,7 +784,7 @@ class NexradIngestService:
             )
         except FuturesTimeoutError:
             future.cancel()
-            shutdown_nexrad_pool(wait=False)
+            shutdown_nexrad_pool(wait=False, expected_pool=pool)
             message = (
                 f"worker parse timed out after {_nexrad_worker_timeout_seconds():.0f}s; "
                 "recycling NEXRAD worker pool"
@@ -762,7 +792,7 @@ class NexradIngestService:
             state.parse_errors.append(message)
             io_manager.write_warning(f"[VOL {site}/{volume_id}] {message}")
         except BrokenProcessPool as exc:
-            shutdown_nexrad_pool(wait=False)
+            shutdown_nexrad_pool(wait=False, expected_pool=pool)
             state.parse_errors.append(str(exc))
             io_manager.write_warning(
                 f"[VOL {site}/{volume_id}] worker pool broke; recycled pool: {exc}"
@@ -777,15 +807,37 @@ class NexradIngestService:
             )
         except Exception as exc:
             if "terminated abruptly" in str(exc).lower():
-                shutdown_nexrad_pool(wait=False)
+                shutdown_nexrad_pool(wait=False, expected_pool=pool)
             state.parse_errors.append(str(exc))
             io_manager.write_warning(
                 f"[VOL {site}/{volume_id}] worker parse failed: {exc}"
             )
 
+        finally:
+            snapshot_path.unlink(missing_ok=True)
         return first_elevation_timestamp
 
-    async def _stream_ingest_volume_async(
+    async def _stream_ingest_volume_async(self, site, volume_id, chunks, **kwargs):
+        from util.runtime.handoff import _AdvisoryFileLock, InputLockTimeout, _lock_contention
+        from util.runtime.config import section
+        lock = _AdvisoryFileLock(self.elevation_store.runtime_dir(site) / ".locks" / "site.lock")
+        deadline = time.monotonic() + section("handoff")["input_lock_timeout_seconds"]
+        while True:
+            try:
+                lock.acquire()
+                break
+            except OSError as exc:
+                if not _lock_contention(exc):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise InputLockTimeout(f"NEXRAD site {site} is still processing another volume") from exc
+                await asyncio.sleep(section("consumers")["core_readiness_seconds"])
+        try:
+            return await self._stream_ingest_volume_async_locked(site, volume_id, chunks, **kwargs)
+        finally:
+            lock.release()
+
+    async def _stream_ingest_volume_async_locked(
         self,
         site: str,
         volume_id: str,
@@ -805,7 +857,7 @@ class NexradIngestService:
         sorted_chunks = sorted(chunks, key=lambda c: (c.chunk_number, c.chunk_type))
 
         runtime_path = runtime_scan_path(site_upper, volume_id)
-        prune_runtime_volumes(site_upper, volume_id)
+        prune_runtime_volumes(site_upper, volume_id, assume_locked=True)
         runtime_path.parent.mkdir(parents=True, exist_ok=True)
         persisted_state = self._load_runtime_state(site_upper, volume_id, runtime_path)
         downloaded_chunk_keys = set(persisted_state.get("downloaded_chunk_keys", []))
@@ -849,10 +901,10 @@ class NexradIngestService:
                 downloaded_chunk_keys.add(self._chunk_identity(chunk))
 
                 found_boundary, boundary_offset = detect_next_volume_offset(
-                    previous_tail, payload, stream_has_started,
+                    previous_tail, payload, stream_has_started, chunk_type=chunk.chunk_type,
                 )
 
-                if found_boundary and boundary_offset > 0:
+                if found_boundary and boundary_offset >= 0:
                     before, after = split_at_boundary(payload, boundary_offset)
 
                     if before:
@@ -1000,6 +1052,7 @@ class NexradIngestService:
                 site_upper,
                 volume_id,
                 downloaded_chunk_keys=downloaded_chunk_keys,
+                bytes_written=current_state.bytes_written,
                 seen_elevation_exports=seen_elevation_exports,
                 elevation_timestamps_by_id=elevation_timestamps_by_id,
                 first_elevation_timestamp=first_elevation_timestamp,
@@ -1261,7 +1314,7 @@ class NexradIngestService:
                 chunk_download_semaphore=chunk_download_semaphore or self._shared_chunk_download_semaphore,
                 perf_totals=perf_totals,
             )
-            record_volume_and_maybe_recycle()
+            await asyncio.to_thread(record_volume_and_maybe_recycle)
             total_elapsed_ms = format_perf_ms(total_started_at)
             _emit_volume_perf_summary(
                 probe_site,

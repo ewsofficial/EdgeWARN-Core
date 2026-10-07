@@ -10,7 +10,7 @@ from common.ingest.nexrad import config as nexrad_config
 from common.ingest.nexrad.parser import DREF_BLOCK, filter_msg31_blocks, iter_metadata_records, iter_sweep_records
 from common.ingest.nexrad.s3_chunks import extract_volume_timestamp, format_nexrad_timestamp, parse_nexrad_timestamp, required_volume_chunks
 from common.ingest.nexrad.models import ElevationArtifact, ElevationGroup
-from util.atomic import atomic_write_text
+from util.atomic import atomic_write_text, atomic_output_path
 
 IMPORTANT_DATA_VARS = None
 SCAN_TIMESTAMP_RE = re.compile(r"^\d{8}-\d{6}$")
@@ -123,19 +123,28 @@ class NexradElevationStore:
         runtime.mkdir(parents=True, exist_ok=True)
         return runtime / f"{str(site).upper()}_{volume_id}.ar2v"
 
-    def prune_runtime_volumes(self, site: str, keep_volume_id: str) -> None:
+    def prune_runtime_volumes(self, site: str, keep_volume_id: str, *, assume_locked=False) -> None:
         runtime = self.runtime_dir(site)
         if not runtime.exists():
             return
 
+        if not assume_locked:
+            from util.runtime.handoff import _AdvisoryFileLock
+            lock = _AdvisoryFileLock(runtime / ".locks" / "site.lock")
+            try:
+                lock.acquire()
+            except OSError:
+                return
+            try:
+                return self.prune_runtime_volumes(site, keep_volume_id, assume_locked=True)
+            finally:
+                lock.release()
         keep_prefix = f"{str(site).upper()}_{keep_volume_id}"
         for child in runtime.iterdir():
-            if child.name.startswith(keep_prefix):
+            if child.name.startswith(keep_prefix) or child.name == ".locks" or ".snapshot-" in child.name:
                 continue
-            if child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-                continue
-            child.unlink(missing_ok=True)
+            if child.suffix in {".ar2v", ".json", ".part"}:
+                child.unlink(missing_ok=True)
 
     def site_manifest_path(self, site: str) -> Path:
         return fs.NEXRAD_LEVEL2_DIR / str(site).upper() / "manifest.json"
@@ -195,8 +204,8 @@ def runtime_scan_path(site: str, volume_id: str) -> Path:
     return _elevation_store().runtime_scan_path(site, volume_id)
 
 
-def prune_runtime_volumes(site: str, keep_volume_id: str):
-    _elevation_store().prune_runtime_volumes(site, keep_volume_id)
+def prune_runtime_volumes(site: str, keep_volume_id: str, *, assume_locked=False):
+    _elevation_store().prune_runtime_volumes(site, keep_volume_id, assume_locked=assume_locked)
 
 
 def site_manifest_path(site: str) -> Path:
@@ -698,19 +707,20 @@ def _write_elevation_ar2v(path: Path, raw_volume, group_names: list[str]) -> Pat
     path.parent.mkdir(parents=True, exist_ok=True)
     sweeps_by_group = {sweep.group_name: sweep for sweep in getattr(raw_volume, "sweeps", [])}
     doppler = nexrad_config.doppler_waveform()
-    with open(path, "wb") as f:
-        f.write(raw_volume.volume_header)
-        for record in iter_metadata_records(raw_volume):
-            f.write(record)
-        for group_name in group_names:
-            sweep = sweeps_by_group.get(group_name)
-            if sweep is None:
-                continue
-            # Per sweep, not per record: the waveform is a property of the sweep,
-            # so testing it inside the record loop only repeated the work.
-            is_doppler = str(getattr(sweep, "waveform", "") or "").strip().lower() == doppler
-            for record in iter_sweep_records(raw_volume, sweep):
-                f.write(filter_msg31_blocks(record, DREF_BLOCK) if is_doppler else record)
+    with atomic_output_path(path) as temporary:
+        with open(temporary, "wb") as f:
+            f.write(raw_volume.volume_header)
+            for record in iter_metadata_records(raw_volume):
+                f.write(record)
+            for group_name in group_names:
+                sweep = sweeps_by_group.get(group_name)
+                if sweep is None:
+                    continue
+                # Per sweep, not per record: the waveform is a property of the sweep,
+                # so testing it inside the record loop only repeated the work.
+                is_doppler = str(getattr(sweep, "waveform", "") or "").strip().lower() == doppler
+                for record in iter_sweep_records(raw_volume, sweep):
+                    f.write(filter_msg31_blocks(record, DREF_BLOCK) if is_doppler else record)
     return path
 
 

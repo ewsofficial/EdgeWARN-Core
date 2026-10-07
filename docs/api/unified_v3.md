@@ -110,3 +110,6 @@ progress is judged against `api.server.service_progress_stale_after_seconds`.
 Cell, storm-snapshot, and alert routes continue serving published artifacts
 through producer outages. EWMRS and NEXRAD retain their route gates.
 `/health/live` describes API liveness and configuration, without a services block.
+
+A pagination cursor whose item has been pruned returns 400. Restart pagination
+without the cursor to obtain the current collection.

@@ -63,7 +63,13 @@ class ExternalModuleRunner:
                         process.terminate()
                         try: stdout, stderr = process.communicate(timeout=2)
                         except subprocess.TimeoutExpired:
-                            process.kill(); stdout, stderr = process.communicate()
+                            process.kill()
+                            try:
+                                stdout, stderr = process.communicate(timeout=2)
+                            except subprocess.TimeoutExpired as exc:
+                                stdout, stderr = exc.output or b"", exc.stderr or b""
+                                if process.stdout: process.stdout.close()
+                                if process.stderr: process.stderr.close()
                         results.append(ModuleRunResult(module_id, "timed_out", time.monotonic() - started, process.returncode, self._capture(stdout), self._capture(stderr), "module exceeded manifest timeout")); continue
                     violations = self.service.contract_violations(module_id)
                     if violations:

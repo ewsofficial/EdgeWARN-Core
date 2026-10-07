@@ -53,7 +53,7 @@ def test_stormprob_cycle_n_history_drives_cycle_n_plus_1_tracker():
     assert cycle_n["modules"]["StormProb"]["status"] == "success"
 
     cycle_n["modules"]["StormProb"]["leads"] = [
-        {"lead_minutes": 15, "east_km": 3.0, "north_km": 1.5}]
+        {"lead_minutes": 15, "status": "ok", "east_km": 3.0, "north_km": 1.5}]
     cycle_n["modules"]["StormProb"]["status"] = "success"
     history_file_payload = [cycle_n]
     tracker = StormCellTracker(

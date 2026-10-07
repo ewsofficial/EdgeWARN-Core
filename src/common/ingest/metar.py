@@ -5,6 +5,7 @@ import io as io_lib
 import re
 import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import util.file as fs
@@ -32,6 +33,7 @@ io = IOManager("[METAR Ingest]")
 
 # Station database cache
 _station_cache = None
+_station_retry_after = None
 
 
 def _station_cache_path():
@@ -58,8 +60,8 @@ async def ensure_station_database():
     """
     Ensure station database is loaded/cached asynchronously.
     """
-    global _station_cache
-    if _station_cache is not None:
+    global _station_cache, _station_retry_after
+    if _station_cache:
         return
 
     cache_file = _station_cache_path()
@@ -81,6 +83,8 @@ async def ensure_station_database():
                 stations = await response.json()
 
                 parsed_cache = _parse_station_entries(stations)
+                if not parsed_cache:
+                    raise ValueError("station database is empty")
 
                 # Save to cache file
                 cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -92,15 +96,19 @@ async def ensure_station_database():
 
     except Exception as e:
         io.write_error(f"Async station download failed: {e}")
+        _station_cache = None
+        _station_retry_after = time.monotonic() + station_timeout_seconds()
 
 def _load_station_database():
     """
     Load station database from cache file or download from Aviation Weather API.
     Returns a dict mapping ICAO codes to [lat, lon] lists.
     """
-    global _station_cache
-    if _station_cache is not None:
+    global _station_cache, _station_retry_after
+    if _station_cache:
         return _station_cache
+    if _station_retry_after is not None and time.monotonic() < _station_retry_after:
+        return {}
     
     cache_file = _station_cache_path()
 
@@ -110,12 +118,13 @@ def _load_station_database():
             with open(cache_file, 'r') as f:
                 _station_cache = json.load(f)
                 io.write_debug(f"Loaded {len(_station_cache)} stations from cache")
-                return _station_cache
+                if _station_cache:
+                    return _station_cache
         except Exception as e:
             io.write_warning(f"Failed to load station cache: {e}")
     
     # Download and parse station database from JSON API
-    _station_cache = {}
+    _station_cache = None
     try:
         io.write_info("Downloading station database from Aviation Weather...")
 
@@ -134,6 +143,9 @@ def _load_station_database():
             stations = json.loads(raw_data.decode('utf-8'))
 
         _station_cache = _parse_station_entries(stations)
+        if not _station_cache:
+            raise ValueError("station database is empty")
+        _station_retry_after = None
 
         io.write_info(f"Parsed {len(_station_cache)} stations")
         
@@ -148,8 +160,10 @@ def _load_station_database():
             
     except Exception as e:
         io.write_error(f"Failed to download station database: {e}")
-    
-    return _station_cache
+        _station_cache = None
+        _station_retry_after = time.monotonic() + station_timeout_seconds()
+
+    return _station_cache or {}
 
 def get_station_coordinates(icao):
     """

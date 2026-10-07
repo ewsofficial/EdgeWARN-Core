@@ -308,3 +308,17 @@ def test_previous_optional_remains_available_when_current_download_is_absent(mon
     assert len(records) == 1 and records[0].role == "previous"
     assert records[0].local_path == previous
     assert state.ctam_manifest.latest_for_product("MESH_00.50") is None
+
+
+def test_realtime_maintenance_flushes_deferred_cleanup(tmp_path, monkeypatch):
+    from common.ingest.replay import guard_cleanup, flush_deferred_cleanup
+    monkeypatch.setattr(fs, "BASE_DIR", tmp_path)
+    called = []
+    @guard_cleanup
+    def cleanup():
+        called.append(True)
+    with input_lock(tmp_path):
+        cleanup()
+    assert called == []
+    flush_deferred_cleanup()
+    assert called == [True]

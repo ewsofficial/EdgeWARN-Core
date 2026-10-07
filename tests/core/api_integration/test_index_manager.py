@@ -189,3 +189,13 @@ def test_historical_old_scan_keeps_inactive_files_and_rebuilds_corrupt_indexes(
     assert (cell_dir / "102.json").exists()
     assert json.loads((cell_dir / "cell_index.json").read_text())["cellIds"] == [102]
     assert json.loads((storm_dir / "stormcell_index.json").read_text())["timestamps"] == ["20230101-115500"]
+
+
+def test_database_projection_cleanup_deletes_orphaned_cell_files(index_manager, mock_fs, monkeypatch):
+    orphan = mock_fs / "cell" / "999.json"
+    orphan.write_text("[]")
+    os.utime(orphan, (0, 0))
+    monkeypatch.setattr(index_manager, "_load_database_projection", lambda: ([], {}))
+    index_manager.remove_old_cells = True
+    index_manager.publish_cycle_indexes("20261007-180000", [])
+    assert not orphan.exists()

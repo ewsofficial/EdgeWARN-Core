@@ -202,7 +202,10 @@ def main():
                 version=get_release_version(),
                 degraded_children=tuple(supervisor.disabled_names()),
             )
-            write_heartbeat(beat, heartbeat_destination)
+            try:
+                write_heartbeat(beat, heartbeat_destination)
+            except OSError as exc:
+                print(f"[Heartbeat] Publication failed; retrying: {exc}")
             for _ in range(check_ticks):
                 # Bounded-backoff restarts and crash-loop disabling happen here.
                 supervisor.check()

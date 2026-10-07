@@ -125,3 +125,9 @@ describe('unified API services', () => {
     expect(repository.readJson).toHaveBeenCalledWith('wpc', ['surface_analysis', 'wpc_sfc_20260317-200000.geojson']);
   });
 });
+
+
+it('rejects pruned pagination cursors instead of restarting a collection', async () => {
+  const { page } = await import('../../src/api/services/validation.js');
+  expect(() => page(['2', '3'], { cursor: '1' }, { default_limit: 1, max_limit: 10 })).toThrow(/Cursor no longer exists/);
+});

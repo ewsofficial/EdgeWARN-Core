@@ -115,7 +115,8 @@ def test_entrypoint_forwards_term_and_drains_logger(tmp_path):
         ["bash", str(entrypoint), sys.executable, str(worker)],
         env={
             **os.environ,
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+            "PYTHONPATH": str(REPO_ROOT / "src"),
             "EDGEWARN_LOG_DIR": str(log_dir),
         },
     )
@@ -209,3 +210,28 @@ def test_container_run_with_disposable_mount_and_sigterm(tmp_path):
             timeout=60,
         )
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True, timeout=300)
+
+
+def test_container_logs_obey_circular_disk_budget(tmp_path):
+    import shutil
+    import yaml
+    if shutil.which("rotatelogs") is None:
+        pytest.skip("Apache rotatelogs is not installed")
+    catalog = tmp_path / "config"
+    shutil.copytree(REPO_ROOT / "config", catalog)
+    runtime_path = catalog / "runtime.yaml"
+    runtime = yaml.safe_load(runtime_path.read_text())
+    runtime["logging"] = {"retention_files": 2, "max_file_mb": 1}
+    runtime_path.write_text(yaml.safe_dump(runtime))
+    directory = tmp_path / "logs"
+    completed = subprocess.run(
+        ["bash", str(REPO_ROOT / "docker/edgewarn-entrypoint.sh"), sys.executable,
+         "-c", "import sys; sys.stdout.write('x' * (4 * 1024 * 1024))"],
+        env={**os.environ, "EDGEWARN_CONFIG_DIR": str(catalog), "EDGEWARN_LOG_DIR": str(directory),
+             "PYTHONPATH": str(REPO_ROOT / "src"),
+             "PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}"},
+        capture_output=True, timeout=10)
+    assert completed.returncode == 0, completed.stderr
+    inodes = {path.stat().st_ino: path.stat().st_size for path in directory.iterdir()}
+    assert len(inodes) <= 2
+    assert sum(inodes.values()) <= 2 * 1024 * 1024 + 65536

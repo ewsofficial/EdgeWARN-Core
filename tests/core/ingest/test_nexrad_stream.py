@@ -107,3 +107,10 @@ def test_volume_state_finalized():
     )
     assert state.finalized is True
     assert state.bytes_written == 1000
+
+
+def test_volume_magic_inside_compressed_chunks_is_never_a_boundary():
+    from common.ingest.nexrad.stream import detect_next_volume_offset
+    assert detect_next_volume_offset(b"", b"BZfakeAR2Vcompressed", True, chunk_type="I") == (False, -1)
+    assert detect_next_volume_offset(b"", b"AR2Vheader", True, chunk_type="S") == (True, 0)
+    assert detect_next_volume_offset(b"", b"AR2Vheader", False, chunk_type="S") == (False, -1)

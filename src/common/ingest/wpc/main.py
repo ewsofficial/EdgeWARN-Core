@@ -73,10 +73,9 @@ def run_wpc_ingest(log_queue=None):
 
     try:
         dt_now = datetime.now(timezone.utc)
-        result = fetch_surface_analysis(dt_now, save_timestamped=True)
-
         dt_prev = dt_now - timedelta(hours=previous_analysis_lookback_hours())
         fetch_surface_analysis(dt_prev, save_timestamped=True)
+        result = fetch_surface_analysis(dt_now, save_timestamped=True)
 
         clean_old_files()
 

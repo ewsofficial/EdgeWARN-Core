@@ -610,7 +610,6 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
                     f"forecasts={forecasts_removed} observations={observations_removed} "
                     f"cycle_projections={projections_scrubbed} cycles={cycles_removed}"
                 )
-                _update_api_indexes(projected_cells, remove_old_cells, timestamp)
         except Exception as exc:
             io_manager.write_warning(f"Failed to prune inactive StormProb data: {exc}")
     io_manager.write_info(

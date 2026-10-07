@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 
 import numpy as np
 import rasterio.features
@@ -230,7 +231,7 @@ class CellDataSaver:
         """Reflectivity-weighted centroid of gates selected by one polygon."""
         rows, cols = np.nonzero(mask)
         refl_vals = self.radar_ds['unknown'].values[grid_slice][mask]
-        valid = ~np.isnan(refl_vals)
+        valid = np.isfinite(refl_vals)
         refl_vals = refl_vals[valid]
         if not refl_vals.size:
             return None, float('nan')
@@ -262,6 +263,9 @@ class CellDataSaver:
 
         # Keep the public detection centroid tied to its detection mask.
         centroid_full, max_refl_val = self.__weighted_centroid(mask, grid_slice)
+        if centroid_full is None or not np.all(np.isfinite(centroid_full)) or not np.isfinite(max_refl_val):
+            logging.getLogger(__name__).warning("Skipping cell %s: no finite radar centroid", poly_id)
+            return None
         centroid = (tuple(round(value, _centroid_decimals) for value in centroid_full)
                     if centroid_full is not None else (np.nan, np.nan))
 

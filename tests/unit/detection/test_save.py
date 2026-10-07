@@ -419,3 +419,9 @@ def test_stormprob_uses_original_ps_polygon_and_its_own_centroid():
     assert stored['centroid_full'][0] < entry['centroid'][0]
     assert stored['centroid_full'][1] < entry['centroid'][1]
     assert stored['radial']['status'] == 'ok'
+
+
+def test_nonfinite_radar_cannot_publish_nan_centroid(synthetic_data):
+    bboxes, radar, mapped, expanded, ps, precip = synthetic_data
+    radar["unknown"].values[:] = np.nan
+    assert CellDataSaver(bboxes, radar, mapped, expanded, ps, precip).create_entry() == []

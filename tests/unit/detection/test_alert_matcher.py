@@ -29,6 +29,15 @@ from EdgeWARN.process.detect.tools.alert_matcher import (
 )
 
 
+@pytest.fixture(autouse=True)
+def fixed_alert_clock(monkeypatch):
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 2, 23, 21, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(alert_matcher, "datetime", FixedDatetime)
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -465,7 +474,7 @@ class TestMatchAlertsToCells:
         
         # Match with target timestamp 21:15 - should use the 21:00 snapshot
         cells = [sample_cell_inside_storm.copy()]
-        result1 = match_alerts_to_cells(cells, temp_registry, target_timestamp="2026-02-23T21:15:00Z")
+        result1 = match_alerts_to_cells(cells, temp_registry, target_timestamp="2026-02-23T21:05:00Z")
         assert len(result1[0]["alerts"]) == 1
         
         # Match with target timestamp 22:15 - should use the 22:00 snapshot (empty)
@@ -493,3 +502,14 @@ class TestMatchAlertsToCells:
             result2 = match_alerts_to_cells([sample_cell_inside_storm.copy()], temp_registry)
 
         assert len(result2[0]["alerts"]) == 1
+
+
+def test_expired_alerts_are_filtered_even_from_cached_snapshot(temp_registry, sample_convective_alert):
+    alert_id = "urn:oid:2.49.0.1.840.0.2406210827.1"
+    sample_convective_alert["properties"]["expires"] = "2026-02-23T21:01:00Z"
+    (temp_registry / "ids" / (alert_id.replace(":", "_") + ".json")).write_text(
+        json.dumps({"feature": sample_convective_alert}))
+    (temp_registry / "timestamps/20260223-210000.json").write_text(json.dumps({"alerts": [alert_id]}))
+    assert len(load_active_alerts(temp_registry, target_timestamp="2026-02-23T21:00:00Z")) == 1
+    assert load_active_alerts(temp_registry, target_timestamp="2026-02-23T21:02:00Z") == []
+    assert load_active_alerts(temp_registry, target_timestamp="2026-02-23T21:11:00Z") == []

@@ -43,10 +43,20 @@ trap cleanup EXIT
 mkdir -p "${log_dir}"
 mkfifo "${log_pipe}"
 
-rotatelogs \
-    -L "${log_dir}/edgewarn.current.log" \
-    -l "${log_dir}/edgewarn.%Y%m%d-%H.log" \
-    3600 <"${log_pipe}" &
+# Match the launcher's configuration root before resolving the log budget.
+launch_args=("$@")
+for ((i=0; i<${#launch_args[@]}; i++)); do
+    if [[ ${launch_args[i]} == --config-path || ${launch_args[i]} == --config-dir ]]; then
+        export EDGEWARN_CONFIG_DIR="${launch_args[i+1]}"
+    fi
+done
+read -r log_count log_mb < <(python -c 'from common.config.loader import load_config; c=load_config("runtime")["logging"]; print(c["retention_files"], c["max_file_mb"])')
+if [[ ! ${log_count:-} =~ ^[1-9][0-9]*$ || ! ${log_mb:-} =~ ^[1-9][0-9]*$ ]]; then
+    echo "Cannot resolve validated container log budget" >&2
+    exit 1
+fi
+rotatelogs -n "${log_count}" -L "${log_dir}/edgewarn.current.log" \
+    "${log_dir}/edgewarn.log" "${log_mb}M" <"${log_pipe}" &
 logger_pid=$!
 
 if (( shutdown_requested )); then

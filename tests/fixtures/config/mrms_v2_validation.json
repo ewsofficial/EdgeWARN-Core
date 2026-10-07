@@ -142,7 +142,8 @@
         "geometry_cache_max_entries": 512,
         "point_match_buffer_deg": 0.01,
         "polygon_match_buffer_deg": 0.005,
-        "snapshot_cache_max_entries": 8
+        "snapshot_cache_max_entries": 8,
+        "snapshot_max_age_seconds": 600
       },
       "detection": {
         "dataset_load_max_workers": 3,
@@ -802,7 +803,8 @@
         "max_age_minutes": 120,
         "retry_max_attempts": 3,
         "retry_initial_seconds": 5,
-        "retry_max_seconds": 30
+        "retry_max_seconds": 30,
+        "render_timeout_seconds": 300
       }
     },
     "ewmrs_render": {
@@ -2136,6 +2138,10 @@
       "consumers": {
         "core_readiness_seconds": 1.0,
         "ewmrs_notification_seconds": 1.0
+      },
+      "logging": {
+        "retention_files": 32,
+        "max_file_mb": 64
       }
     },
     "scheduler": {

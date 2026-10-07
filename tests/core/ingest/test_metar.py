@@ -154,3 +154,28 @@ def test_save_metar_data_empty(mocker, mock_io_manager):
     metar.save_metar_data([], datetime.now(timezone.utc))
     
     mock_io_manager.write_warning.assert_called_with("No METAR data to save.")
+
+
+def test_failed_station_download_retries_after_cooldown(tmp_path, monkeypatch):
+    import io
+    from datetime import timezone
+    clock = [0.0]
+    monkeypatch.setattr(metar, "_station_cache", None)
+    monkeypatch.setattr(metar, "_station_retry_after", 0.0)
+    monkeypatch.setattr(metar, "_station_cache_path", lambda: tmp_path / "stations.json")
+    monkeypatch.setattr(metar.time, "monotonic", lambda: clock[0])
+    calls = []
+    class Response(io.BytesIO):
+        def info(self):
+            return {}
+    def urlopen(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 1:
+            raise OSError("upstream unavailable")
+        return Response(b'[{"icaoId":"KJFK","lat":40.6,"lon":-73.7}]')
+    monkeypatch.setattr(metar.urllib.request, "urlopen", urlopen)
+    assert metar._load_station_database() == {}
+    assert metar._load_station_database() == {}
+    assert len(calls) == 1
+    clock[0] = 61
+    assert metar._load_station_database()["KJFK"] == [40.6, -73.7]

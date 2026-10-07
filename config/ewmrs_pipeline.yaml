@@ -155,6 +155,7 @@ rap_uint16:
 
 # Independent ingest foundations; consumed by the later service cutover.
 input_jobs:
+  render_timeout_seconds: 300
   # Maximum pending input/layer jobs. Bound: 1..100000.
   pending_max_jobs: 4096
   # Maximum pending job age in minutes, matching GUI retention default. Bound: 1..10080.
