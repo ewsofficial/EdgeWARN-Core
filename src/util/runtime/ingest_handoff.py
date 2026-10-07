@@ -12,6 +12,7 @@ import logging
 import math
 from pathlib import Path
 import re
+import threading
 import uuid
 
 from common.ingest.manifest import CycleInputManifest, StagedInput, parse_file_analysis_time
@@ -264,6 +265,7 @@ class IngestHandoff:
         # (inode, size, mtime_ns) on every read. Records are published by
         # atomic replace, so any rewrite changes the signature and re-parses.
         self._parsed = {}
+        self._cache_lock = threading.RLock()
 
     def path(self, kind, key):
         if kind not in KINDS or not re.fullmatch(r'[A-Za-z0-9_-]+', key):
@@ -292,6 +294,10 @@ class IngestHandoff:
         return stat.st_ino, stat.st_size, stat.st_mtime_ns
 
     def read(self, kind, key):
+        with self._cache_lock:
+            return self._read(kind, key)
+
+    def _read(self, kind, key):
         path = self.path(kind, key)
         try:
             before = self._signature(path)
@@ -386,8 +392,15 @@ class IngestHandoff:
     def _forget_missing(self, belongs, present):
         """Drop cached records whose files a full listing no longer contains."""
         present = {path.resolve() for path in present}
-        for path in [p for p in self._parsed if belongs(p) and p not in present]:
-            del self._parsed[path]
+        with self._cache_lock:
+            for path in [p for p in self._parsed if belongs(p) and p not in present]:
+                self._parsed.pop(path, None)
+
+    def prune_caches(self):
+        with self._cache_lock:
+            self._parsed = {path: entry for path, entry in self._parsed.items() if path.is_file()}
+            self._verified_files = {key: entry for key, entry in self._verified_files.items()
+                                    if self.path('input', key).is_file()}
 
     def _write(self, kind, key, data, *, mutable=False):
         record = IngestRecord.from_dict(IngestRecord(kind, key, self.fingerprint, self.run_id,

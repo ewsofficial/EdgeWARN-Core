@@ -167,9 +167,20 @@ class InputInventory:
                     raise IngestRecordError('Notification does not match inventory')
             acks = self.handoff.records('render-ack')
             plans = self.handoff.records('render-plan')
+            complete = self._render_completion_index(plans, acks)
             pending = tuple(record.key for record in self.handoff.records('render-ready')
-                            if not self._render_complete(record.key, plans, acks))
+                            if record.key not in complete)
             return {'adopted': tuple(adopted), 'published': tuple(published), 'pending': pending}
+
+    @staticmethod
+    def _render_completion_index(plans, acks):
+        acknowledged = {(a.data['input_id'], a.data['render_fingerprint']) for a in acks
+                        if a.data['layer_id'] == '__input__' and a.data['status'] in TERMINAL_STATUSES}
+        mappings = {}
+        for plan in plans:
+            mappings.setdefault(plan.data['input_id'], set()).add(plan.data['render_fingerprint'])
+        return {identity for identity, fingerprints in mappings.items()
+                if all((identity, fingerprint) in acknowledged for fingerprint in fingerprints)}
 
     @staticmethod
     def _render_complete(identity, plans, acks):
@@ -210,9 +221,10 @@ class InputInventory:
             return references
         acks = self.handoff.records('render-ack')
         plans = self.handoff.records('render-plan')
+        complete = self._render_completion_index(plans, acks)
         # Inventory without outbox is also pending work: protect the crash window.
         for record in self.handoff.records('input'):
-            if not self._render_complete(record.key, plans, acks):
+            if record.key not in complete:
                 references.add(record.key)
         return references
 
@@ -262,3 +274,58 @@ class InputInventory:
                 self._retire_record(record)
                 removed.append(identity)
             return tuple(removed)
+
+    def compact(self, *, before, tombstones_before=None):
+        """Prune expired unpinned scan state and metadata for retired inputs.
+
+        Live Core pins and active consumer state always win over retention.
+        The rediscovery window must fit within the tombstone retention window.
+        """
+        import shutil
+        from util.runtime.handoff import parse_cycle_id
+
+        removed = []
+        with input_lock(self.base_dir):
+            handoff = self.handoff
+            pinned = set()
+            for pin in handoff.records('pin'):
+                pinned.update(pin.data['input_ids'])
+            for directory in (handoff.root / 'scans').glob('*'):
+                if not directory.is_dir():
+                    continue
+                try:
+                    stamp = parse_cycle_id(directory.name)
+                except ValueError:
+                    continue
+                if stamp >= utc(before):
+                    continue
+                state = handoff.read('core-state', directory.name)
+                if state and state.data['status'] == 'active':
+                    continue
+                phases = [handoff.read(kind, directory.name) for kind in
+                          ('core-start-ready', 'core-integration-ready', 'core-final-ready')]
+                ids = {identity for phase in phases if phase for identity in phase.data['input_ids']}
+                if ids & pinned:
+                    continue
+                shutil.rmtree(contained(self.base_dir, directory))
+                handoff.path('core-state', directory.name).unlink(missing_ok=True)
+                removed.append(directory.name)
+            for state in handoff.records('core-state'):
+                if (parse_cycle_id(state.key) < utc(before)
+                        and state.data['status'] in TERMINAL_STATUSES
+                        and not set(state.data['input_ids']) & pinned):
+                    handoff.path('core-state', state.key).unlink(missing_ok=True)
+            live = {record.key for record in handoff.records('input')}
+            for kind in ('render-plan', 'render-ack'):
+                for record in handoff.records(kind):
+                    if record.data['input_id'] not in live and record.data['input_id'] not in pinned:
+                        handoff.path(kind, record.key).unlink(missing_ok=True)
+            for record in handoff.records('retired-input'):
+                if (record.published_at < utc(tombstones_before or before)
+                        and record.key not in live and record.key not in pinned):
+                    path = contained(self.base_dir, record.data['input']['path'])
+                    # Reconciliation must finish an interrupted deletion first.
+                    if not path.exists():
+                        handoff.path('retired-input', record.key).unlink(missing_ok=True)
+            handoff.prune_caches()
+        return tuple(removed)

@@ -701,3 +701,27 @@ def test_core_only_retention_releases_unacknowledged_render_inputs(inventory):
     inventory.render_consumer = False
     assert inventory.cleanup(before=T + timedelta(hours=1)) == (item.input_id,)
     assert not item.record.local_path.exists()
+
+
+def test_compaction_bounds_a_day_of_terminal_scans_and_caches(inventory, dependencies):
+    from util.runtime.handoff import canonical_cycle_id
+    for step in range(720):
+        stamp = T + timedelta(minutes=2 * step)
+        key = canonical_cycle_id(stamp)
+        inventory.handoff._write('scan-state', key, {
+            'first_seen_at': stamp.isoformat(), 'optional_started_at': stamp.isoformat()})
+        inventory.handoff.disposition('terminal', key, status='expired', reason='simulated expiry')
+    cutoff = T + timedelta(hours=23)
+    assert len(inventory.compact(before=cutoff)) == 690
+    assert len(inventory.handoff.records('scan-state')) == 30
+    assert len(inventory.handoff.records('terminal')) == 30
+    assert len(inventory.handoff._parsed) <= 60
+
+
+def test_compaction_preserves_active_core_state(inventory, dependencies):
+    checks(inventory)
+    inventory.publish_scan(T, dependencies, at=T)
+    key = canonical_cycle_id(T)
+    inventory.handoff.disposition('core-state', key, status='active')
+    assert inventory.compact(before=T + timedelta(days=1)) == ()
+    assert inventory.handoff.read('core-start-ready', key) is not None

@@ -829,3 +829,14 @@ def test_rap_prune_preserves_referenced_ids_and_retires_inventory(tmp_path, monk
     assert service._prune_rap() == (items[-1].record.local_path,)
     assert service.inventory.handoff.read("input", items[-1].input_id) is None
     assert service.inventory.handoff.read("retired-input", items[-1].input_id) is not None
+
+
+def test_timer_coalesces_maintenance_while_publisher_is_blocked(tmp_path, monkeypatch):
+    service = make_service(tmp_path, ScriptedSource(make_registry(tmp_path)))
+    monkeypatch.setattr(service, "_dispatch_listings", lambda *args: None)
+    monkeypatch.setattr(service, "_dispatch_acquisitions", lambda *args: None)
+    monkeypatch.setattr(service, "_dispatch_auxiliary", lambda *args: None)
+    for tick in range(100):
+        service._tick(tick * 10)
+    assert service._work.qsize() == 2
+    assert service._last_reconcile is None

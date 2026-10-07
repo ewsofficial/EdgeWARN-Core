@@ -360,6 +360,8 @@ class IngestService:
                          "listing_overruns": 0, "coalesced_ticks": 0, "expired_scans": 0,
                          "retired_inputs": 0, "render_notifications": 0}
         self._last_reconcile: float | None = None
+        self._maintenance_pending = False
+        self._status_pending = False
         self._last_poll_at: datetime | None = None
         self._phase = "starting"
         self._started = False
@@ -478,11 +480,14 @@ class IngestService:
         self._dispatch_listings(monotonic_now, at)
         self._dispatch_acquisitions(monotonic_now)
         self._dispatch_auxiliary(at, monotonic_now)
-        if (self._last_reconcile is None or
-                monotonic_now - self._last_reconcile >= self.resources.reconcile_interval_seconds):
-            self._last_reconcile = monotonic_now
-            self._work.put(_Work(kind="maintenance"))
-        self._work.put(_Work(kind="poll-status"))
+        with self._index_lock:
+            if (not self._maintenance_pending and (self._last_reconcile is None or
+                    monotonic_now - self._last_reconcile >= self.resources.reconcile_interval_seconds)):
+                self._maintenance_pending = True
+                self._work.put(_Work(kind="maintenance"))
+            if not self._status_pending:
+                self._status_pending = True
+                self._work.put(_Work(kind="poll-status"))
         self._phase = "acquiring" if self._outstanding else "polling"
 
     def _dispatch_listings(self, monotonic_now, at):
@@ -906,9 +911,18 @@ class IngestService:
         elif item.kind == "startup":
             self._reconcile()
         elif item.kind == "maintenance":
-            self._maintain()
+            try:
+                self._maintain()
+            finally:
+                with self._index_lock:
+                    self._last_reconcile = self._clock()
+                    self._maintenance_pending = False
         elif item.kind == "poll-status":
-            self._publish_poll_status()
+            try:
+                self._publish_poll_status()
+            finally:
+                with self._index_lock:
+                    self._status_pending = False
 
     # -- durable publication --------------------------------------------
 
@@ -998,6 +1012,13 @@ class IngestService:
     def _maintain(self):
         at = self._wall()
         self._reconcile()
+        self.inventory.compact(
+            before=at - timedelta(minutes=self.resources.retention_minutes),
+            tombstones_before=at - timedelta(minutes=2 * self.resources.listing_window_minutes))
+        start, end = self._observation_window(at)
+        with self._index_lock:
+            self._committed_scans = {product: {scan for scan in scans if start <= scan <= end}
+                                     for product, scans in self._committed_scans.items()}
         self._retire(at)
         self._prune_rap()
         self._collect_staging(at)
@@ -1091,6 +1112,8 @@ class IngestService:
         key = _cycle_key(scan)
         if handoff.read("terminal", key) is not None:
             return
+        if handoff.read("core-final-ready", key) is not None:
+            return
         evaluation = self._evaluate_scan(scan)
         if evaluation is None:
             return
@@ -1156,7 +1179,8 @@ class IngestService:
                 scans.add(parse_cycle_id(record.key))
             except ValueError:
                 continue
-        return scans
+        start, end = self._observation_window(self._wall())
+        return {scan for scan in scans if start <= scan <= end}
 
     def status(self):
         with self._index_lock:

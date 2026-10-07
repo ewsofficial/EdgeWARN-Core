@@ -459,3 +459,9 @@ Identity tombstones precede deletion so reconciliation can finish interrupted
 cleanup and reject conflicting rediscovery. File verification caches use file
 version metadata only to avoid repeated hashing; encoded observation time
 remains the source-time authority.
+
+Handoff maintenance coalesces pending passes. It bounds tracked scans to the
+listing window and prunes scan/consumer records past raw retention when no live
+Core pin or active state protects them. Plans and acknowledgments for retired
+inputs are removed; tombstones remain for twice the listing window. Maintenance
+also removes cache entries for deleted records and inputs.
