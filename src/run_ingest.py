@@ -68,6 +68,8 @@ def _parse_args(argv=None):
                       ("profile", "run.profile")):
         setattr(args, flag, overlay.resolve(
             getattr(args, flag), yaml_value=run_cfg[flag], key=key))
+    args.render_consumer = overlay.resolve(
+        args.render_consumer, yaml_value=not run_cfg["disable_ewmrs"], key="run.disable_ewmrs")
     root = config_loader.export_config_root(args.config_dir)
     config_loader.validate_all_configs(config_dir=root)
     return args
@@ -143,7 +145,7 @@ def main():
         base_dir=fs.BASE_DIR, run_id=run_id, registry=registry,
         dependencies=dependencies,
         resources=IngestResources.resolve(config_dir=args.config_dir),
-        io=io_manager, stop_event=stop_event)
+        io=io_manager, stop_event=stop_event, render_consumer=args.render_consumer)
 
     def _request_stop(_signum, _frame):
         print("[Ingest] Shutdown signal received; stopping after the current atomic unit...")

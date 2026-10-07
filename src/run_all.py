@@ -238,6 +238,8 @@ def build_service_commands(args, services, src_root, *, service_argv=None):
             # child behavior stable if its inherited config root differs.
             cmd.append("--mrms-core-only")
         cmd.extend(service_argv.get(service, ()))
+        if service == "ingest":
+            cmd.append("--render-consumer" if "ewmrs" in services else "--no-render-consumer")
         if args.config_dir is not None:
             cmd += ["--config-dir", str(args.config_dir)]
         commands[service] = cmd

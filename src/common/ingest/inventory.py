@@ -1,5 +1,7 @@
 """Validated input inventory, crash reconciliation, and reference-aware retention."""
 import hashlib
+import logging
+import uuid
 from pathlib import Path
 
 from common.ingest.manifest import parse_file_analysis_time
@@ -11,9 +13,10 @@ from util.runtime.ingest_handoff import (
 
 
 class InputInventory:
-    def __init__(self, base_dir, *, fingerprint, run_id):
+    def __init__(self, base_dir, *, fingerprint, run_id, render_consumer=True):
         self.handoff = IngestHandoff(base_dir, fingerprint=fingerprint, run_id=run_id)
         self.base_dir = self.handoff.base_dir
+        self.render_consumer = render_consumer
 
     def _validate_completion(self, completed):
         record = completed.record
@@ -60,12 +63,22 @@ class InputInventory:
         with input_lock(self.base_dir):
             return self._commit_input(completed)
 
-    def valid_inputs(self):
-        """Fail visibly on lost/changed committed bytes instead of trusting existence."""
-        result = self.handoff.records('input')
-        for record in result:
-            self.handoff.verify_input(record)
-        return result
+    def valid_inputs(self, *, strict=False):
+        """Isolate lost/changed bytes so unrelated scans can still advance."""
+        valid = []
+        for record in self.handoff.records('input'):
+            try:
+                self.handoff.verify_input(record)
+            except IngestRecordError as exc:
+                if strict:
+                    raise
+                logging.getLogger(__name__).warning('Invalidating input %s: %s', record.key, exc)
+                path = self.handoff.path('input', record.key)
+                path.rename(path.with_suffix(f'.invalid-{uuid.uuid4().hex}'))
+                self.handoff.path('render-ready', record.key).unlink(missing_ok=True)
+            else:
+                valid.append(record)
+        return tuple(valid)
 
     def publish_scan(self, cycle_time, dependencies, **options):
         """Select and publish references under the same lock as retention."""
@@ -193,6 +206,8 @@ class InputInventory:
         for state in self.handoff.records('core-state'):
             if state.data['status'] not in TERMINAL_STATUSES:
                 references.update(state.data['input_ids'])
+        if not self.render_consumer:
+            return references
         acks = self.handoff.records('render-ack')
         plans = self.handoff.records('render-plan')
         # Inventory without outbox is also pending work: protect the crash window.
@@ -222,13 +237,28 @@ class InputInventory:
                 cutoff = (family_before or {}).get(record.data['input']['family'], before)
                 if record.key in references or utc(record.data['input']['analysis_time']) >= utc(cutoff):
                     continue
-                path = contained(self.base_dir, record.data['input']['path'])
-                if path.exists() and file_digest(path) != record.data['sha256']:
-                    raise IngestRecordError('Cannot retire changed committed bytes')
-                # Keep the identity tombstone before deleting any referenced bytes.
-                self.handoff._write('retired-input', record.key, record.data)
-                path.unlink(missing_ok=True)
-                self.handoff.path('render-ready', record.key).unlink(missing_ok=True)
-                self.handoff.path('input', record.key).unlink(missing_ok=True)
+                self._retire_record(record)
                 removed.append(record.key)
+            return tuple(removed)
+
+    def _retire_record(self, record):
+        path = contained(self.base_dir, record.data['input']['path'])
+        if path.exists() and file_digest(path) != record.data['sha256']:
+            raise IngestRecordError('Cannot retire changed committed bytes')
+        self.handoff._write('retired-input', record.key, record.data)
+        path.unlink(missing_ok=True)
+        self.handoff.path('render-ready', record.key).unlink(missing_ok=True)
+        self.handoff.path('input', record.key).unlink(missing_ok=True)
+
+    def retire_inputs(self, identities):
+        """Retire specified inventory IDs, atomically yielding to all references."""
+        with input_lock(self.base_dir):
+            references = self._references()
+            removed = []
+            for identity in identities:
+                record = self.handoff.read('input', identity)
+                if record is None or identity in references:
+                    continue
+                self._retire_record(record)
+                removed.append(identity)
             return tuple(removed)

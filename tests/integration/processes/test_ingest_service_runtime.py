@@ -529,7 +529,7 @@ class TestCoreReadinessEvaluation:
         source = ScriptedSource(registry, reveal={product: [T] for product in CHECKS},
                                 failing={PROB_SEVERE})
         service = make_service(tmp_path, source, retry_initial_seconds=0,
-                               retry_max_seconds=0, retry_max_attempts=2)
+                               retry_max_seconds=30, retry_max_attempts=2)
         published = record_poll_statuses(service)
         service.start()
         try:
@@ -542,7 +542,9 @@ class TestCoreReadinessEvaluation:
             "core-start-ready", canonical_cycle_id(T)) is None
         assert any(PROB_SEVERE in reason
                    for status in published for reason in status["reasons"])
-        assert source.acquisitions.count((PROB_SEVERE, T.isoformat())) == 2
+        # Abandoned objects may be offered again after their cooldown; each
+        # of the four polls still has at most two bounded attempts.
+        assert 2 <= source.acquisitions.count((PROB_SEVERE, T.isoformat())) <= 8
 
     def test_an_incomplete_scan_expires_with_an_explicit_missing_list(self, tmp_path):
         registry = make_registry(tmp_path)
@@ -802,3 +804,28 @@ def test_durable_commit_failure_retries_before_settlement(tmp_path, monkeypatch)
         assert len(service.inventory.handoff.records("render-ready")) == 1
     finally:
         service.shutdown()
+
+
+def test_rap_prune_preserves_referenced_ids_and_retires_inventory(tmp_path, monkeypatch):
+    from common.ingest.manifest import StagedInput
+    import util.file as fs
+    service = make_service(tmp_path, ScriptedSource(make_registry(tmp_path)), rap_max_files=3)
+    service.dependencies = replace(service.dependencies, rap_enabled=True)
+    directory = tmp_path / "data/RAP"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(fs, "RAP_DIR", directory)
+    items = []
+    for hour in range(4):
+        at = T - timedelta(hours=hour)
+        path = directory / f"RAP.{at:%Y%m%d-%H}z.awp130pgrbf00.grib2"
+        path.write_bytes(b"rap")
+        item = CommittedInput(StagedInput("RAP", str(path), at, "synoptic", "rap"),
+                              hashlib.sha256(b"rap").hexdigest(), str(path))
+        service.inventory.commit_input(item)
+        items.append(item)
+    assert service._prune_rap() == ()
+    assert items[-1].record.local_path.exists()
+    service.inventory.render_consumer = False
+    assert service._prune_rap() == (items[-1].record.local_path,)
+    assert service.inventory.handoff.read("input", items[-1].input_id) is None
+    assert service.inventory.handoff.read("retired-input", items[-1].input_id) is not None

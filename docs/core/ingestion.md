@@ -51,6 +51,11 @@ run_nexrad.py
 
 `edgewarn run` starts all four Python services. `edgewarn run core` starts
 ingest and Core; `edgewarn run ewmrs` starts ingest, Core, and EWMRS.
+Ingest receives `--no-render-consumer` when the launcher omits EWMRS,
+so unacknowledged render notifications do not pin raw inputs forever. For
+a directly managed ingest process, set this flag explicitly when no EWMRS
+consumer is deployed. RAP pruning retires inventory IDs atomically and yields
+to active references. A lost committed input is isolated from other scans.
 Direct consumers require a separately managed `run_ingest.py` using the same
 config root, runtime root, and dependency options. Ingest and EWMRS can run
 without Core using `run_all.py --services ingest,ewmrs`.

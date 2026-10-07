@@ -315,7 +315,7 @@ class IngestService:
 
     def __init__(self, *, base_dir, run_id, registry, dependencies, resources=None,
                  io=None, stop_event=None, clock=None, wall_clock=None, wait=None,
-                 lister=None, acquirer=None, auxiliary=None, startup_latest_only=True):
+                 lister=None, acquirer=None, auxiliary=None, startup_latest_only=True, render_consumer=True):
         from common.ingest.inventory import InputInventory
 
         self.base_dir = Path(base_dir).resolve()
@@ -332,7 +332,8 @@ class IngestService:
         self._acquirer = acquirer
         self._auxiliary = auxiliary
         self.inventory = InputInventory(
-            self.base_dir, fingerprint=dependencies.fingerprint, run_id=run_id)
+            self.base_dir, fingerprint=dependencies.fingerprint, run_id=run_id,
+            render_consumer=render_consumer)
 
         self.ledger = AcquisitionLedger(capacity=self.resources.pending_max_jobs,
                                          clock=self._clock,
@@ -1057,16 +1058,12 @@ class IngestService:
             if analysis is not None:
                 candidates.append((analysis, path))
         candidates.sort(key=lambda item: item[0], reverse=True)
-        protected = self.inventory.referenced_inputs()
-        removed = []
-        for rank, (_, path) in enumerate(candidates):
-            if rank < self.resources.rap_max_files or str(path) in protected:
-                continue
-            try:
-                path.unlink()
-                removed.append(path)
-            except OSError as exc:
-                self._warn(f"could not retire RAP analysis {path.name}: {exc}")
+        by_path = {Path(record.data["input"]["path"]): record.key
+                   for record in self.inventory.handoff.records("input")
+                   if record.data["input"]["family"] == "rap"}
+        selected = {by_path[path]: path for rank, (_, path) in enumerate(candidates)
+                    if rank >= self.resources.rap_max_files and path in by_path}
+        removed = [selected[key] for key in self.inventory.retire_inputs(selected)]
         if removed:
             self._debug(f"retired {len(removed)} unreferenced RAP analysis file(s)")
         return tuple(removed)

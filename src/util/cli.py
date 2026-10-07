@@ -25,6 +25,8 @@ def build_service_parser(service, *, add_help=True):
     parser = argparse.ArgumentParser(add_help=add_help, allow_abbrev=False)
     if service == "ingest":
         add_base_directory_flags(parser)
+        parser.add_argument("--render-consumer", action=argparse.BooleanOptionalAction, default=None,
+                            help="Protect inputs for an EWMRS consumer (default: runtime.run.disable_ewmrs)")
         parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
         parser.add_argument("--disable-goes", action=argparse.BooleanOptionalAction, default=None)
         add_stormprob_dependency_flags(parser)

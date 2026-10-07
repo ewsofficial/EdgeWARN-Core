@@ -195,7 +195,7 @@ def test_corrected_content_does_not_overwrite_inventory(inventory):
         inventory.commit_input(second)
     assert inventory.handoff.read('input', first.input_id).data['sha256'] == first.sha256
     with pytest.raises(IngestRecordError, match='changed'):
-        inventory.valid_inputs()
+        inventory.valid_inputs(strict=True)
 
 
 @pytest.mark.parametrize('mutation', ['schema', 'fingerprint', 'key', 'path', 'evidence', 'boolean', 'time', 'extra'])
@@ -475,7 +475,7 @@ def test_file_verification_cache_invalidates_on_same_size_replacement(inventory)
     inventory.valid_inputs()
     item.record.local_path.write_bytes(b'x' * len(b'validated payload'))
     with pytest.raises(IngestRecordError, match='changed'):
-        inventory.valid_inputs()
+        inventory.valid_inputs(strict=True)
 
 
 def test_active_core_keeps_phase_inputs_after_scan_expiry(inventory, dependencies):
@@ -685,3 +685,19 @@ def test_record_enumeration_isolates_corruption_and_disappearance(inventory, mon
         return original(kind, key)
     monkeypatch.setattr(inventory.handoff, "read", disappearing)
     assert inventory.handoff.records("input") == ()
+
+
+def test_missing_input_does_not_block_new_scan(inventory, dependencies):
+    missing = add(inventory, 'Old', T - timedelta(minutes=2))
+    missing.record.local_path.unlink()
+    checks(inventory)
+    assert inventory.publish_scan(T, dependencies, at=T).start is not None
+    assert inventory.handoff.read('input', missing.input_id) is None
+
+
+def test_core_only_retention_releases_unacknowledged_render_inputs(inventory):
+    item = add(inventory)
+    inventory.handoff.publish_render_ready(item.input_id)
+    inventory.render_consumer = False
+    assert inventory.cleanup(before=T + timedelta(hours=1)) == (item.input_id,)
+    assert not item.record.local_path.exists()
