@@ -203,7 +203,7 @@ class AcquisitionLedger:
       successful acquisition, so the successful cursor never advances past it.
     """
 
-    def __init__(self, *, capacity, clock=None):
+    def __init__(self, *, capacity, clock=None, abandoned_retry_seconds=None):
         if capacity < 1:
             raise ValueError("ledger capacity must be positive")
         self.capacity = capacity
@@ -211,6 +211,8 @@ class AcquisitionLedger:
         self._lock = threading.Lock()
         self._queued: dict[str, AcquisitionJob] = {}
         self._settled: dict[str, tuple[str, str]] = {}
+        self._settled_at: dict[str, float] = {}
+        self._abandoned_retry_seconds = abandoned_retry_seconds
         self._in_flight: set[str] = set()
         self.rejected = 0
 
@@ -223,6 +225,12 @@ class AcquisitionLedger:
         window is saturated, so the caller can report backpressure explicitly.
         """
         with self._lock:
+            settled = self._settled.get(job.identity)
+            if (settled is not None and settled[0] == "abandoned"
+                    and self._abandoned_retry_seconds is not None
+                    and self._clock() - self._settled_at[job.identity] >= self._abandoned_retry_seconds):
+                del self._settled[job.identity]
+                del self._settled_at[job.identity]
             if (job.identity in self._queued or job.identity in self._in_flight
                     or job.identity in self._settled):
                 return False
@@ -267,8 +275,11 @@ class AcquisitionLedger:
         with self._lock:
             self._in_flight.discard(identity)
             self._settled[identity] = (state, reason)
+            self._settled_at[identity] = self._clock()
             while len(self._settled) > self.capacity:
-                del self._settled[next(iter(self._settled))]
+                oldest = next(iter(self._settled))
+                del self._settled[oldest]
+                del self._settled_at[oldest]
 
     def state(self, identity):
         with self._lock:
@@ -324,7 +335,8 @@ class IngestService:
             self.base_dir, fingerprint=dependencies.fingerprint, run_id=run_id)
 
         self.ledger = AcquisitionLedger(capacity=self.resources.pending_max_jobs,
-                                         clock=self._clock)
+                                         clock=self._clock,
+                                         abandoned_retry_seconds=self.resources.retry_max_seconds)
         self._work: queue.Queue = queue.Queue()
         self._index_lock = threading.RLock()
         self._publisher: threading.Thread | None = None

@@ -20,9 +20,11 @@ declared `max_age_seconds`. Changes to module declarations or ingestion
 eligibility require a restart.
 
 StormProb has a separate all-input gate after the final optional input and
-enrichment snapshot. Missing required MRMS/RAP inputs or model features stop
-the whole Core process with a nonzero status before forecast or alert
-publication. Set `runtime.run.disable_stormprob: true` or use
+enrichment snapshot. Missing required MRMS/RAP inputs skip the affected realtime scan without
+forecast or alert publication; Core continues to the next scan. Startup
+configuration and asset preflight remains fatal. Abandoned acquisitions become
+eligible for rediscovery after `ingest.retry_max_seconds`, while their scan is
+still within its acquisition window. Set `runtime.run.disable_stormprob: true` or use
 `--disable-stormprob` to skip its dependency and asset checks, inference, and
 new publication while keeping external CTAM modules available. `--disable-ctam`
 disables both; `--disable-ctam-modules` disables only external modules.

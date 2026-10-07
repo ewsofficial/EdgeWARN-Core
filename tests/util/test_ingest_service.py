@@ -251,3 +251,19 @@ def test_discovered_object_helper_matches_the_source_grammar():
         assert hashlib.sha256(str(obj.logical_identity).encode()).hexdigest()
         mirror = obj.mirror("https")
         assert mirror.logical_identity == obj.logical_identity
+
+
+def test_abandoned_acquisition_can_be_reoffered_after_cooldown():
+    clock = [0.0]
+    ledger = AcquisitionLedger(capacity=8, clock=lambda: clock[0], abandoned_retry_seconds=30)
+    job = AcquisitionJob("gap", "mrms", "A", datetime(2026, 1, 1, tzinfo=UTC))
+    ledger.offer(job)
+    ledger.take(job.identity)
+    ledger.settle(job.identity, "abandoned", "upstream lag")
+    assert not ledger.offer(job)
+    clock[0] = 30
+    assert ledger.offer(job)
+    ledger.take(job.identity)
+    ledger.settle(job.identity, "committed")
+    clock[0] = 60
+    assert not ledger.offer(job)
