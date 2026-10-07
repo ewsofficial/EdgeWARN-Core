@@ -610,7 +610,7 @@ class TestRun1001Regressions:
             attempts.append((kind, target))
             if len(attempts) == 1:
                 raise TimeoutError("GLM upstream timed out")
-            return ()
+            return (_completion(source, REFLECTIVITY, T).completed,)
 
         service = make_service(tmp_path, source, include_glm=True, retry_initial_seconds=0,
                                retry_max_seconds=0)
@@ -644,6 +644,8 @@ class TestRun1001Regressions:
         function(*args)  # the retry runs on the auxiliary pool and succeeds
 
         assert attempts == [("glm", T), ("glm", T)]
+        assert service.ledger.state(identity) is None
+        service._apply(service._work.get_nowait())
         assert service.ledger.state(identity) == ("committed", "")
         assert service.ledger.counts()["in_flight_jobs"] == 0
 
@@ -765,3 +767,38 @@ class TestIngestEntryPoint:
                      ["--refl-threshold", "1.0"], ["--disable-wpc"], ["--disable-nws"]):
             with pytest.raises(SystemExit):
                 parser.parse_args(argv)
+
+
+def test_durable_commit_failure_retries_before_settlement(tmp_path, monkeypatch):
+    from util.runtime.handoff import InputLockTimeout
+    from util.runtime.ingest_service import AcquisitionJob
+
+    source = ScriptedSource(make_registry(tmp_path))
+    service = make_service(tmp_path, source, retry_initial_seconds=0.01)
+    obj = source.discovered(source.registry.require(REFLECTIVITY), T)
+    job = AcquisitionJob("commit-retry", "mrms", REFLECTIVITY, T, discovered=obj)
+    original = service.inventory.commit_input
+    calls = []
+
+    def commit(completed):
+        calls.append(completed.input_id)
+        if len(calls) == 1:
+            raise InputLockTimeout("injected contention")
+        return original(completed)
+
+    monkeypatch.setattr(service.inventory, "commit_input", commit)
+    service.start()
+    try:
+        service.ledger.offer(job)
+        service.ledger.take(job.identity)
+        service._acquire_mrms(job)
+        wait_for(lambda: service.ledger.counts()["pending_jobs"] == 1, "commit failure did not requeue")
+        assert service.ledger.state(job.identity) is None
+        service.ledger.take(job.identity)
+        service._acquire_mrms(job)
+        wait_for(lambda: service.ledger.state(job.identity) == ("committed", ""), "retry not committed")
+        assert len(calls) == 2
+        assert len(service.inventory.valid_inputs()) == 1
+        assert len(service.inventory.handoff.records("render-ready")) == 1
+    finally:
+        service.shutdown()

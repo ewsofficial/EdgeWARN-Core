@@ -699,11 +699,6 @@ class IngestService:
             completed = self._run_acquisition(job)
         except Exception as exc:
             self._fail(job, f"{type(exc).__name__}: {exc}")
-        else:
-            # Only a usable, validated file advances the successful cursor. The
-            # durable commit and its render notification are a separate,
-            # recoverable step on the publisher thread.
-            self.ledger.settle(job.identity, "committed")
         finally:
             self._outstanding -= 1
             if not job.protected:
@@ -812,9 +807,7 @@ class IngestService:
             return
         # One analysis hour or scan minute resolves to a single acquisition
         # identity, so reusing it for another scan publishes no second event.
-        self.ledger.settle(job.identity, "committed")
-        for item in completed:
-            self._work.put(_Work(kind="completion", completed=item, job=job))
+        self._work.put(_Work(kind="completion", completed=completed, job=job))
 
     def _run_auxiliary(self, job):
         if self._auxiliary is not None:
@@ -864,6 +857,8 @@ class IngestService:
                     except Exception as exc:
                         self._warn(f"publisher {item.kind} failed: {type(exc).__name__}: {exc}")
                         self._add_reason(f"publisher {item.kind} failed: {type(exc).__name__}: {exc}")
+                        if item.kind == "completion" and item.job is not None:
+                            self._fail(item.job, f"durable publication failed: {exc}")
                 self._flush_evaluations(pending_scans)
             finally:
                 # Acknowledge only after the batch's evaluations ran, so an
@@ -886,7 +881,15 @@ class IngestService:
 
     def _apply(self, item):
         if item.kind == "completion":
-            return self._publish_completion(item)
+            completions = item.completed if isinstance(item.completed, tuple) else (item.completed,)
+            if not completions:
+                raise IngestRecordError("Acquisition returned no usable inputs")
+            scans = set()
+            for completed in completions:
+                scans.update(self._publish_completion(_Work(kind="completion", completed=completed)))
+            if item.job is not None:
+                self.ledger.settle(item.job.identity, "committed")
+            return scans
         elif item.kind == "startup":
             self._reconcile()
         elif item.kind == "maintenance":
