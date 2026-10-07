@@ -48,7 +48,7 @@ describe('unified API app', () => {
       restartRequired: true,
       effective: { baseDir, renderProductCount: 32, radarProductCount: 7 },
     });
-    const ready = await request(app).get('/health/ready').expect(200);
+    const ready = await request(app).get('/health/ready').expect(503);
     expect(ready.body.config).toEqual(live.body.config);
     const cells = await request(app).get('/api/v3/cells').expect(200);
     expect(cells.body.data).toEqual(['4']);

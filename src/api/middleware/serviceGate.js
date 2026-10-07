@@ -4,7 +4,7 @@
 
 export function createServiceGate({ serviceRegistry, service, respond }) {
   return async (req, res, next) => {
-    if (!serviceRegistry) return next();
+    if (!serviceRegistry || (service === 'edgewarn' && /^\/api\/v3\/(cells|storm-snapshots|alert-snapshots|alerts)(?:\/|\?|$)/.test(req.originalUrl))) return next();
     const { state, heartbeat } = await serviceRegistry.stateFor(service);
     if (state === 'active' || state === 'degraded') return next();
 

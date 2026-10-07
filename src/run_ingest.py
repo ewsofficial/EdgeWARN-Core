@@ -159,10 +159,13 @@ def main():
     def refresh_heartbeat():
         # A heartbeat is poll liveness, never proof that an input is ready: a
         # quiet upstream leaves this service active with no new inputs.
+        status = service.status()
         write_heartbeat(ServiceHeartbeat(
             service=SERVICE_NAME, pid=os.getpid(), run_id=run_id,
-            updated_at=datetime.now(timezone.utc), phase=service.status()["phase"],
-            version=get_release_version(), degraded_children=(),
+            updated_at=datetime.now(timezone.utc), phase=status["phase"],
+            last_successful_activity=status["last_successful_activity"],
+            version=get_release_version(),
+            degraded_children=() if status["publisher_alive"] else ("ingest-publisher",),
         ), heartbeat_destination)
 
     heartbeat_stop = threading.Event()

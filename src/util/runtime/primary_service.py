@@ -20,6 +20,7 @@ this module never imports.
 """
 
 import multiprocessing
+from datetime import datetime, timezone
 import time
 import uuid
 
@@ -261,6 +262,7 @@ def run_primary_cycle_loop(
     supervisor=None,
     on_tick=None,
     stop_event=None,
+    progress=None,
 ):
     """Drive primary cycles from local durable readiness until interrupted.
 
@@ -293,6 +295,8 @@ def run_primary_cycle_loop(
             stormcell_last_successful
         )
 
+    progress = progress if progress is not None else {}
+    progress.update(phase="waiting", last_successful_activity=persisted_cycle_state.last_successful)
     last_successful = persisted_cycle_state.last_successful
     last_abandoned = persisted_cycle_state.last_abandoned
     selection_cursor = persisted_cycle_state.selection_cursor
@@ -393,6 +397,7 @@ def run_primary_cycle_loop(
                         f"(attempt {pending_attempt_count}/{retry_policy.max_attempts})"
                     )
 
+                    progress["phase"] = "cycling"
                     outcome = None
                     try:
                         if primary_lease is not None:
@@ -420,6 +425,7 @@ def run_primary_cycle_loop(
                         if primary_lease is not None:
                             primary_lease.release()
                     if outcome.completed:
+                        progress.update(phase="waiting", last_successful_activity=datetime.now(timezone.utc))
                         cycle_state_store.record_outcome(outcome, pending_attempt_count)
                         last_successful = dt
                         selection_cursor = max(
@@ -435,6 +441,7 @@ def run_primary_cycle_loop(
                             f"{len(outcome.produced_artifacts)} validated artifact(s)"
                         )
                     else:
+                        progress["phase"] = "degraded"
                         abandon = (not outcome.retryable
                                    or pending_attempt_count >= retry_policy.max_attempts)
                         cycle_state_store.record_outcome(
@@ -485,6 +492,7 @@ def run_primary_cycle_loop(
                 from EdgeWARN.ctam.preflight import StormProbDependencyError
                 if isinstance(exc, StormProbDependencyError):
                     raise
+                progress["phase"] = "degraded"
                 print(f"[Scheduler] Recoverable loop failure: {type(exc).__name__}: {exc}")
                 retry_not_before = time.monotonic() + retry_policy.delay_after(max(1, pending_attempt_count))
                 _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)

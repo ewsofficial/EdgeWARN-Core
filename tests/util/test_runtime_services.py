@@ -219,6 +219,7 @@ class TestPublicationAndClassification:
         assert set(SERVICE_STATES) == {
             "active",
             "stale",
+            "stalled",
             "disabled",
             "degraded",
             "unsupported-schema",

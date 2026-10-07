@@ -42,14 +42,14 @@ export async function createApp(options = {}) {
   app.get('/health/live', (req, res) => res.json({ status: 'ok', requestId: req.requestId, config: config.diagnostics }));
   app.get('/health/ready', async (req, res) => {
     const checks = await Promise.all([config.dataDir, config.guiDir, config.wpcDir].map(async (dir) => { try { return (await fs.stat(dir)).isDirectory(); } catch { return false; } }));
-    // Diagnostic only (decomposition Phase 3): readiness keeps its
-    // directory-based contract and never flips on an optional disabled or
-    // stale service.
-    res.status(checks.every(Boolean) ? 200 : 503).json({
-      status: checks.every(Boolean) ? 'ready' : 'not-ready',
+    const services = await servicesSummary();
+    const healthy = config.api.server.enabled_services.every((name) => ['active', 'degraded'].includes(services[name]?.state));
+    const ready = checks.every(Boolean) && healthy;
+    res.status(ready ? 200 : 503).json({
+      status: ready ? 'ready' : 'not-ready',
       requestId: req.requestId,
       config: config.diagnostics,
-      services: await servicesSummary(),
+      services,
     });
   });
   const analysis = createAnalysisService(repository); const renders = createRenderService(repository, config.api.render_defaults, config.api.artifacts.chunk_length_slack_bytes); const ancillary = createAncillaryServices(repository, { validation: config.api.validation, wpc: config.wpc });
@@ -60,6 +60,7 @@ export async function createApp(options = {}) {
   const serviceRegistry = createServiceRegistry({
     baseDir: config.baseDir,
     staleAfterSeconds: config.api.server.service_stale_after_seconds,
+    progressStaleAfterSeconds: config.api.server.service_progress_stale_after_seconds,
   });
   const servicesSummary = async () => Object.fromEntries(Object.entries(await serviceRegistry.states()).map(([name, entry]) => [name, {
     state: entry.state,

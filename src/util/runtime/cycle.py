@@ -343,6 +343,7 @@ class PrimaryCycleConfig:
     # ``None`` resolves runtime.consumers.core_readiness_seconds, the one-second
     # local check interval that replaced the old 15-second supervisor wait.
     readiness_check_seconds: float | None = None
+    max_cycle_seconds: float | None = None
 
 
 def readiness_handoff(config: PrimaryCycleConfig):
@@ -422,7 +423,7 @@ class ReadinessWatcher(threading.Thread):
     """
 
     def __init__(self, *, handoff, key, dependencies, base_dir, shared_state, owner,
-                 interval, stop_event, release, emit_phase, is_worker_alive, io=None):
+                 interval, stop_event, release, emit_phase, is_worker_alive, io=None, max_wait_seconds=None):
         super().__init__(name="core-readiness-watcher", daemon=True)
         self.handoff = handoff
         self.key = key
@@ -431,23 +432,29 @@ class ReadinessWatcher(threading.Thread):
         self.shared_state = shared_state
         self.owner = owner
         self.interval = max(0.05, float(interval))
-        self._stop = stop_event
+        self._stop_event = stop_event
         self._release = release
         self._emit_phase = emit_phase
         self._is_worker_alive = is_worker_alive
         self._io = io
         self.installed = {"core-integration-ready": False, "core-final-ready": False}
         self.reason = ""
+        self.terminal = False
+        self.deadline = time.monotonic() + max_wait_seconds if max_wait_seconds is not None else None
 
     def run(self):
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             if all(self.installed.values()):
                 return
             if not self._is_worker_alive():
                 return
-            self._stop.wait(self.interval)
-            if self._stop.is_set():
+            self._stop_event.wait(self.interval)
+            if self._stop_event.is_set():
                 break
+            if self.deadline is not None and time.monotonic() >= self.deadline:
+                self.reason = "integration/final readiness deadline exceeded"
+                self._finish_unavailable()
+                return
             try:
                 self._poll()
             except IngestRecordError as exc:
@@ -459,6 +466,7 @@ class ReadinessWatcher(threading.Thread):
     def _poll(self):
         if self.handoff.read("terminal", self.key) is not None:
             self.reason = "scan has a terminal ingest disposition"
+            self.terminal = True
             self._finish_unavailable()
             return
         if not self.installed["core-integration-ready"]:
@@ -535,6 +543,8 @@ def _run_primary_cycle_once(
     from common.pipeline.readiness import validate_phase_dependencies
 
     cycle_settings = section("cycle")
+    max_cycle_seconds = config.max_cycle_seconds if config.max_cycle_seconds is not None else cycle_settings["max_cycle_seconds"]
+    deadline = time.monotonic() + max_cycle_seconds
     log_queue = multiprocessing.Queue()
     shared_state = manager.dict()
 
@@ -568,7 +578,7 @@ def _run_primary_cycle_once(
         if phase not in released_phases:
             emit_phase(phase, status)
             released_phases.add(phase)
-        event.set()
+            event.set()
 
     if not config.handoff_enabled:
         return _unavailable_outcome(
@@ -653,13 +663,19 @@ def _run_primary_cycle_once(
                 integration_ready_event if name == "integration" else optional_complete_event,
                 "integration_released" if name == "integration" else "optional_complete",
                 status),
-            emit_phase=emit_phase, is_worker_alive=edgewarn_proc.is_alive)
+            emit_phase=emit_phase, is_worker_alive=edgewarn_proc.is_alive,
+            max_wait_seconds=min(max_cycle_seconds, section("ingest")["scan_deadline_seconds"] + interval))
         watcher.start()
 
         try:
             while edgewarn_proc.is_alive() or not log_queue.empty():
                 drain_log_queue(log_queue)
-                time.sleep(cycle_settings["log_drain_poll_seconds"])
+                if ((stop_event is not None and stop_event.is_set()) or time.monotonic() >= deadline
+                        or (watcher.reason and not watcher.terminal)):
+                    shared_state["watchdog_failure"] = "cycle stopped or progress deadline exceeded"
+                    watcher_stop.set()
+                    break
+                time.sleep(min(cycle_settings["log_drain_poll_seconds"], max_cycle_seconds, 0.1))
         except KeyboardInterrupt:
             print("CTRL+C detected, stopping primary cycle workers...")
             watcher_stop.set()
@@ -673,6 +689,16 @@ def _run_primary_cycle_once(
         raise
     finally:
         watcher_stop.set()
+        if watcher is not None:
+            watcher.join(timeout=5)
+        # Release barriers before termination: a killed process can leave an
+        # Event's condition lock held, making a later parent set() hang.
+        release(integration_ready_event, "integration_released",
+                "ready" if bool(shared_state.get("edgewarn_integration_inputs_ready")) else "unavailable")
+        release(optional_complete_event, "optional_complete",
+                "complete" if bool(shared_state.get("optional_inputs_complete")) else "failed")
+        if edgewarn_proc.pid is not None:
+            edgewarn_proc.join(timeout=0.2)
         started_processes.shutdown()
         drain_log_queue(log_queue)
     if watcher is not None:
@@ -714,11 +740,15 @@ def _run_primary_cycle_once(
     # A terminal ingest disposition or a StormProb gate over committed,
     # immutable inputs gives the same answer on every retry, so the scan is
     # skipped at once instead of re-running detection against it.
-    scan_terminal = bool(watcher is not None and watcher.reason)
+    scan_terminal = bool(watcher is not None and watcher.terminal)
     retryable = not (scan_terminal or stormprob_skip) and any(
         stage.status in {CycleStatus.UNAVAILABLE, CycleStatus.FAILED}
         for stage in stages.values()
     )
+    if shared_state.get("watchdog_failure"):
+        stages["watchdog"] = CycleStageResult(CycleStatus.UNAVAILABLE,
+                                              errors=(shared_state["watchdog_failure"],))
+        retryable = True
     final_manifest = (CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
                       or CycleInputManifest.from_dict(shared_state.get("integration_manifest"))
                       or CycleInputManifest.from_dict(shared_state.get("detection_manifest")))

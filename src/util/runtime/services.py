@@ -53,7 +53,7 @@ ROUTE_SERVICE_REQUIREMENTS: dict[str, str] = {
 }
 
 #: Heartbeat states reported by :func:`classify_heartbeat_state`.
-SERVICE_STATES = ("active", "stale", "disabled", "degraded", "unsupported-schema")
+SERVICE_STATES = ("active", "stale", "stalled", "disabled", "degraded", "unsupported-schema")
 
 
 class HeartbeatSchemaError(ValueError):
@@ -223,6 +223,7 @@ def classify_heartbeat_state(
     *,
     stale_after_seconds: float,
     now: datetime | None = None,
+    progress_stale_after_seconds: float | None = None,
 ) -> tuple[str, ServiceHeartbeat | None]:
     """Classify one registry file into a service state.
 
@@ -253,6 +254,12 @@ def classify_heartbeat_state(
         return ("stale", beat)
     if age > stale_after_seconds:
         return ("stale", beat)
+    if progress_stale_after_seconds is not None:
+        activity = beat.last_successful_activity
+        if beat.service in {"ingest", "edgewarn"} or activity is not None:
+            progress_age = (reference - activity).total_seconds() if activity else float("inf")
+            if progress_age > progress_stale_after_seconds or progress_age < -stale_after_seconds:
+                return ("stalled", beat)
     if beat.degraded_children:
         return ("degraded", beat)
     return ("active", beat)

@@ -11,7 +11,7 @@ const limits = { json: 2_000_000, binary: 2_000_000, image: 2_000_000 };
 const cache = { max_entries: 10, max_size_bytes: 4_000_000 };
 
 function heartbeat(service = 'edgewarn') {
-  return JSON.stringify({ schema_version: 1, service, pid: 1, run_id: 'test', updated_at: new Date().toISOString(), phase: 'cycling', degraded_children: [] });
+  return JSON.stringify({ schema_version: 1, service, pid: 1, run_id: 'test', updated_at: new Date().toISOString(), last_successful_activity: new Date().toISOString(), phase: 'cycling', degraded_children: [] });
 }
 
 async function makeBase({ modules, payloads = {}, heartbeatService = 'edgewarn' } = {}) {

@@ -78,6 +78,8 @@ background_intervals:
 
 # Durable primary-cycle state. Retry settings control recovery from transient ingest failures.
 cycle:
+  # Bound worker I/O and integration waits; timeout is a retryable scan failure.
+  max_cycle_seconds: 300
   state_file: {dir: DATA_DIR, name: runtime/cycle_state.json}
 
   retry:

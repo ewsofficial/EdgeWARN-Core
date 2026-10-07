@@ -102,8 +102,11 @@ and `/robots.txt` remain available.
 
 `/health/ready` reports `services.ingest`, `services.edgewarn`, `services.ewmrs`,
 and `services.nexrad`, each with `state`, `phase`, `lastSeen`, and
-`degradedChildren`. States are `active`, `stale`, `disabled`, `degraded`, or
-`unsupported-schema`. Readiness still depends on the runtime directories.
-Ingest has no route ownership: its outage does not gate already published
-artifacts. Core, EWMRS, and NEXRAD retain their existing route gates.
+`degradedChildren`. States are `active`, `stale`, `stalled`, `disabled`, `degraded`, or
+`unsupported-schema`. Readiness returns 503 if a runtime directory is missing or
+any service in `api.server.enabled_services` is missing, stale, stalled, or
+unsupported. Set that list to the deployed Python topology. Core and ingest
+progress is judged against `api.server.service_progress_stale_after_seconds`.
+Cell, storm-snapshot, and alert routes continue serving published artifacts
+through producer outages. EWMRS and NEXRAD retain their route gates.
 `/health/live` describes API liveness and configuration, without a services block.

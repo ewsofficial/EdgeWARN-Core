@@ -20,6 +20,7 @@ const freshHeartbeat = (overrides = {}) => JSON.stringify({
   pid: 4321,
   run_id: 'run-abc',
   updated_at: new Date().toISOString(),
+  last_successful_activity: new Date().toISOString(),
   phase: 'supervising',
   degraded_children: [],
   ...overrides,
@@ -169,16 +170,22 @@ describe('SERVICE_NOT_ENABLED gating for the edgewarn route family', () => {
     return app;
   }
 
-  it('returns 503 problem+json on analysis routes when the service is disabled', async () => {
+  it('serves published analysis artifacts while Core is disabled', async () => {
     const app = await createAppWithBaseDir();
-    for (const endpoint of ['/api/v3/cells', '/api/v3/storm-snapshots', '/api/v3/alert-snapshots']) {
-      const response = await request(app).get(endpoint).expect(503).expect('Content-Type', /application\/problem\+json/);
-      expect(response.body).toMatchObject({
-        code: 'SERVICE_NOT_ENABLED',
-        service: 'edgewarn',
-        state: 'disabled',
-      });
+    for (const endpoint of ['/api/v3/cells', '/api/v3/storm-snapshots', '/api/v3/alert-snapshots?source=edgewarn']) {
+      await request(app).get(endpoint).expect(200);
     }
+    await request(app).get('/health/ready').expect(503);
+  });
+
+  it('reports stalled progress while still serving cells and alerts', async () => {
+    const app = await createAppWithBaseDir();
+    await writeHeartbeat(baseDir, 'edgewarn', freshHeartbeat({ service: 'edgewarn',
+      last_successful_activity: new Date(Date.now() - 3600000).toISOString() }));
+    const ready = await request(app).get('/health/ready').expect(503);
+    expect(ready.body.services.edgewarn.state).toBe('stalled');
+    await request(app).get('/api/v3/cells').expect(200);
+    await request(app).get('/api/v3/alert-snapshots?source=edgewarn').expect(200);
   });
 
   it('serves analysis routes normally when the service heartbeats as active', async () => {
@@ -246,20 +253,20 @@ describe('SERVICE_NOT_ENABLED gating for the nexrad route family', () => {
     await writeHeartbeat(baseDir, 'nexrad', freshHeartbeat({ degraded_children: ['NEXRAD Ingest'] }));
     await request(app).get('/api/v3/radar-sites').expect(200);
 
-    const ready = await request(app).get('/health/ready').expect(200);
+    const ready = await request(app).get('/health/ready').expect(503);
     expect(ready.body.services.nexrad).toEqual({
       state: 'degraded',
       phase: 'supervising',
       lastSeen: expect.any(String),
       degradedChildren: ['NEXRAD Ingest'],
     });
-    // Readiness keeps its directory-based contract regardless of services.
-    expect(ready.body.status).toBe('ready');
+    // Missing enabled producers make readiness fail even with healthy directories.
+    expect(ready.body.status).toBe('not-ready');
   });
 
   it('reports every canonical service in the health services block', async () => {
     const app = await createAppWithBaseDir();
-    const ready = await request(app).get('/health/ready').expect(200);
+    const ready = await request(app).get('/health/ready').expect(503);
     expect(Object.keys(ready.body.services).sort()).toEqual(['edgewarn', 'ewmrs', 'ingest', 'nexrad']);
     expect(ready.body.services.edgewarn).toEqual({ state: 'disabled', phase: null, lastSeen: null, degradedChildren: [] });
   });
@@ -272,5 +279,16 @@ describe('OpenAPI service diagnostics', () => {
     expect(spec.components.schemas.Services.required.sort()).toEqual(['edgewarn', 'ewmrs', 'ingest', 'nexrad']);
     expect(spec.paths['/health/ready'].get.responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/Readiness');
     expect(requiredServiceForRoute('/api/v3/render-products')).toBe('ewmrs');
+  });
+});
+
+
+describe('progress-aware classification', () => {
+  it('detects stalled Core despite a fresh liveness heartbeat', () => {
+    const now = new Date();
+    const heartbeat = freshHeartbeat({ service: 'edgewarn',
+      last_successful_activity: new Date(now.getTime() - 601000).toISOString() });
+    expect(classifyHeartbeatState(heartbeat, { service: 'edgewarn',
+      staleAfterSeconds: 30, progressStaleAfterSeconds: 600, now }).state).toBe('stalled');
   });
 });

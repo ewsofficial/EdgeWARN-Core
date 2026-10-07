@@ -22,7 +22,7 @@ export const ROUTE_SERVICE_REQUIREMENTS = {
   '/api/v3/radar-sites': 'nexrad',
 };
 
-const SERVICE_STATES = ['active', 'stale', 'disabled', 'degraded', 'unsupported-schema'];
+const SERVICE_STATES = ['active', 'stale', 'stalled', 'disabled', 'degraded', 'unsupported-schema'];
 
 export function servicesDir(baseDir) {
   return path.join(baseDir, 'state', 'realtime', 'services');
@@ -82,7 +82,7 @@ function parseHeartbeat(service, payload) {
   };
 }
 
-export function classifyHeartbeatState(raw, { service, staleAfterSeconds, now = new Date() }) {
+export function classifyHeartbeatState(raw, { service, staleAfterSeconds, progressStaleAfterSeconds, now = new Date() }) {
   if (raw === null) return { state: 'disabled', heartbeat: null };
   let payload;
   try {
@@ -96,6 +96,14 @@ export function classifyHeartbeatState(raw, { service, staleAfterSeconds, now = 
   if (ageSeconds < -staleAfterSeconds || ageSeconds > staleAfterSeconds) {
     return { state: 'stale', heartbeat };
   }
+  if (progressStaleAfterSeconds !== undefined) {
+    const activity = heartbeat.lastSuccessfulActivity;
+    const requiresProgress = ['ingest', 'edgewarn'].includes(service);
+    const age = activity ? (now.getTime() - activity.getTime()) / 1000 : Infinity;
+    if ((requiresProgress || activity) && (age > progressStaleAfterSeconds || age < -staleAfterSeconds)) {
+      return { state: 'stalled', heartbeat };
+    }
+  }
   if (heartbeat.degradedChildren.length > 0) return { state: 'degraded', heartbeat };
   return { state: 'active', heartbeat };
 }
@@ -104,7 +112,7 @@ let cache = new Map();
 const CACHE_TTL_MS = 1000;
 
 async function readCachedStates(baseDir, options) {
-  const { staleAfterSeconds, now } = options;
+  const { staleAfterSeconds, progressStaleAfterSeconds, now } = options;
   const entry = cache.get(baseDir);
   const nowMs = Date.now();
   if (entry && nowMs - entry.readAt < CACHE_TTL_MS) return entry.states;
@@ -117,11 +125,11 @@ async function readCachedStates(baseDir, options) {
       // Match Python: an absent heartbeat means intentionally disabled or not
       // started; an existing-but-unreadable file is an invalid artifact.
       states[name] = error?.code === 'ENOENT'
-        ? classifyHeartbeatState(null, { service: name, staleAfterSeconds, now })
+        ? classifyHeartbeatState(null, { service: name, staleAfterSeconds, progressStaleAfterSeconds, now })
         : { state: 'unsupported-schema', heartbeat: null };
       continue;
     }
-    states[name] = classifyHeartbeatState(raw, { service: name, staleAfterSeconds, now });
+    states[name] = classifyHeartbeatState(raw, { service: name, staleAfterSeconds, progressStaleAfterSeconds, now });
   }
   cache.set(baseDir, { readAt: nowMs, states });
   return states;
@@ -131,25 +139,25 @@ export function resetServiceStateCache() {
   cache = new Map();
 }
 
-export async function scanServiceStates(baseDir, { staleAfterSeconds, now = new Date(), cached = true }) {
+export async function scanServiceStates(baseDir, { staleAfterSeconds, progressStaleAfterSeconds, now = new Date(), cached = true }) {
   if (!cached) {
     const saved = cache.get(baseDir);
     cache.delete(baseDir);
     try {
-      return await readCachedStates(baseDir, { staleAfterSeconds, now });
+      return await readCachedStates(baseDir, { staleAfterSeconds, progressStaleAfterSeconds, now });
     } finally {
       if (saved) cache.set(baseDir, saved);
     }
   }
-  return readCachedStates(baseDir, { staleAfterSeconds, now });
+  return readCachedStates(baseDir, { staleAfterSeconds, progressStaleAfterSeconds, now });
 }
 
-export function createServiceRegistry({ baseDir, staleAfterSeconds }) {
+export function createServiceRegistry({ baseDir, staleAfterSeconds, progressStaleAfterSeconds }) {
   return {
     baseDir,
     staleAfterSeconds,
     async states(now) {
-      return scanServiceStates(baseDir, { staleAfterSeconds, now });
+      return scanServiceStates(baseDir, { staleAfterSeconds, progressStaleAfterSeconds, now });
     },
     async stateFor(service, now) {
       return (await this.states(now))[service];

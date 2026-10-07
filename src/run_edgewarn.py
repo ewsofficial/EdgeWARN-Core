@@ -104,6 +104,7 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, _request_stop)
 
+    progress = {"phase": "starting", "last_successful_activity": None}
     heartbeat_destination = str(services_dir(args.base_dir) / f"{SERVICE_NAME}.json")
     def refresh_heartbeat():
         beat = ServiceHeartbeat(
@@ -111,7 +112,8 @@ def main():
             pid=os.getpid(),
             run_id=run_id,
             updated_at=datetime.now(timezone.utc),
-            phase="cycling",
+            phase=progress["phase"],
+            last_successful_activity=progress["last_successful_activity"],
             version=get_release_version(),
             degraded_children=(),
         )
@@ -133,6 +135,7 @@ def main():
             supervisor=None,
             on_tick=None,
             stop_event=stop_event,
+            progress=progress,
         )
     finally:
         stop_event.set()

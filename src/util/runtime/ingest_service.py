@@ -359,6 +359,7 @@ class IngestService:
         self._metrics = {"polls": 0, "discovered": 0, "committed": 0, "duplicates": 0,
                          "listing_overruns": 0, "coalesced_ticks": 0, "expired_scans": 0,
                          "retired_inputs": 0, "render_notifications": 0}
+        self._last_successful_activity = None
         self._last_reconcile: float | None = None
         self._maintenance_pending = False
         self._status_pending = False
@@ -870,6 +871,8 @@ class IngestService:
                         continue
                     try:
                         scans = self._apply(item)
+                        if item.kind in {"completion", "maintenance", "startup"}:
+                            self._last_successful_activity = self._wall()
                         if scans:
                             pending_scans.update(scans)
                     except Exception as exc:
@@ -1192,6 +1195,8 @@ class IngestService:
             "notifications": self._metrics["render_notifications"],
             "duplicates": self._metrics["duplicates"],
             "last_poll_at": self._last_poll_at,
+            "last_successful_activity": self._last_successful_activity,
+            "publisher_alive": self._publisher is not None and self._publisher.is_alive(),
             "reasons": reasons,
             **self.ledger.counts(),
         }

@@ -92,7 +92,14 @@
         "production_version_label": "2.x",
         "request_timeout_ms": 30000,
         "service_stale_after_seconds": 30,
-        "v3_api_version": "3.0.2"
+        "v3_api_version": "3.0.2",
+        "service_progress_stale_after_seconds": 600,
+        "enabled_services": [
+          "ingest",
+          "edgewarn",
+          "ewmrs",
+          "nexrad"
+        ]
       },
       "validation": {
         "radar_products": [
@@ -2029,7 +2036,8 @@
         "state_file": {
           "dir": "DATA_DIR",
           "name": "runtime/cycle_state.json"
-        }
+        },
+        "max_cycle_seconds": 300
       },
       "goes_coordination": {
         "pause_ingest_during_render": false,

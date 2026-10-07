@@ -561,3 +561,19 @@ class TestCoreImportsNoAcquisition:
             encoding="utf-8")
         assert "MRMSUpdateChecker" not in source
         assert "publish_registry" not in source
+
+
+def test_cycle_watchdog_bounds_a_missing_integration_snapshot(producer, worker):
+    import time
+    registry, _, old_inventory = producer
+    dependencies = make_dependencies(registry, mandatory_integration=(PRECIP_RATE,))
+    inventory = InputInventory(old_inventory.base_dir, fingerprint=dependencies.fingerprint, run_id=PRODUCER_RUN)
+    for product in CHECKS:
+        notify(inventory, commit(inventory, product))
+    publish(inventory, dependencies)
+    started = time.monotonic()
+    outcome = run_cycle(inventory.base_dir, dependencies, overrides={"max_cycle_seconds": 0.1})
+    assert time.monotonic() - started < 3
+    assert not outcome.completed
+    assert outcome.retryable
+    assert "watchdog" in outcome.stages

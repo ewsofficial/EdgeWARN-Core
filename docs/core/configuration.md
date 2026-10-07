@@ -189,3 +189,12 @@ per-layer work within `ewmrs_pipeline.input_jobs.pending_max_jobs`, retrying
 failures independently. Size this bound for the configured catalog (currently
 about 46 layers per RAP arrival). Change the configured layers/templates to
 change the rendered set; do not silently omit advertised RAP products.
+
+`runtime.cycle.max_cycle_seconds` bounds a realtime Core worker, including I/O
+and local integration waits. A timeout terminates the worker, releases its pins,
+and returns a retryable unavailable outcome. Shutdown also interrupts this wait.
+Core heartbeats report the current phase and last completed-cycle activity;
+ingest reports its last successful publisher pass and publisher liveness.
+`api.server.service_progress_stale_after_seconds` detects stalled Core/ingest,
+and `api.server.enabled_services` selects the deployed producers required by
+`/health/ready`. Restart Python and Node services after changing these settings.
