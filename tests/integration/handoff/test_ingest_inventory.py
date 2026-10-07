@@ -670,3 +670,18 @@ def test_matching_state_is_reused_and_corruption_is_not_quarantined(inventory):
     assert inventory.handoff.quarantine_stale() == ()
     with pytest.raises(IngestRecordError, match='Cannot read'):
         inventory.handoff.read('input', item.input_id)
+
+
+def test_record_enumeration_isolates_corruption_and_disappearance(inventory, monkeypatch):
+    first = add(inventory, "A")
+    second = add(inventory, "B")
+    inventory.handoff.path("input", first.input_id).write_text("invalid json")
+    assert [r.key for r in inventory.handoff.records("input")] == [second.input_id]
+    assert list(inventory.handoff.path("input", first.input_id).parent.glob("*.corrupt-*"))
+    original = inventory.handoff.read
+    def disappearing(kind, key):
+        if kind == "input":
+            inventory.handoff.path(kind, key).unlink(missing_ok=True)
+        return original(kind, key)
+    monkeypatch.setattr(inventory.handoff, "read", disappearing)
+    assert inventory.handoff.records("input") == ()

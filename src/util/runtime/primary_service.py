@@ -348,101 +348,80 @@ def run_primary_cycle_loop(
 
     try:
         while stop_event is None or not stop_event.is_set():
-            if not require_ingest_producer(registry, cycle_config.dependencies, log=print):
-                _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
-                continue
+            try:
+                if not require_ingest_producer(registry, cycle_config.dependencies, log=print):
+                    _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
+                    continue
 
-            pending = reader.pending_scans()
-            if pending_timestamp is None and pending:
-                # Realtime takes the newest ready scan. Every older ready scan
-                # is superseded, so a cold-start backlog never makes Core work
-                # forward through stale data; tracking still only moves forward.
-                selection = pending[-1]
-                for older in pending[:-1]:
-                    reader.skip(
-                        older,
-                        f"superseded by newer ready scan {selection.isoformat()}",
-                    )
-                if selection_cursor is not None and selection <= selection_cursor:
-                    reader.skip(
-                        selection,
-                        "start readiness arrived at or before the processing cursor; "
-                        "processing continues forward only",
-                    )
-                    selection = None
-                if selection is not None:
-                    pending_timestamp = selection
-                    pending_attempt_count = 0
-                    print(
-                        f"[Scheduler] Local check set complete for {pending_timestamp}; "
-                        "scheduling detection"
-                    )
+                pending = reader.pending_scans()
+                if pending_timestamp is None and pending:
+                    # Realtime takes the newest ready scan. Every older ready scan
+                    # is superseded, so a cold-start backlog never makes Core work
+                    # forward through stale data; tracking still only moves forward.
+                    selection = pending[-1]
+                    for older in pending[:-1]:
+                        reader.skip(
+                            older,
+                            f"superseded by newer ready scan {selection.isoformat()}",
+                        )
+                    if selection_cursor is not None and selection <= selection_cursor:
+                        reader.skip(
+                            selection,
+                            "start readiness arrived at or before the processing cursor; "
+                            "processing continues forward only",
+                        )
+                        selection = None
+                    if selection is not None:
+                        pending_timestamp = selection
+                        pending_attempt_count = 0
+                        print(
+                            f"[Scheduler] Local check set complete for {pending_timestamp}; "
+                            "scheduling detection"
+                        )
 
-            should_run_pipeline = (
-                pending_timestamp is not None
-                and time.monotonic() >= retry_not_before
-            )
-
-            if should_run_pipeline:
-                dt = pending_timestamp
-                pending_attempt_count += 1
-                cycle_state_store.record_attempt(dt, pending_attempt_count)
-                print(
-                    f"[Scheduler] Starting primary cycle for {dt} "
-                    f"(attempt {pending_attempt_count}/{retry_policy.max_attempts})"
+                should_run_pipeline = (
+                    pending_timestamp is not None
+                    and time.monotonic() >= retry_not_before
                 )
 
-                outcome = None
-                try:
-                    if primary_lease is not None:
-                        primary_lease.acquire(dt)
-                    outcome = run_primary_cycle_once(
-                        dt,
-                        manager,
-                        config=cycle_config,
-                        stop_event=stop_event,
-                    )
-                except Exception as exc:
-                    from EdgeWARN.ctam.preflight import StormProbDependencyError
-                    if isinstance(exc, StormProbDependencyError):
-                        cycle_state_store.record_outcome(
-                            CycleOutcome(
-                                dt,
-                                {"stormprob": CycleStageResult(
-                                    CycleStatus.FAILED, errors=(str(exc),))},
-                                retryable=False,
-                            ),
-                            pending_attempt_count,
-                        )
-                    raise
-                finally:
-                    if primary_lease is not None:
-                        primary_lease.release()
-                if outcome.completed:
-                    cycle_state_store.record_outcome(outcome, pending_attempt_count)
-                    last_successful = dt
-                    selection_cursor = max(
-                        value
-                        for value in (last_successful, last_abandoned)
-                        if value is not None
-                    )
-                    pending_timestamp = None
-                    pending_attempt_count = 0
-                    retry_not_before = 0.0
+                if should_run_pipeline:
+                    dt = pending_timestamp
+                    pending_attempt_count += 1
+                    cycle_state_store.record_attempt(dt, pending_attempt_count)
                     print(
-                        f"Primary cycle for {dt} finished with "
-                        f"{len(outcome.produced_artifacts)} validated artifact(s)"
+                        f"[Scheduler] Starting primary cycle for {dt} "
+                        f"(attempt {pending_attempt_count}/{retry_policy.max_attempts})"
                     )
-                else:
-                    abandon = (not outcome.retryable
-                               or pending_attempt_count >= retry_policy.max_attempts)
-                    cycle_state_store.record_outcome(
-                        outcome,
-                        pending_attempt_count,
-                        abandoned=abandon,
-                    )
-                    if abandon:
-                        last_abandoned = dt
+
+                    outcome = None
+                    try:
+                        if primary_lease is not None:
+                            primary_lease.acquire(dt)
+                        outcome = run_primary_cycle_once(
+                            dt,
+                            manager,
+                            config=cycle_config,
+                            stop_event=stop_event,
+                        )
+                    except Exception as exc:
+                        from EdgeWARN.ctam.preflight import StormProbDependencyError
+                        if isinstance(exc, StormProbDependencyError):
+                            cycle_state_store.record_outcome(
+                                CycleOutcome(
+                                    dt,
+                                    {"stormprob": CycleStageResult(
+                                        CycleStatus.FAILED, errors=(str(exc),))},
+                                    retryable=False,
+                                ),
+                                pending_attempt_count,
+                            )
+                        raise
+                    finally:
+                        if primary_lease is not None:
+                            primary_lease.release()
+                    if outcome.completed:
+                        cycle_state_store.record_outcome(outcome, pending_attempt_count)
+                        last_successful = dt
                         selection_cursor = max(
                             value
                             for value in (last_successful, last_abandoned)
@@ -452,34 +431,63 @@ def run_primary_cycle_loop(
                         pending_attempt_count = 0
                         retry_not_before = 0.0
                         print(
-                            f"[Scheduler] Primary cycle for {dt} was explicitly "
-                            f"abandoned after {pending_attempt_count} attempt(s); "
-                            f"errors={list(outcome.errors)}"
+                            f"Primary cycle for {dt} finished with "
+                            f"{len(outcome.produced_artifacts)} validated artifact(s)"
                         )
                     else:
-                        delay = retry_policy.delay_after(pending_attempt_count)
-                        retry_not_before = time.monotonic() + delay
+                        abandon = (not outcome.retryable
+                                   or pending_attempt_count >= retry_policy.max_attempts)
+                        cycle_state_store.record_outcome(
+                            outcome,
+                            pending_attempt_count,
+                            abandoned=abandon,
+                        )
+                        if abandon:
+                            last_abandoned = dt
+                            selection_cursor = max(
+                                value
+                                for value in (last_successful, last_abandoned)
+                                if value is not None
+                            )
+                            pending_timestamp = None
+                            pending_attempt_count = 0
+                            retry_not_before = 0.0
+                            print(
+                                f"[Scheduler] Primary cycle for {dt} was explicitly "
+                                f"abandoned after {pending_attempt_count} attempt(s); "
+                                f"errors={list(outcome.errors)}"
+                            )
+                        else:
+                            delay = retry_policy.delay_after(pending_attempt_count)
+                            retry_not_before = time.monotonic() + delay
+                            print(
+                                f"[Scheduler] Primary cycle for {dt} failed and remains "
+                                f"pending; retrying in {delay:.1f}s; "
+                                f"errors={list(outcome.errors)}"
+                            )
+
+                else:
+                    if pending_timestamp is not None:
+                        remaining = max(0.0, retry_not_before - time.monotonic())
                         print(
-                            f"[Scheduler] Primary cycle for {dt} failed and remains "
-                            f"pending; retrying in {delay:.1f}s; "
-                            f"errors={list(outcome.errors)}"
+                            f"[Scheduler] Retry for {pending_timestamp} is pending "
+                            f"for another {remaining:.1f}s"
+                        )
+                    else:
+                        print(
+                            "[Scheduler] No locally complete check set yet; waiting for the "
+                            "ingest service to publish scan readiness."
                         )
 
-            else:
-                if pending_timestamp is not None:
-                    remaining = max(0.0, retry_not_before - time.monotonic())
-                    print(
-                        f"[Scheduler] Retry for {pending_timestamp} is pending "
-                        f"for another {remaining:.1f}s"
-                    )
-                else:
-                    print(
-                        "[Scheduler] No locally complete check set yet; waiting for the "
-                        "ingest service to publish scan readiness."
-                    )
-
-            # Wait/Check loop — also monitor any supervised children
-            _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
+                # Wait/Check loop — also monitor any supervised children
+                _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
+            except Exception as exc:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                if isinstance(exc, StormProbDependencyError):
+                    raise
+                print(f"[Scheduler] Recoverable loop failure: {type(exc).__name__}: {exc}")
+                retry_not_before = time.monotonic() + retry_policy.delay_after(max(1, pending_attempt_count))
+                _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
 
     except KeyboardInterrupt:
         print("CTRL+C detected, exiting ...")

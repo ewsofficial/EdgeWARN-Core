@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 import re
@@ -318,14 +319,34 @@ class IngestHandoff:
     def records(self, kind):
         if kind in {'core-start-ready', 'core-integration-ready', 'core-final-ready', 'terminal', 'scan-state'}:
             paths = sorted((self.root / 'scans').glob(f'*/{kind}.json'))
-            self._forget_missing(lambda p: p.name == f'{kind}.json' and p.parent.parent == self.root / 'scans', paths)
-            return tuple(self.read(kind, path.parent.name) for path in paths)
-        key = '20000101T000000Z' if kind == 'core-state' else 'poll-status' if kind == 'poll-status' else '0' * 64
-        directory = self.path(kind, key).parent
-        paths = [self.path(kind, key)] if kind == 'poll-status' else sorted(directory.glob('*.json'))
-        if kind != 'poll-status':
-            self._forget_missing(lambda p: p.parent == directory, paths)
-        return tuple(record for path in paths if (record := self.read(kind, path.stem)) is not None)
+            key_for = lambda path: path.parent.name
+            belongs = lambda p: p.name == f'{kind}.json' and p.parent.parent == self.root / 'scans'
+        else:
+            key = '20000101T000000Z' if kind == 'core-state' else 'poll-status' if kind == 'poll-status' else '0' * 64
+            directory = self.path(kind, key).parent
+            paths = [self.path(kind, key)] if kind == 'poll-status' else sorted(directory.glob('*.json'))
+            key_for = lambda path: path.stem
+            belongs = lambda p: p.parent == directory
+        self._forget_missing(belongs, paths)
+        records = []
+        for path in paths:
+            try:
+                record = self.read(kind, key_for(path))
+            except IngestRecordError as exc:
+                if 'Dependency fingerprint mismatch' in str(exc):
+                    raise
+                logging.getLogger(__name__).warning('Skipping unreadable handoff record %s: %s', path, exc)
+                # Preserve evidence; atomic rename removes only this bad record
+                # from enumeration. Direct reads remain strict.
+                try:
+                    path.rename(path.with_suffix(f'.corrupt-{uuid.uuid4().hex}'))
+                except OSError:
+                    pass
+                self._parsed.pop(path, None)
+                continue
+            if record is not None:
+                records.append(record)
+        return tuple(records)
 
     def quarantine_stale(self):
         """Move aside durable state written under a different dependency agreement.

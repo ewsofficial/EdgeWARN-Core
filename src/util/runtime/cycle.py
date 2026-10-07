@@ -498,7 +498,17 @@ class ReadinessWatcher(threading.Thread):
             print(f"[Readiness] WARN: {message}", flush=True)
 
 
-def run_primary_cycle_once(
+def run_primary_cycle_once(dt, manager, *, config: PrimaryCycleConfig, stop_event=None):
+    from util.runtime.ingest_handoff import IngestRecordError
+
+    try:
+        return _run_primary_cycle_once(dt, manager, config=config, stop_event=stop_event)
+    except (OSError, IngestRecordError) as exc:
+        release_pin_safely(readiness_handoff(config), f"core:{canonical_cycle_id(dt)}")
+        return _unavailable_outcome(dt, f"Transient readiness failure: {type(exc).__name__}: {exc}")
+
+
+def _run_primary_cycle_once(
     dt,
     manager,
     *,

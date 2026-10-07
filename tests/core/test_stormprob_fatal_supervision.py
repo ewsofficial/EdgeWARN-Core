@@ -140,3 +140,30 @@ class SimpleDependencies:
     """Only the fingerprint is read on this path."""
 
     fingerprint = 'a' * 64
+
+
+@pytest.mark.parametrize("where", ["selection", "cycle"])
+def test_transient_failure_does_not_exit_loop(tmp_path, monkeypatch, where):
+    from util.runtime.handoff import InputLockTimeout
+    dt = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
+    calls = []
+    stop = threading.Event()
+    def pending():
+        if where == "selection" and not calls:
+            calls.append("selection-error")
+            raise InputLockTimeout("injected")
+        return (dt,)
+    _install_loop_stubs(monkeypatch, tmp_path / "state.json", pending)
+    def cycle(*args, **kwargs):
+        calls.append("cycle")
+        if where == "cycle" and calls.count("cycle") == 1:
+            raise OSError("injected IO failure")
+        stop.set()
+        return CycleOutcome(dt, {"edgewarn": CycleStageResult(CycleStatus.COMPLETED)}, retryable=False)
+    monkeypatch.setattr(primary_service, "run_primary_cycle_once", cycle)
+    import itertools
+    clock = itertools.count(1_000_000_000, 100)
+    monkeypatch.setattr(primary_service.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(primary_service, "_wait_ticks", lambda *args: None)
+    primary_service.run_primary_cycle_loop(cycle_config=_config(tmp_path), stop_event=stop)
+    assert CycleStateStore(tmp_path / "state.json").load().last_successful == dt

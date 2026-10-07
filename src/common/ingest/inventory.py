@@ -32,6 +32,8 @@ class InputInventory:
 
     def _commit_input(self, completed):
         self._validate_completion(completed)
+        # A malformed existing identity must never be silently overwritten.
+        self.handoff.read('input', completed.input_id)
         for existing in (*self.handoff.records('input'), *self.handoff.records('retired-input')):
             raw = existing.data['input']
             if (raw['family'], raw['product'], raw['analysis_time']) == (
