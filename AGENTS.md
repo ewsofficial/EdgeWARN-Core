@@ -1,53 +1,33 @@
 # EdgeWARN-Core Agent Guide
 
-## Scope and instruction precedence
+## Scope and precedence
 
-This file applies to the entire repository. Many source and test subtrees have
-more specific `AGENTS.md` files; read and follow every applicable guide before
-editing a file. The closest guide to the file being changed takes precedence
-when instructions differ.
+This guide applies to the repository. Read all applicable subtree AGENTS.md
+files before editing; the closest guide takes precedence.
 
-## What this repository is
+## Runtime ownership
 
-EdgeWARN-Core 3.0.2 is the backend for the EdgeWARN weather platform. It is a
-mixed Python and Node.js system with four independently deployable runtime
-surfaces:
+Four deployable surfaces:
 
-- **Core (Python):** MRMS/RAP/GLM ingestion, storm-cell detection, optional
-  tracking and lineage, multi-source enrichment, CTAM execution, StormProb,
-  alerts, and API index publication.
-- **EWMRS (Python):** MRMS and GOES raster rendering, RAP Uint16 products,
-  tiling, METAR/NWS/WPC accessories, and GUI artifact cleanup.
-- **NEXRAD (Python):** Level-II discovery, ingest, parsing, retention, and
-  compressed polar rendering.
-- **Unified API (Node.js):** an Express service that reads runtime artifacts
-  from the filesystem and exposes only the versioned v3 API.
+- Ingest (Python): MRMS/RAP/scan-time GLM acquisition, validated inventory,
+  immutable Core readiness, and reference-aware retention.
+- Core (Python): detection, tracking/lineage, multi-source enrichment, CTAM,
+  StormProb, alerts, and filesystem API publication.
+- NEXRAD (Python): Level-II discovery, acquisition, parsing, retention, and
+  compressed polar serialization.
+- Unified API (Node): filesystem readers and versioned v3 HTTP endpoints.
 
-The Python services are separate processes, not threads inside one monolith.
-They coordinate through atomic records beneath `<BASE_DIR>/state/realtime/`.
-Core publishes cycle phase records, EWMRS consumes them and maintains a
-checkpoint, and all services publish heartbeats used by the API service gate.
+Python services are separate processes. Ingest publishes durable readiness
+under `<BASE_DIR>/state/realtime/ingest/v1/`; Core consumes exact pinned inputs.
+All services publish heartbeats and own single-instance locks. The Node API
+is deployed separately from the processing image and `edgewarn run`.
 
-The Node API is a separate deployment and is not started by the Python Docker
-image or by `edgewarn run`.
+## Dependencies and setup
 
-## Technology and dependency authorities
-
-- Python 3.13 in the Conda environment named `EdgeWARN`
-- NumPy, SciPy, xarray, rasterio/rioxarray, Shapely, scikit-image, cfgrib,
-  ONNX Runtime, aiohttp/aioboto3, and related scientific/geospatial packages
-- Node.js with Express, ES modules, Helmet, CORS, compression, and rate limiting
-- pytest for Python and Jest/Supertest for Node.js
-- `environment.yml` is the Python runtime dependency authority
-- `package.json` and `package-lock.json` are the Node dependency authorities
-- `pyproject.toml` defines Python packaging and the `edgewarn` console command
-
-Do not add Python runtime dependencies to `pyproject.toml`; package installs use
-`--no-deps` so Conda remains authoritative.
-
-## Setup
-
-From the repository root:
+Use Python 3.13 in the EdgeWARN Conda environment. `environment.yml` owns Python
+runtime dependencies; do not add them to pyproject.toml. `package.json` and its
+lockfile own Node dependencies. `pyproject.toml` owns packaging and the console
+command. Imports/tests must work with `pythonpath = src`.
 
 ```bash
 conda env create -f environment.yml
@@ -57,214 +37,71 @@ npm install
 edgewarn --version
 ```
 
-The editable install is required when exercising the package command. Imports
-and tests must remain compatible with `pythonpath = src`.
-
-## Supported runtime commands
-
-### Deployment-facing Python command
-
-`edgewarn run` validates the complete configuration tree before starting any
-worker or initializing the runtime filesystem.
+## Supported commands
 
 ```bash
-edgewarn run                  # Core + EWMRS + NEXRAD
-edgewarn run core             # Core only
-edgewarn run ewmrs            # Core producer + EWMRS consumer
+edgewarn run                  # Ingest + Core + NEXRAD
+edgewarn run core             # Ingest + Core
+edgewarn run ingest           # Ingest only
 edgewarn run nexrad           # NEXRAD ingest + rendering
-edgewarn run core --config-path /etc/edgewarn/config
+edgewarn run core --config-path /etc/edgewarn/config \
+  --args core '["--lat_limits", "20", "55"]'
 ```
 
-Use repeatable, worker-scoped JSON arrays to forward service arguments without
-shell parsing:
+Worker names are ingest, core, nexrad. JSON argv arrays contain strings and
+cannot override wrapper-owned topology/configuration flags. Direct source
+entrypoints are run_ingest.py, run_edgewarn.py, run_nexrad.py, and run_all.py,
+run from src/. run.py is retired. Use util/cli.py instead of duplicating parsers.
+Boolean feature switches support --no-* forms. --disable-glm controls Core
+lightning acquisition. Historical processing reuses Core with an isolated
+historical runtime root and bounded timestamp selection.
+
+`npm run api` starts port 5000; `npm run debug:api` uses port 3001. Supported
+surfaces are /api/v3, /api/v3/openapi.json, /health/live, /health/ready. Removed
+legacy and retired render/RAP/WPC/METAR routes return RFC 9457 404 responses.
+
+## Configuration and filesystem
+
+The 13 catalogs are api, api_index, detection, filesystem, historical, ingest,
+integration, kalman, lineage, nexrad, runtime, scheduler, synoptic_rap. Each has
+a schema in config/schema/. Deploy the complete tree and restart after edits.
+Both runtimes use these catalogs and supported overlays; avoid hard-coded defaults.
+
+Configuration root: --config-dir (package --config-path), EDGEWARN_CONFIG_DIR,
+then installation discovery. Runtime root: --base-dir/--base_dir,
+EDGEWARN_BASE_DIR, legacy BASE_DIR, filesystem.yaml. Defaults are
+~/EdgeWARN_input on POSIX and C:\EdgeWARN_input on Windows.
 
 ```bash
-edgewarn run ewmrs \
-  --args core '["--lat_limits", "20", "55"]' \
-  --args ewmrs '["--disable-wpc"]'
-```
-
-Valid worker names are `core`, `ewmrs`, and `nexrad`. The wrapper owns topology
-and configuration-path flags, so those flags cannot be forwarded in `--args`.
-
-### Direct Python entry points
-
-Run source entry points from `src/`:
-
-```bash
-cd src
-python run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
-python run_ewmrs.py
-python run_nexrad.py
-python run_all.py --services edgewarn,ewmrs,nexrad
-```
-
-- `run_edgewarn.py` owns the latency-sensitive analysis cycle.
-- `run_ewmrs.py` owns render/accessory work and consumes Core readiness records.
-- `run_nexrad.py` supervises both NEXRAD ingest and render children.
-- `run_all.py` is a thin subprocess supervisor; it does no scientific work.
-- `run.py` is retired and exits with migration instructions.
-
-Common service flags include `--base-dir`/`--base_dir`, `--config-dir`, and
-`--profile`. Feature flags use `argparse.BooleanOptionalAction`, so both
-`--disable-*` and `--no-disable-*` forms are meaningful. Consult
-`src/util/cli.py` and the entry point rather than duplicating parser definitions.
-
-### Historical processing
-
-```bash
-cd src
-python process_historical.py \
-  --start 2024-01-01T00:00:00 \
-  --end 2024-01-01T01:00:00 \
-  --lat 20 55 --lon -130 -60
-```
-
-Historical processing finds the best MRMS scan around each requested step and
-reuses the Core pipeline with historical configuration and optional CTAM,
-tracking, and polygon-expansion controls.
-
-### Unified Node API
-
-Run from the repository root:
-
-```bash
-npm run api                  # port 5000 by default
-npm run debug:api            # port 3001 by default
-```
-
-Compatibility scripts `api:edgewarn` and `api:ewmrs` only launch the same
-unified server and emit a deprecation warning. The supported surfaces are:
-
-- `/api/v3`
-- `/api/v3/openapi.json`
-- `/health/live`
-- `/health/ready`
-
-Legacy v1/v2, `/features`, `/data`, `/renders/*`, `/wpc/*`, `/colormaps`,
-`/rap/*`, `/nexrad/*`, `/health`, and `/healthz` routes are removed. Preserve
-their expected 404 behavior unless a public API decision explicitly changes it.
-
-## Configuration model
-
-The application loads one schema-validated configuration catalog consisting of
-18 YAML files in `config/`, each paired with `config/schema/*.schema.json`:
-
-```text
-api              api_index        detection       ewmrs_pipeline
-ewmrs_render     filesystem       historical      ingest
-integration      kalman           lineage         metar
-nexrad           nws              runtime         scheduler
-synoptic_rap     wpc
-```
-
-Copy and deploy the entire `config/` tree; individual files are not standalone.
-All Python workers and the Node API must resolve settings from this catalog and
-the supported overlay layer rather than introducing new hard-coded defaults.
-
-Configuration-root precedence for direct services is `--config-dir`, then
-`EDGEWARN_CONFIG_DIR`, then installation/repository discovery. The package
-command calls the same concept `--config-path`. Runtime base-directory
-precedence is CLI `--base-dir`/`--base_dir`, then `EDGEWARN_BASE_DIR`, then the
-legacy `BASE_DIR`, then `filesystem.yaml`.
-
-Validate configuration from both runtimes after catalog or schema changes:
-
-```bash
+edgewarn configure nexrad.gui.max_workers 8
 npm run validate-config
 PYTHONPATH=src python -m common.config.validate
 ```
 
-For operator edits, use the validated, atomic configuration editor:
+Runtime artifacts live beneath the resolved base directory: data/ contains
+weather inputs/cells/alerts/StormProb; gui/NEXRAD contains radar products;
+state/realtime contains cycles, inventory/readiness, consumer state, leases,
+heartbeats, and locks. Preserve atomic cross-process writes and constrain
+cleanup to the resolved root. Existing retired files remain operator-owned;
+no automatic retirement purge runs.
 
-```bash
-edgewarn configure ewmrs_pipeline.workers.budget_mb.goes 2048
-edgewarn configure --config-path /etc/edgewarn/config
-```
+## Source layout
 
-Configuration changes require process restart. Keep schema, defaults, CLI/env
-overlays, documentation, and baseline tests synchronized.
-
-## Runtime filesystem contract
-
-The runtime base directory is the source of truth for generated artifacts. Its
-platform defaults come from `config/filesystem.yaml` (`~/EdgeWARN_input` on
-POSIX and `C:\EdgeWARN_input` on Windows). Do not write generated data into the
-repository unless a test explicitly uses a temporary repository-local fixture.
-
-Important top-level paths are:
-
-```text
-<BASE_DIR>/
-├── data/                     # raw/derived weather data, cells, alerts, StormProb DB
-├── gui/                      # MRMS/GOES float16, RAP Uint16, NEXRAD .bin.gz products
-├── wpc/surface_analysis/     # WPC GeoJSON products
-└── state/realtime/
-    ├── cycles/               # durable per-cycle phase records
-    ├── consumers/            # consumer checkpoints
-    ├── leases/               # primary activity lease
-    └── services/             # service heartbeats and process locks
-```
-
-Filesystem writes that become visible to another process must remain atomic.
-Cleanup must be constrained to the resolved base directory. Preserve existing
-binary formats, schema versions, filenames, and readiness order; the Python
-writers and Node readers form a cross-language contract.
-
-## Current source layout
-
-```text
-src/
-├── api/                      # unified Express v3 API, OpenAPI, routes, services, repositories
-├── common/
-│   ├── config/               # Python catalog loading, validation, and overlays
-│   ├── ingest/               # primary MRMS/NEXRAD/NWS/synoptic/WPC implementations
-│   └── pipeline/             # staged ingest coordination
-├── edgewarn_cli/             # edgewarn run/configure/sync-nws-zones
-├── EdgeWARN/
-│   ├── alerts/               # EdgeWARN alert schema and manager
-│   ├── api_integration/      # filesystem API index/snapshot publication
-│   ├── ctam/                 # module discovery, host, SDK, transactions, built-ins
-│   ├── ingest/               # compatibility-facing imports and a few adapters
-│   ├── process/detect/       # detection, Kalman tracking, lineage, save tools
-│   ├── process/integrate/    # GLM/RAP/AzShear/statistical enrichment
-│   ├── schedule/             # scan selection and scheduling
-│   ├── stormprob/            # ONNX inference, records, SQLite repository, migration/audit
-│   └── pipeline.py           # reusable Core orchestration helpers
-├── EWMRS/                    # render pipeline, RAP encoding, transforms, tiling
-├── NEXRAD/                   # NEXRAD GUI serialization and render loop
-├── util/                     # filesystem, CLI, I/O, GRIB, release, and shared helpers
-│   └── runtime/              # service lifecycles, handoff, heartbeats, workers
-├── run_edgewarn.py
-├── run_ewmrs.py
-├── run_nexrad.py
-├── run_all.py
-└── process_historical.py
-```
-
-Additional repository surfaces:
-
-- `models/stormprob/` contains versioned ONNX models and normalization assets.
-- `assets/nws_zones/` is gitignored operational data. Source deployments must
-  run `edgewarn sync-nws-zones --apply` before enabling NWS-dependent EWMRS
-  work; the Docker image normally bundles a snapshot.
-- `benchmarks/` contains opt-in performance and memory workloads.
-- `scripts/` contains diagnostics, plotting, asset sync, and verification tools.
-- `docker/`, `Dockerfile`, and `compose.yaml` define the Python processing image
-  and administrative configuration/zone-sync profiles.
-- `docs/api/`, `docs/core/`, and `docs/ctam/` contain the public contracts and
-  architecture documentation.
-
-Do not refer to removed `src/EdgeWARN/api`, `src/EWMRS/api`, or
-`src/EdgeWARN/core` packages. The live HTTP implementation is `src/api`, and
-shared ingest implementations belong in `src/common/ingest`.
+src/api owns live HTTP routes/services/repositories and OpenAPI. src/common owns
+configuration, shared acquisition, inventory, and staged readiness.
+src/edgewarn_cli owns run/configure/migrate-mrms. src/EdgeWARN owns analysis,
+alerts, API publication, CTAM, StormProb, detection, integration, and scheduling.
+src/NEXRAD owns radar serialization/rendering. src/util owns shared helpers and
+runtime lifecycle/handoff. Do not reference removed legacy HTTP packages.
+Models live in models/stormprob and are installed as package data files.
+Benchmarks are opt-in; scripts contain diagnostics and qualification tools.
 
 ## Development rules
 
 ### Pipeline and scientific changes
 
-- Preserve the staged flow: detection inputs first, EWMRS render readiness
-  second, and Core integration readiness last.
+- Preserve the staged flow: detection readiness first, integration readiness second,
+  and final optional-input readiness last.
 - Consider downstream effects on tracking/lineage, integration, StormProb,
   CTAM, alerts, snapshots/indexes, render availability, and API service gating.
 - Treat timestamps, coordinate domains, projections, units, missing values, and
@@ -282,8 +119,8 @@ shared ingest implementations belong in `src/common/ingest`.
   service heartbeats, range/stream behavior, and path containment.
 - Update `src/api/openapi/v3.yaml`, API documentation, product catalogs, and
   Jest tests together for public contract changes.
-- Changes to EWMRS float16 chunks, RAP Uint16 fields, NEXRAD gzip payloads, or
-  indexes require coordinated writer, reader, fixture, and documentation work.
+- NEXRAD gzip payloads and Core indexes require coordinated writer, reader,
+  fixture, and documentation work.
 
 ### CTAM and StormProb
 

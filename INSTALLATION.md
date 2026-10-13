@@ -1,596 +1,102 @@
-# EdgeWARN Core Installation and Runtime
+# Installation and deployment
 
-## Requirements
-
-- Conda or Miniconda
-- npm
-- git-scm
-
-## Setup
-
-1. Clone the repository:
-
-```bash
-git clone https://www.github.com/ewsofficial/EdgeWARN-Core
-cd EdgeWARN-Core
-```
-
-2. Create and activate the Python environment:
+Create the Conda environment, install the package without dependency resolution,
+and install the Node dependencies from the repository root:
 
 ```bash
 conda env create -f environment.yml
 conda activate EdgeWARN
-```
-
-3. Install Node.js dependencies:
-
-```bash
-npm install
-```
-
-4. Register the Python package command in the active environment:
-
-```bash
 python -m pip install --no-deps -e .
+npm install
 edgewarn --version
 ```
 
-`environment.yml` is the sole runtime dependency authority. `--no-deps`
-ensures pip only installs the EdgeWARN package and its `edgewarn` console
-entry point; Conda supplies Python and every runtime dependency. Use the same
-flag for editable and wheel installs.
-
-### Deploying editable configuration
-
-The YAML configuration tree is deployment state and is not installed inside
-the Python wheel. Container and service images should copy the complete tree,
-including its schemas, to an operator-editable location:
-
-```bash
-install -d /etc/edgewarn
-cp -R config /etc/edgewarn/config
-```
-
-Select that copy with `--config-path /etc/edgewarn/config`. Keeping it outside
-site-packages permits atomic updates and read-only production mounts without
-modifying the installed wheel.
-
-## Runtime Base Directory
-
-Most generated data is written outside the repository into a base directory.
-
-Defaults:
-
-- Linux/macOS: `~/EdgeWARN_input`
-- Windows: `C:\EdgeWARN_input`
-
-The unified API resolves the same platform default when no override is set.
-
-`config/filesystem.yaml` is the sole authority for these defaults. Precedence
-is CLI (`--base-dir` or `--base_dir`), then `EDGEWARN_BASE_DIR`, then legacy
-`BASE_DIR`, then YAML. The legacy spellings remain supported for compatibility.
-
-## Configuration tree
-
-The application validates all 18 YAML documents and their schemas before
-starting workers or an HTTP listener. Select a deployed tree with `--config-dir
-/path/to/config` or `EDGEWARN_CONFIG_DIR=/path/to/config`; otherwise discovery
-walks up from the installed source tree. Copy the whole `config/` directory,
-including `config/schema/`, for deployment.
+`environment.yml` owns Python dependencies; `package.json` and the lockfile own
+Node dependencies. Deploy the entire 13-file `config/` tree with its schemas.
+The wheel also includes a configuration snapshot under `share/edgewarn`.
+For operator settings, copy the tree to `/etc/edgewarn/config` and use
+`--config-path` with the package command, or `--config-dir` with direct services.
+`EDGEWARN_CONFIG_DIR` selects the tree when no CLI override is given.
 
 ```bash
 npm run validate-config
 PYTHONPATH=src python -m common.config.validate
-```
-
-See `docs/core/configuration.md` for the authoritative owner of each setting.
-
-Overrides:
-
-- Python CLIs (all real-time services, `process_historical.py`): `--base_dir` or `--base-dir`
-- Unified API: `--base-dir` or `EDGEWARN_BASE_DIR`
-- `--base_dir` and `BASE_DIR` remain temporary compatibility aliases
-- RAP maximum analysis age: `EDGEWARN_RAP_MAX_AGE_MINUTES` (non-negative
-  integer minutes; default `180`)
-
-The RAP setting controls both local-cache eligibility and the bounded backward
-search of NOAA RAP analysis hours. Analysis timestamps, rather than download
-times or filesystem modification times, determine freshness.
-
-## Running API Services
-
-Run from repository root:
-
-```bash
-npm run api
-npm run debug:api
-```
-
-- Unified API default port: `5000`
-- Unified API debug mode port: `3001`
-
-Current API surfaces:
-
-- v3: `/api/v3` and `/api/v3/openapi.json`
-- Health: `/health/live`, `/health/ready`
-- Legacy EdgeWARN and EWMRS endpoints are removed and return 404; use `/api/v3`
-
-CLI and environment overrides:
-
-- Base directory: `--base-dir <path>` or `EDGEWARN_BASE_DIR`
-- Port override: `PORT`; debug mode: `--debug-server`
-- Rate-limit env vars: `RATE_LIMIT_MAX_SEC`, `RATE_LIMIT_MAX_MIN`
-- Browser and proxy policy: `ALLOWED_ORIGINS`, `TRUST_PROXY_IPS`
-
-See `docs/api/unified_v3.md` for migration details and the complete contract.
-
-## Running Real-Time Services
-
-### Package command
-
-`edgewarn run` is the deployment-facing supervisor. It validates every YAML
-document and matching schema before starting any child process or initializing
-the runtime filesystem.
-
-| Command | Selected services |
-| --- | --- |
-| `edgewarn run` | Ingest, Core, EWMRS/accessories, and NEXRAD |
-| `edgewarn run core` | Ingest and Core |
-| `edgewarn run ewmrs` | Ingest, Core, and EWMRS/accessories |
-| `edgewarn run ingest` | MRMS, RAP, and scan-time GLM acquisition only |
-| `edgewarn run nexrad` | NEXRAD Level-II ingest and NEXRAD rendering |
-
-EWMRS consumes ingest notifications independently of Core. The `ewmrs` package
-mode retains Core analysis for compatibility. NEXRAD's launcher owns both of its supervised
-children; it is not ingest-only.
-
-Use `--config-path` to select a complete deployed tree. Forward launcher flags
-as a repeatable, worker-scoped JSON array so quoting is preserved and no
-argument is broadcast to unrelated workers:
-
-```bash
-edgewarn run core --config-path /etc/edgewarn/config
-edgewarn run core \
-  --args core '["--lat_limits", "20", "55", "--disable-ctam"]'
-edgewarn run ewmrs \
-  --args core '["--lat_limits", "20", "55"]' \
-  --args ewmrs '["--disable-wpc"]'
-edgewarn run nexrad --args nexrad '["--profile"]'
-```
-
-Each `JSON_ARGV` value must be an array containing only strings. A worker may
-appear once and only when its topology is selected. The wrapper rejects
-configuration and topology flags inside forwarded arrays because it injects
-the single resolved configuration path itself.
-
-### Direct source commands
-
-Four independently operable services run from `src/`. Start each in its own
-shell, service unit, or container; all of them share the configured runtime
-base directory.
-
-```bash
-cd src
-# Independent acquisition (start in its own shell before consumers):
-python run_ingest.py
-# Primary EdgeWARN service (latency-sensitive analysis cycle):
-python run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
-# EWMRS/accessory service (renders, GOES ABI, METAR/NWS/WPC):
-python run_ewmrs.py
-# NEXRAD service (Level-II ingest + rendering):
-python run_nexrad.py
-```
-
-An optional supervisor starts any subset with one command (it performs no
-ingest, rendering, or coordination work itself):
-
-```bash
-python run_all.py                                # all four services
-python run_all.py --services ingest,edgewarn,ewmrs      # a subset
-```
-
-`run.py` is retired and exits with instructions rather than silently starting
-only the primary service. Use `run_all.py` for all services or the explicit
-service commands above.
-
-### Primary flags
-
-- `--lat_limits <LAT_MIN> <LAT_MAX>` default `20 55`
-- `--lon_limits <LON_MIN> <LON_MAX>` default `230 300`
-- `--base_dir` / `--base-dir`
-- `--config-dir`
-- `--profile`
-- `--disable-ctam`
-- `--ctam-module-dir`
-- `--list-ctam-modules`
-- `--check-ctam-modules`
-- `--disable-tracking`
-- `--disable-polygon-expansion`
-- `--disable-goes` (disables scan-time GLM)
-- `--mrms-core-only`
-- `--refl-threshold`
-- `--min-seed-percentage`
-- `--drop-offset`
-
-### EWMRS and NEXRAD flags
-
-- Both accept `--base_dir` / `--base-dir`, `--config-dir`, and `--profile`.
-- EWMRS additionally accepts `--disable-metar`, `--disable-nws`,
-  `--disable-wpc`, and `--disable-goes` (ABI ingest/render).
-- EWMRS and `run_ingest.py` also accept `--disable-ctam` and
-  `--disable-stormprob`. They only select the dependency agreement (see
-  [Independent ingest agreement](#independent-ingest-agreement)) and must match
-  the primary's values.
-
-Notes:
-
-- The primary normalizes `--lon_limits` into the `0-360` domain internally.
-- `--mrms-core-only` runs MRMS-only primary behavior and implies disabling
-  every non-primary component.
-- Every `--disable-*` / `--profile` switch defaults from `runtime.yaml` when
-  omitted and accepts a `--no-` form to re-enable.
-- Each service publishes an atomic heartbeat under
-  `<BASE_DIR>/state/realtime/services/<name>.json`; the unified Node API uses
-  these to answer requests whose owning service is not active with a
-  structured `SERVICE_NOT_ENABLED` error instead of stale artifacts.
-
-## Editing Configuration
-
-A noninteractive edit names the YAML file without `.yaml`, traverses a dotted
-leaf path, and parses the new value as one YAML scalar:
-
-```bash
-edgewarn configure ewmrs_pipeline.workers.budget_mb.goes 2048
-edgewarn configure --config-path /etc/edgewarn/config \
-  runtime.run.disable_nexrad true
-edgewarn configure runtime.profiling.perf_tracker null
-edgewarn configure runtime.run.ctam_module_dir '"ctam_modules"'
-edgewarn configure 'ingest.mrms.ncep_https.directory_map.EchoTop_18_00\.50' '"EchoTop_18"'
-```
-
-Escape a literal `.` or `\` in a mapping key with a leading backslash. The
-interactive editor preserves these path segments automatically.
-
-Only scalar replacement is supported. Before replacement, the command locks
-the configuration root, revalidates the complete tree, checks the target path,
-and validates the proposed document. It preserves comments, ordering,
-permissions, and final-newline behavior, writes with flush/`fsync` plus atomic
-replace, then revalidates from disk. A failed post-write check restores the
-same-process backup. Symlink escapes and read-only targets are rejected.
-
-Running without a dotted assignment opens the interactive editor only when
-both stdin and stdout are terminals:
-
-```bash
 edgewarn configure --config-path /etc/edgewarn/config
 ```
 
-The first screen selects one of the registered files; the second lists each
-leaf's path, value, type, and schema constraints. Select a row and edit it with
-`Ctrl+S`; schema errors stay on screen and do not change disk. `Esc` navigates
-back and `q` quits when an editor is not open. For automation and noninteractive
-containers, always use the dotted assignment form.
+Configuration writes are validated and atomic. Restart processes after changes.
 
-### Package command exit statuses
+## Running real-time services
 
-| Status | Meaning |
+| Command | Services |
 | --- | --- |
-| `0` | Help/version, successful edit, or clean signal-driven shutdown |
-| `1` | Child startup/runtime failure, forced shutdown, or write/rollback I/O failure |
-| `2` | Usage, forwarded-argument, config-root, YAML, or schema validation error |
+| `edgewarn run` | Ingest, Core, NEXRAD |
+| `edgewarn run core` | Ingest, Core |
+| `edgewarn run ingest` | Ingest |
+| `edgewarn run nexrad` | NEXRAD ingest and rendering |
 
-Child-specific failures are logged with the worker name; the supervisor returns
-`1` instead of exposing the child's implementation-specific status.
+```bash
+edgewarn run core --config-path /etc/edgewarn/config \
+  --args core '["--lat_limits", "20", "55"]'
+edgewarn run nexrad --args nexrad '["--profile"]'
+```
+
+`--args` accepts one JSON string array per selected worker: `ingest`, `core`, or
+`nexrad`. The wrapper owns topology and configuration-root flags. Shared
+CTAM/StormProb/GLM settings must agree between ingest and Core; contradictory
+worker settings fail preflight before spawning.
+
+Run direct source commands from `src/`, starting ingest before Core:
+
+```bash
+python run_ingest.py
+python run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
+python run_nexrad.py
+python run_all.py --services ingest,edgewarn,nexrad
+```
+
+These are separate processes. The supervisor forwards shutdown signals and
+reaps complete process groups. Core consumes immutable local readiness;
+NEXRAD runs acquisition and rendering children independently.
+`--disable-glm` disables Core lightning acquisition. `--mrms-core-only` selects
+MRMS detection/integration and CTAM while disabling RAP, GLM, and NEXRAD.
+`--disable-stormprob` leaves external CTAM available; `--disable-ctam` disables
+all CTAM execution. Boolean switches support their `--no-*` forms.
+
+## Runtime base directory
+
+Precedence: CLI `--base-dir`/`--base_dir`, `EDGEWARN_BASE_DIR`, legacy `BASE_DIR`,
+then `filesystem.yaml` (POSIX `~/EdgeWARN_input`, Windows `C:\EdgeWARN_input`).
+All generated artifacts live beneath this root. Core writes `data/`, NEXRAD
+writes `data/NEXRAD_Level2` and `gui/NEXRAD`, and durable handoff/heartbeats live
+under `state/realtime`. Use a shared root and a umask that allows the API to read
+published artifacts. No retirement cleanup runs automatically; see
+[the changelog](CHANGELOG.md) for optional operator cleanup and rollback.
 
 ## Containers
 
-The default image contains the installed Python services, dependencies,
-configuration, models, and NWS zone snapshot. Once the image has been published
-to a registry, a recipient only needs Docker to download and start it:
-
 ```bash
-# Replace this example with the published image reference.
-IMAGE=your-registry/edgewarn-core:3.0.2
-docker run -d --name edgewarn --restart unless-stopped "$IMAGE"
+docker compose up -d --build edgewarn
+docker compose run --rm edgewarn-configure
 ```
 
-Docker downloads the image if it is not present locally. No repository checkout,
-Conda installation, configuration files, or host asset directories are required.
-The container starts the EdgeWARN, EWMRS, and NEXRAD processing services with
-the bundled defaults. Live weather ingestion still requires network access.
-The Node.js REST API is a separate deployment and is not started by this image.
+Compose starts ingest, Core, and NEXRAD. Mount configuration read-only for the
+processing service; the administrative configure profile mounts it writable.
+Persist the runtime root and circular logs. Operator CTAM modules are mounted
+read-only at `/opt/edgewarn/ctam_modules`. The image bundles dependencies,
+configuration, and models; it does not start the Node API.
 
-For persistent data and logs that can be reused when replacing the container,
-use Docker-managed named volumes (Docker creates them automatically):
+## API deployment
 
-```bash
-docker run -d --name edgewarn --restart unless-stopped \
-  -v edgewarn-runtime:/var/lib/edgewarn \
-  -v edgewarn-logs:/var/log/edgewarn \
-  "$IMAGE"
-```
+Run `npm run api` independently (port 5000), or `npm run debug:api` (port 3001).
+Set `EDGEWARN_BASE_DIR` and `EDGEWARN_CONFIG_DIR` consistently with producers.
+Set `api.server.enabled_services` to the deployed Python topology. Readiness
+requires `data/`, `gui/`, and healthy enabled services. See
+[deployment](docs/api/deployment.md) and [API v3](docs/api/unified_v3.md).
 
-Host mounts below are optional overrides for operators building or customizing
-the image.
+## Historical processing and verification
 
-Build the image and start the default all-service topology. NWS zone assets
-are downloaded during the build and bundled in the image; no zone asset
-mount or separate initialization step is required:
-
-```bash
-docker build -t edgewarn-core:3.0.2 .
-export EDGEWARN_HOST_BASE_DIR=/srv/edgewarn/runtime
-export EDGEWARN_CTAM_MODULES_DIR=/srv/edgewarn/ctam_modules
-docker run --rm --name edgewarn \
-  -v "$EDGEWARN_HOST_BASE_DIR:/var/lib/edgewarn" \
-  -v "$PWD/config:/etc/edgewarn/config:ro" \
-  -v "$EDGEWARN_CTAM_MODULES_DIR:/opt/edgewarn/ctam_modules:ro" \
-  -e EDGEWARN_CTAM_MODULE_DIR=/opt/edgewarn/ctam_modules \
-  edgewarn-core:3.0.2
-```
-
-CTAM modules are operator-owned code and are never baked into the image:
-`ctam_modules/` is gitignored and excluded from the build context, so a
-`COPY` of it would fail the build. Instead, mount the host module directory
-read-only at `/opt/edgewarn/ctam_modules` and point
-`EDGEWARN_CTAM_MODULE_DIR` at it (CLI flag `--ctam-module-dir` wins over the
-variable, which wins over `runtime.yaml run.ctam_module_dir`). An absent host
-directory is a supported empty-module configuration. Validate manifests before
-deploying with `edgewarn --check-ctam-modules --ctam-module-dir
-/srv/edgewarn/ctam_modules`. In Compose these are already wired: set
-`EDGEWARN_CTAM_MODULES_DIR` to choose the host directory.
-
-Enabled modules must explicitly declare `requires = []` or `[[requires]]`.
-Core startup checks required MRMS products against the effective ingest
-registry before creating runtime directories or launching workers. Enabled
-StormProb also requires its model assets and all source products. To disable
-StormProb while retaining external CTAM, set
-`edgewarn configure runtime.run.disable_stormprob true`, restart, or pass
-`--disable-stormprob` to the direct Core command (through `--args core` for
-`edgewarn run`). `--no-disable-stormprob` overrides the configured value.
-
-The image installs a built wheel. `tini` runs as PID 1 and the entrypoint pipes
-the installed `edgewarn` command through `rotatelogs` for persisted, rotated
-logs:
-
-```dockerfile
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/edgewarn-entrypoint"]
-CMD ["edgewarn", "run", "--config-path", "/etc/edgewarn/config"]
-```
-
-Override the entrypoint back to `edgewarn` to select a specialized topology
-without log rotation:
-
-```bash
-docker run --rm \
-  --entrypoint edgewarn \
-  -v edgewarn-runtime:/var/lib/edgewarn \
-  -v "$PWD/config:/etc/edgewarn/config:ro" \
-  edgewarn-core:3.0.2 run core --config-path /etc/edgewarn/config
-docker run --rm \
-  --entrypoint edgewarn \
-  -v edgewarn-runtime:/var/lib/edgewarn \
-  -v "$PWD/config:/etc/edgewarn/config:ro" \
-  edgewarn-core:3.0.2 run ewmrs --config-path /etc/edgewarn/config
-docker run --rm \
-  --entrypoint edgewarn \
-  -v edgewarn-runtime:/var/lib/edgewarn \
-  -v "$PWD/config:/etc/edgewarn/config:ro" \
-  edgewarn-core:3.0.2 run nexrad --config-path /etc/edgewarn/config
-```
-
-Runtime output and configuration are separate mounts. Production should keep
-configuration read-only; `edgewarn run` needs only read access. An attempted
-edit fails with status `1` before replacement and leaves the file unchanged.
-In Compose, set `EDGEWARN_HOST_BASE_DIR` to the host runtime directory; Compose
-mounts it at `/var/lib/edgewarn` and passes that container path to the package
-as `EDGEWARN_BASE_DIR` for every supervised worker.
-For an intentional interactive administrative edit, use the Compose profile,
-which is the only supplied service with a read-write configuration mount:
-
-```bash
-docker compose build edgewarn
-docker compose --profile admin run --rm edgewarn-configure
-```
-
-`docker stop` sends `SIGTERM` to `tini`, which forwards it to the entrypoint.
-The entrypoint signals the tracked `edgewarn` supervisor PID; the supervisor
-signals every selected service process group, including descendants whose
-service leader has already exited. It allows 20 seconds for graceful service
-cleanup before escalating surviving groups to `SIGKILL`. Compose's 25-second
-grace leaves five seconds for escalation, reaping, final `rotatelogs` draining,
-and entrypoint teardown. The entrypoint returns the supervisor status and a
-clean signal-driven stop exits `0`.
-
-## Running Historical Reprocessing
-
-Run from `src/`:
-
-```bash
-python process_historical.py --start 2024-01-01T00:00:00 --end 2024-01-01T01:00:00 --lat 20 55 --lon -130 -60
-```
-
-Common optional flags:
-
-- `--start <ISO8601>` required
-- `--end <ISO8601>` required
-- `--lat <LAT_MIN> <LAT_MAX>` default `20 55`
-- `--lon <LON_MIN> <LON_MAX>` default `-130 -60`
-- `--base_dir` / `--base-dir`
-- `--config-dir`
-- `--profile`
-- `--disable-ctam`
-- `--ctam-module-dir`
-- `--list-ctam-modules`
-- `--check-ctam-modules`
-- `--disable-tracking`
-- `--disable-polygon-expansion`
-- `--refl-threshold`
-- `--min-seed-percentage`
-- `--drop-offset`
-
-Historical-processing note:
-
-- `process_historical.py` writes its stormcell products to `<BASE_DIR>/data/stormcells/stormcells_{timestamp}.json` through the normal detection and integration pipeline.
-
-## Maintaining NWS Zone Assets
-
-`edgewarn sync-nws-zones` refreshes `assets/nws_zones` from the NWS zone and UGC APIs in both source and installed deployments. The repository script remains a compatibility wrapper.
-
-The `assets/nws_zones/` directory is **not** part of the repository. Native
-installations must synchronize it before starting a pipeline that ingests
-NWS alerts; Docker images bundle a snapshot by default. If it is
-missing, the geomapper raises an error that directs the operator to this
-script. A full initial sync is roughly 8,600 zone codes at ~20 requests/second,
-so allow about seven minutes the first time.
-
-Run from repository root to refresh an already-populated tree (for example
-after NWS publishes a new zone):
-
-For a native installation:
-
-```bash
-edgewarn sync-nws-zones --apply
-```
-
-For Compose, optionally initialize or refresh the host-mounted asset directory
-to override the image's bundled snapshot:
-
-```bash
-docker compose --profile admin run --rm edgewarn-sync-nws-zones
-docker compose up edgewarn
-```
-
-Normal Docker and Compose builds bundle the snapshot automatically:
-
-```bash
-docker compose build edgewarn
-docker compose up edgewarn
-```
-
-With BuildKit (the default builder used by current Docker Compose), the zone
-download stage runs independently and in parallel with the runtime Conda
-environment solve. The normal host-mounted zone directory still takes
-precedence when it contains synchronized assets; the bundled snapshot is used
-as a fallback when that mount is empty. The switch defaults to `true`, so
-the first build requires access to the NWS zone APIs. Docker can reuse the
-cached download layer on subsequent builds; use `docker compose build
---no-cache edgewarn` to force a fresh snapshot. The build also verifies that
-the installed application can find the bundled assets.
-
-To skip bundling, use `docker build --build-arg EDGEWARN_SYNC_NWS_ZONES=false -t edgewarn-core:3.0.2 .`
-or set `EDGEWARN_SYNC_NWS_ZONES=false` for the Compose build. In that case,
-synchronize and mount the host asset directory before running EWMRS.
-
-Set `EDGEWARN_NWS_ASSETS_DIR` to relocate the host asset directory; it defaults
-to `./assets/nws_zones` and is mounted read-only into the runtime container.
-
-Flags:
-
-- `--assets-dir <path>` custom `assets/nws_zones` location
-- `--zone-types <types...>` defaults to `forecast fire public county marine`
-- `--timeout-seconds <int>` default `30`
-- `--max-retries <int>` default `3`
-- `--max-workers <int>` default `16`
-- `--pause-seconds <float>` default `0.05`
-- `--progress` / `--no-progress` progress output, default on
-- `--apply` is accepted for compatibility; this script always writes updates
-- `--report-path <path>` write the sync report JSON to a file
-- `--config-dir <path>` select the `config/` tree to read defaults from
-
-The listed defaults are owned by `config/nws.yaml` under `zone_sync`, not by the
-parser, so a deployed tree can change them. `--pause-seconds` is scaled by
-`--max-workers` to hold a whole-job rate: `0.05` is roughly 20 requests/second
-regardless of thread count. `--apply` and `--report-path` have no YAML keys.
-
-## Tests
-
-Node.js tests:
-
-```bash
-npm test
-npm run test:watch
-npm run test:coverage
-```
-
-Python tests (with `EdgeWARN` active):
-
-```bash
-conda activate EdgeWARN
-python -m pytest
-```
-
-The default command is the deterministic offline correctness suite. Performance
-benchmarks and live compatibility probes must be selected explicitly.
-
-### Upgrade the MRMS configuration
-
-The shipped ingest catalog uses schema version 2. Stop all Python services and
-the API, drain the consumer backlog, and use the complete release checkout with
-Node dependencies installed for migration. Wheel installations include validator
-assets under `<python-prefix>/share/edgewarn`; run
-`npm ci --omit=dev --prefix <python-prefix>/share/edgewarn` there. Preview with
-`edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime`.
-Add `--apply` to execute, `--resume` after interruption, or `--rollback` to restore
-the journaled original configuration and directory names. Keep services stopped
-until both runtime validators pass. See [migration and qualification](docs/core/configurable-mrms-phase8.md)
-for interlocks, backup location, and offline evidence.
-
-Historical processing writes its raw cache and generated artifacts beneath
-`<resolved-base-dir>/historical`. This includes stormcells, StormProb databases,
-and API indexes; realtime artifacts at the parent root are not overwritten.
-See [phase readiness and replay](docs/core/configurable-mrms-phase5.md) for
-input leases, optional-completion behavior, and immutable ingest reports.
-
-### Independent ingest agreement
-
-Supervised Core/EWMRS topologies must include exactly one `ingest` service.
-Use `python run_all.py --services ingest,ewmrs` to render with Core stopped.
-Direct `run_edgewarn.py` and `run_ewmrs.py` require a separately managed
-`run_ingest.py` sharing the complete config tree, runtime root, and dependency
-options. Without it they wait with producer diagnostics. When one supervised
-child exits, the supervisor reports it and reaps its process group, but the other
-services keep running. The supervisor exits nonzero once every child has exited,
-or on shutdown after any child exited. Separate service units provide full isolation.
-
-`--args ingest '["--disable-goes"]'` propagates GLM disablement to Core and
-EWMRS. `--disable-ctam` and `--disable-stormprob` propagate the same way: with
-CTAM and StormProb both enabled, every StormProb MRMS source (VIL, VII, echo
-tops, isothermal reflectivities, AzShear and the others in
-`EdgeWARN.ctam.preflight.STORMPROB_MRMS_SOURCES`) is a mandatory integration
-input, so Core is released into integration only once all of them are local.
-If any of them, RAP or GLM is still missing when the ingest scan deadline
-expires, or the StormProb gate rejects the scan's inputs, Core skips that scan
-without publishing forecasts or alerts and continues with the next one. Only
-startup preflight failures (missing model assets or source products) stop Core.
-Direct commands must pass the same values to `run_ingest.py`,
-`run_edgewarn.py` and `run_ewmrs.py` (or share `runtime.run`).
-Conflicting explicit values or worker runtime roots fail before startup.
-A base directory supplied for one worker applies to the entire topology.
-MRMS-only mode keeps ingest and Core. Durable handoff must be enabled.
-
-Upgrading to this agreement changes the dependency fingerprint, so readiness
-records written by an earlier release under `state/realtime/ingest/v1/` are
-rejected as a mismatch. Start the first run on a fresh runtime base directory,
-or stop every service and remove `state/realtime/ingest/` (and the Core and
-EWMRS consumer state under `state/realtime/consumers/core-ingest-v1/` and
-`state/realtime/consumers/ewmrs-inputs-v1/`) before restarting.
-
-Realtime ingest acquires check products first, then mandatory integration
-inputs, then everything else, newest observation first within each tier. Core
-processes the newest ready scan and records every older ready scan as
-`skipped` ("superseded"), so a cold start never works forward through stale
-scans. The listing window (`scheduler.s3_lookback_hours`) must not exceed raw
-input retention; configuration validation rejects a longer window.
-
-Realtime `state/realtime/ingest-reports` snapshots are retired. Monitor
-`state/realtime/ingest/v1/` readiness/outbox records and `poll-status.json`
-instead. Historical ingest reports remain supported. No repository reader uses
-the retired realtime directory; external operator tools must be audited at cutover.
-
-The supplied Compose service restarts after exit and checks enabled Python
-producer heartbeats. Match `api.server.enabled_services` to your deployment.
-Container logs use the bounded circular budget in `runtime.logging`; the active
-file is linked as `edgewarn.current.log`. See
-[production failure recovery](docs/core/production_hardening.md) for restart,
-worker timeout, alert freshness, and storage-maintenance behavior.
+Run `process_historical.py` from `src/` with `--start`, `--end`, `--lat`, and
+`--lon`; it uses an isolated historical runtime root. Activate EdgeWARN before
+`python -m pytest`. Use temporary base directories in tests. Run `npm test`
+and `npm run test:coverage` for API contracts.

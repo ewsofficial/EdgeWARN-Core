@@ -13,12 +13,6 @@ Accessory children enter a cooldown of `restart_window_seconds` after a crash
 burst and are then eligible to restart. Shutdown stops all owned process groups.
 Compose uses `restart: unless-stopped` and a read-only heartbeat health check.
 
-EWMRS admits first attempts within its configured job window, newest input
-first. `ewmrs_pipeline.input_jobs.render_timeout_seconds` bounds each render
-batch; timed-out workers are terminated and their jobs follow normal retry
-handling. Broken pools are replaced under a lifecycle lock. Product index
-updates use a cross-process lock.
-
 NEXRAD serializes processing per site. Runtime cleanup yields to the site lock,
 and parsers consume separate snapshots. A timed-out pool generation is retired
 and terminated. Retried downloads truncate to their last committed byte count
@@ -28,13 +22,10 @@ and outside the lifecycle lock.
 
 ## Feed and scientific quality
 
-An empty NWS pull preserves unexpired warnings. Malformed features are isolated,
-and stream syntax is validated before registry mutation. Cell matching rejects
+Cell matching of externally published official alerts rejects
 snapshots older than `detection.alert_matching.snapshot_max_age_seconds` and
 filters expired warnings, including cached features. Station-catalog downloads
-reuse last-known-good radar stations after transient failures. Empty or failed
-METAR station downloads remain eligible for retry; synchronous attempts use the
-station download timeout as a cooldown.
+reuse last-known-good radar stations after transient failures.
 
 Kalman prediction applies eastward velocity to longitude and northward velocity
 to latitude; acceleration and process-noise axes follow the same ordering.
@@ -67,7 +58,7 @@ its retry policy. Pagination rejects a cursor whose item has been pruned with
 ## Verification
 
 Offline regressions inject worker death, hung renders, lock/read failures,
-partial NEXRAD download failure, empty/malformed NWS data, station-feed failure,
+partial NEXRAD download failure, stale official-alert snapshots, station-feed failure,
 and corrupt publication state. Scientific fixtures check direction, finite
 coordinates, and per-lead forecast publication. Configuration is validated by
 both runtimes; API contract and process/container tests accompany the changes.

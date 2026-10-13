@@ -1,6 +1,6 @@
 # Retire EWMRS and remove all mentions from code
 
-Status: implementation in progress.
+Status: implemented and verified (2026-10-13).
 
 ## 1. Outcome and scope
 
@@ -156,14 +156,14 @@ Read applicable subtree `AGENTS.md` files before each phase. Each phase is a
 reviewable commit with the stated completion check. Suggested order minimizes
 the window where references dangle.
 
-- [ ] **Phase 0 — Lock decisions + baseline.** Record §3 answers here. Add a temporary EWMRS-reference inventory test (fails if count grows) so the retirement diff only shrinks. Capture `grep -ri ewmrs --include='*.py' --include='*.js' --include='*.yaml' --include='*.json' --include='*.md' src config docs tests | wc -l` baseline in the commit message.
-- [ ] **Phase 1 — Config + schemas + loaders.** Delete the two YAML catalogs + schemas; remove from Python `loader.py` catalog table, `src/config/loader.js`, `mrms-products.js`; purge `runtime.yaml` EWMRS keys + `api.yaml` gates; update `edgewarn configure` allowlist, `tests/config_baseline/*.json`, `tests/fixtures/config/*`. Completion: `npm run validate-config` + `PYTHONPATH=src python -m common.config.validate` pass on the 16-file catalog.
-- [ ] **Phase 2 — Python runtime deletion.** Delete `src/EWMRS/`, `src/run_ewmrs.py`, `src/util/runtime/ewmrs_{service,consumer}.py`; strip EWMRS branches from `background.py`, `goes.py` (delete file if Q2=delete), `ingest_handoff.py`, `handoff.py`, `services.py`, `primary_service.py`, `cycle.py`, `coordinator.py`, `goes_readiness.py`, `mrms/main.py`, `NEXRAD/*`, `EdgeWARN/pipeline.py`, `edgewarn_cli/migrate_mrms.py`, `util/io.py`, `run_ingest.py`, `run.py` shim text. Completion: `python -c "import run_ewmrs"` fails; no `EWMRS` import remains under `src/`.
-- [ ] **Phase 3 — Launchers + CLI + packaging.** Update `run_all.py`, `edgewarn_cli/run.py`, `util/cli.py`, `pyproject.toml`, `Dockerfile`, `compose.yaml`, `docker/edgewarn-entrypoint.sh`. `edgewarn run ewmrs` errors actionably. Completion: `edgewarn run --help` shows no ewmrs; `run_all.py --services ewmrs` rejected; `pip install -e .` + `edgewarn --version` work.
-- [ ] **Phase 4 — Node API + OpenAPI.** Remove EWMRS routes/services/compat shim, `X-EWMRS-*` headers, static `gui/` EWMRS readers; bump OpenAPI version; delete `docs/api/ewmrs_api_endpoints.md` (leave a redirect stub pointing at `unified_v3.md` + CHANGELOG if desired). Completion: Jest contract tests assert 404 on old render/RAP/WPC paths (or new static behavior if Q1=keep).
-- [ ] **Phase 5 — Tests + fixtures + benchmarks + scripts.** Delete/rewrite every file in §2.4; regenerate `tests/config_baseline/*`, serialization fixtures via `generate_fixtures.py`; remove EWMRS benchmarks/plots or retarget them (delete if they import `EWMRS`). Completion: full `pytest` + `npm test` green with zero `ewmrs` imports.
-- [ ] **Phase 6 — Docs + guides.** Rewrite `AGENTS.md`, `src/AGENTS.md`, `README.md`, `INSTALLATION.md`, `docs/core/*`, `docs/api/*`, `docs/ctam/*`; delete `src/EWMRS/AGENTS.md` tree; update CLI help snapshots, deployment systemd units, container examples. Completion: docs build/lint (if any) passes; no stale `run ewmrs` / `run_ewmrs.py` / `ewmrs_pipeline.yaml` instructions remain outside frozen history.
-- [ ] **Phase 7 — Final sweep + release note.** Run the acceptance sweep in §7, delete the Phase-0 inventory test (or convert it to a permanent zero-tolerance guard), add `CHANGELOG.md` entry with breaking-change + operator cleanup instructions, and remove `build/` stale artifacts by rebuilding (never commit `build/` edits).
+- [x] **Phase 0 — Lock decisions + baseline.** Record §3 answers here. Add a temporary EWMRS-reference inventory test (fails if count grows) so the retirement diff only shrinks. Capture `grep -ri ewmrs --include='*.py' --include='*.js' --include='*.yaml' --include='*.json' --include='*.md' src config docs tests | wc -l` baseline in the commit message.
+- [x] **Phase 1 — Config + schemas + loaders.** Delete the two YAML catalogs + schemas; remove from Python `loader.py` catalog table, `src/config/loader.js`, `mrms-products.js`; purge `runtime.yaml` EWMRS keys + `api.yaml` gates; update `edgewarn configure` allowlist, `tests/config_baseline/*.json`, `tests/fixtures/config/*`. Completion: `npm run validate-config` + `PYTHONPATH=src python -m common.config.validate` pass on the 16-file catalog.
+- [x] **Phase 2 — Python runtime deletion.** Delete `src/EWMRS/`, `src/run_ewmrs.py`, `src/util/runtime/ewmrs_{service,consumer}.py`; strip EWMRS branches from `background.py`, `goes.py` (delete file if Q2=delete), `ingest_handoff.py`, `handoff.py`, `services.py`, `primary_service.py`, `cycle.py`, `coordinator.py`, `goes_readiness.py`, `mrms/main.py`, `NEXRAD/*`, `EdgeWARN/pipeline.py`, `edgewarn_cli/migrate_mrms.py`, `util/io.py`, `run_ingest.py`, `run.py` shim text. Completion: `python -c "import run_ewmrs"` fails; no `EWMRS` import remains under `src/`.
+- [x] **Phase 3 — Launchers + CLI + packaging.** Update `run_all.py`, `edgewarn_cli/run.py`, `util/cli.py`, `pyproject.toml`, `Dockerfile`, `compose.yaml`, `docker/edgewarn-entrypoint.sh`. `edgewarn run ewmrs` errors actionably. Completion: `edgewarn run --help` shows no ewmrs; `run_all.py --services ewmrs` rejected; `pip install -e .` + `edgewarn --version` work.
+- [x] **Phase 4 — Node API + OpenAPI.** Remove EWMRS routes/services/compat shim, `X-EWMRS-*` headers, static `gui/` EWMRS readers; bump OpenAPI version; delete `docs/api/ewmrs_api_endpoints.md` (leave a redirect stub pointing at `unified_v3.md` + CHANGELOG if desired). Completion: Jest contract tests assert 404 on old render/RAP/WPC paths (or new static behavior if Q1=keep).
+- [x] **Phase 5 — Tests + fixtures + benchmarks + scripts.** Delete/rewrite every file in §2.4; regenerate `tests/config_baseline/*`, serialization fixtures via `generate_fixtures.py`; remove EWMRS benchmarks/plots or retarget them (delete if they import `EWMRS`). Completion: full `pytest` + `npm test` green with zero `ewmrs` imports.
+- [x] **Phase 6 — Docs + guides.** Rewrite `AGENTS.md`, `src/AGENTS.md`, `README.md`, `INSTALLATION.md`, `docs/core/*`, `docs/api/*`, `docs/ctam/*`; delete `src/EWMRS/AGENTS.md` tree; update CLI help snapshots, deployment systemd units, container examples. Completion: docs build/lint (if any) passes; no stale `run ewmrs` / `run_ewmrs.py` / `ewmrs_pipeline.yaml` instructions remain outside frozen history.
+- [x] **Phase 7 — Final sweep + release note.** Run the acceptance sweep in §7, delete the Phase-0 inventory test (or convert it to a permanent zero-tolerance guard), add `CHANGELOG.md` entry with breaking-change + operator cleanup instructions, and remove `build/` stale artifacts by rebuilding (never commit `build/` edits).
 
 ## 6. Compatibility, migration, and rollback
 
@@ -201,3 +201,32 @@ npm run test:coverage
 Done when the sweep is clean, both config validators pass, the full Python and
 Node suites are green, and the release note documents the breaking CLI/API/
 config removals plus operator artifact cleanup.
+
+## Implementation record
+
+All phases completed. Runtime and launcher deletion were committed together so
+startup imports/parsers were concrete and reviewable. Every deletion commit uses
+the requested FTR prefix. The initial tracked baseline was 985 mentions; final
+tracked live-reference count is zero outside plans and CHANGELOG.md.
+
+Decisions applied: remove all accessory implementations and their three catalogs,
+so the end-state catalog contains 13 files rather than the originally proposed
+16. Preserve Core scan-time GLM under --disable-glm. Preserve Core matching of
+published official alerts without retaining an acquisition service. Generic
+retired-topology/worker errors point to CHANGELOG.md without hardcoding the
+retired name in executable code. Existing operator artifacts are untouched.
+
+Final verification:
+
+- Full offline Python suite in EdgeWARN: 2,251 passed, 7 skipped (network and
+  benchmark markers excluded). Includes slow process/signal tests, full Core
+  readiness/inventory/pin regressions, and installed-wheel checks.
+- Jest and coverage: 13 suites, 134 tests passed. Retired families return 404
+  with queries as well as GET/POST; remaining NEXRAD serialization passes.
+- Python and Node catalog validators: all 13 catalogs passed.
+- Editable install, installed version/help, fresh wheel rebuild and wheel-member
+  inspection passed; the wheel contains 13 YAML catalogs and no retired packages.
+- Offline qualify_mrms_release.py passed; worker/queue/task/staging cleanup checks
+  remained intact.
+- OpenAPI references resolve; the live-reference sweep and diff whitespace checks
+  pass. No generated build or coverage output is committed.
