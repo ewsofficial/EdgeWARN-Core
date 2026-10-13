@@ -3,7 +3,7 @@
   "info": {
     "title": "EdgeWARN Unified API",
     "version": "3.1.0",
-    "description": "The versioned, read-only EdgeWARN and EWMRS public API."
+    "description": "The versioned, read-only EdgeWARN public API."
   },
   "servers": [
     {
@@ -637,30 +637,12 @@
           "type": "string"
         }
       },
-      "productId": {
-        "name": "productId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_.-]+$"
-        }
-      },
       "siteId": {
         "name": "siteId",
         "in": "path",
         "required": true,
         "schema": {
           "type": "string"
-        }
-      },
-      "layerId": {
-        "name": "layerId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_.-]+$"
         }
       },
       "elevation": {
@@ -708,24 +690,6 @@
             "official",
             "edgewarn"
           ]
-        }
-      },
-      "x": {
-        "name": "x",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "y": {
-        "name": "y",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "integer",
-          "minimum": 0
         }
       },
       "moduleId": {

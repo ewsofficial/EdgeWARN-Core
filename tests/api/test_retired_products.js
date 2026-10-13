@@ -26,6 +26,7 @@ it.each(['/api/v3/render-products', '/api/v3/render-products/MRMS_QPE',
   '/api/v3/analyses/wpc/surface', '/api/v3/observations/metar'])('%s is retired', async (url) => {
   await request(app).get(url).expect(404).expect('Content-Type', /application\/problem\+json/);
   await request(app).post(url).expect(404);
+  await request(app).get(url + "?limit=2").expect(404);
 });
 it('reports only the deployed service names', async () => {
   const response = await request(app).get('/health/ready').expect(503);

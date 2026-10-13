@@ -104,3 +104,15 @@ def test_auxiliary_freshness_participates_in_fingerprint():
     first = resolve_dependencies(registry(), auxiliary_settings=settings)
     settings['rap']['max_age_minutes'] += 1
     assert first.fingerprint != resolve_dependencies(registry(), auxiliary_settings=settings).fingerprint
+
+
+def test_resource_baseline():
+    runtime = load_config('runtime')
+    assert_baseline('independent_ingest_settings', {
+        'scheduler': dict(load_config('scheduler')['scheduler']),
+        'ingest': get_ingest_settings(),
+        'consumers': dict(runtime['consumers']),
+    })
+    settings = get_ingest_settings()
+    assert settings['download_concurrency'] == load_config('ingest')['mrms']['downloads']['max_concurrency']
+    assert settings['auxiliary_timeout_seconds'] == 4 * load_config('synoptic_rap')['rap']['nomads_timeout_seconds']
