@@ -457,7 +457,6 @@ def historical_pipeline(
                 dt,
                 lambda message: pipeline_io.write_info(message),
                 include_goes=False,
-                include_ewmrs=False,
             )
         )
         if (getattr(cycle_state, "ingest_report", None)

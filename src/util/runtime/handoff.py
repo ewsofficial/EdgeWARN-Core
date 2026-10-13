@@ -701,50 +701,5 @@ def select_pending_records(
     return selected
 
 
-def expected_layer_bindings(
-    manifest: CycleInputManifest,
-    layers,
-) -> dict[str, str | None]:
-    """Exact source path each render layer would pin under *manifest*.
-
-    Mirrors the manifest-bound selection performed by the EWMRS render
-    pipeline (``latest_for_directory`` pinning), so the shadow consumer can
-    compare its selections against the files the live worker renders without
-    producing any GUI output.
-    """
-    bindings: dict[str, str | None] = {}
-    for layer in layers:
-        name = layer.get("name")
-        source_path = layer.get("filepath")
-        if name is None or source_path is None:
-            continue
-        pinned = manifest.latest_for_directory(Path(source_path))
-        bindings[name] = str(pinned.local_path) if pinned is not None else None
-    return bindings
 
 
-def shadow_validate_phase_record(
-    record: PhaseRecord,
-    *,
-    layers=None,
-    base_dir: str | os.PathLike | None = None,
-) -> tuple[str, ...]:
-    """Full shadow validation of one committed record; returns problems.
-
-    Validates the record against the same rules the real consumer will apply:
-    successful status, manifest alignment over the exact committed inputs, and
-    — when *layers* is provided — a resolvable pinned path per layer. Pass
-    ``EWMRS.render.config.get_mrms_file_list()`` lazily from the caller so
-    importing runtime code does not load the render stack.
-    """
-    problems: list[str] = []
-    if not record.success:
-        problems.append(f"{record.phase}: record is marked unsuccessful")
-    manifest = record.to_manifest()
-    problems.extend(sorted(manifest.validate_alignment()))
-    problems.extend(record.validate_exact_inputs(base_dir=base_dir))
-    if layers is not None:
-        for name, bound in expected_layer_bindings(manifest, layers).items():
-            if bound is None:
-                problems.append(f"{name}: no manifest record pins a source file")
-    return tuple(problems)

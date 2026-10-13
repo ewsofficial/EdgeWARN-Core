@@ -2,11 +2,6 @@ services:
   edgewarn:
     build:
       context: .
-      args:
-        # NWS zone assets download at build time.  Set
-        # EDGEWARN_SYNC_NWS_ZONES=false to skip; EWMRS requires the assets.
-        # BuildKit downloads them in parallel with the runtime Conda solve.
-        EDGEWARN_SYNC_NWS_ZONES: ${EDGEWARN_SYNC_NWS_ZONES:-true}
     image: edgewarn-core:3.0.2
     restart: unless-stopped
     healthcheck:
@@ -15,7 +10,7 @@ services:
       timeout: 10s
       start_period: 5m
       retries: 3
-    # Start ingest before Core, EWMRS, and NEXRAD using the package topology.
+    # Start ingest before Core and NEXRAD using the package topology.
     command: ["edgewarn", "run", "--config-path", "/etc/edgewarn/config"]
     environment:
       # Set EDGEWARN_HOST_BASE_DIR to choose the host directory.  The package
@@ -30,7 +25,6 @@ services:
     volumes:
       - ${EDGEWARN_HOST_BASE_DIR:-./EdgeWARN_input}:/var/lib/edgewarn
       - ./config:/etc/edgewarn/config:ro
-      - ${EDGEWARN_NWS_ASSETS_DIR:-./assets/nws_zones}:/etc/edgewarn/assets/nws_zones:ro
       - ${EDGEWARN_LOG_DIR:-./EdgeWARN_logs}:/var/log/edgewarn
       # CTAM modules are operator-supplied code, never baked into the image.
       # Mounted read-only: modules may only mutate data through the loopback
@@ -49,11 +43,3 @@ services:
     volumes:
       - ./config:/etc/edgewarn/config:rw
 
-  edgewarn-sync-nws-zones:
-    image: edgewarn-core:3.0.2
-    profiles: ["admin"]
-    entrypoint: ["edgewarn"]
-    command: ["sync-nws-zones", "--apply", "--config-path", "/etc/edgewarn/config"]
-    volumes:
-      - ./config:/etc/edgewarn/config:ro
-      - ${EDGEWARN_NWS_ASSETS_DIR:-./assets/nws_zones}:/etc/edgewarn/assets/nws_zones:rw

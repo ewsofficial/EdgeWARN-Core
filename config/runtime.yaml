@@ -27,7 +27,7 @@ run:
 
   ctam_module_dir: ctam_modules
 
-  disable_goes: false
+  disable_glm: false
   disable_nexrad: false
   mrms_core_only: false
 

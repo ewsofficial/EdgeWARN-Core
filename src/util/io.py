@@ -246,11 +246,7 @@ class IOManager:
         runtime_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
         args.lat_limits = overlay.resolve(args.lat_limits, yaml_value=list(runtime_cfg["lat_limits"]), key="run.lat_limits")
         args.lon_limits = overlay.resolve(args.lon_limits, yaml_value=list(runtime_cfg["lon_limits"]), key="run.lon_limits")
-        args.disable_ewmrs = overlay.resolve(args.disable_ewmrs, yaml_value=runtime_cfg["disable_ewmrs"], key="run.disable_ewmrs")
-        args.disable_nws = overlay.resolve(args.disable_nws, yaml_value=runtime_cfg["disable_nws"], key="run.disable_nws")
-        args.disable_metar = overlay.resolve(args.disable_metar, yaml_value=runtime_cfg["disable_metar"], key="run.disable_metar")
-        args.disable_wpc = overlay.resolve(args.disable_wpc, yaml_value=runtime_cfg["disable_wpc"], key="run.disable_wpc")
-        args.disable_goes = overlay.resolve(args.disable_goes, yaml_value=runtime_cfg["disable_goes"], key="run.disable_goes")
+        args.disable_glm = overlay.resolve(args.disable_glm, yaml_value=runtime_cfg["disable_glm"], key="run.disable_glm")
         args.disable_nexrad = overlay.resolve(args.disable_nexrad, yaml_value=runtime_cfg["disable_nexrad"], key="run.disable_nexrad")
         args.mrms_core_only = overlay.resolve(args.mrms_core_only, yaml_value=runtime_cfg["mrms_core_only"], key="run.mrms_core_only")
         self._resolve_common_processing_args(args)

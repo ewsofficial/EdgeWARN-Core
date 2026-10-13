@@ -1,23 +1,4 @@
-"""Primary EdgeWARN service functions (decomposition Phase 1).
-
-Owns the truthful cycle-state store, retry policy, local readiness selection,
-and the polling loop that drives ``run_primary_cycle_once``. Extracted verbatim
-from the former monolithic ``run.py`` so the future ``run_edgewarn.py`` entry
-point can call this module directly while the old runner remains a temporary
-adapter.
-
-Since the independent-ingest cutover this module performs **no remote
-discovery**: :class:`LocalReadinessReader` selects pending scans from the
-durable readiness records the ingest service commits, so a scan becomes a
-candidate only when every configured check modifier is already downloaded and
-validated locally. Waiting for a later prerequisite costs no analysis retry,
-because no attempt is recorded until a start record actually exists.
-
-The primary service must not import EWMRS or NEXRAD implementations at module
-load: the EWMRS render jobs are independent per-input work owned by the EWMRS
-service, and accessory loops live behind ``util.runtime.background``, which
-this module never imports.
-"""
+"""Core local-readiness polling, cycle configuration, and retry handling."""
 
 import multiprocessing
 import math
@@ -56,7 +37,7 @@ def build_cycle_config(args):
     ))
     dependencies = get_ingest_dependencies(
         mrms_core_only=mrms_core_only,
-        disable_goes=args.disable_goes,
+        disable_glm=args.disable_glm,
         disable_ctam=args.disable_ctam,
         disable_stormprob=args.disable_stormprob,
     )
@@ -75,7 +56,7 @@ def build_cycle_config(args):
         min_seed_percentage=args.min_seed_percentage,
         drop_offset=args.drop_offset,
         config_dir=args.config_dir,
-        goes_enabled=not args.disable_goes and not mrms_core_only,
+        goes_enabled=not args.disable_glm and not mrms_core_only,
         mrms_core_only=mrms_core_only,
         base_dir=args.base_dir,
         handoff_enabled=handoff_enabled,
@@ -185,24 +166,19 @@ def report_effective_config(config_dir=None):
     # Lazy imports keep diagnostics from making optional render dependencies eager
     # at module import time.
     from common.ingest.mrms.config import get_check_modifiers, get_mrms_modifiers
-    from EWMRS.render.config import get_mrms_file_list, get_goes_file_list
     from EdgeWARN.process.integrate.config import get_datasets_config
-    from EWMRS.rap.config import get_rap_uint16_layers
     print(
         "[Scheduler] Enabled products: "
         f"MRMS ingest={len(get_mrms_modifiers())}, "
         f"MRMS readiness={len(get_check_modifiers())}, "
-        f"EWMRS MRMS={len(get_mrms_file_list())}, "
-        f"GOES={len(get_goes_file_list())}, "
         f"integration datasets={len(get_datasets_config())}, "
-        f"RAP layers={len(get_rap_uint16_layers())}"
     )
     print("[Scheduler] Configuration changes require a process restart to take effect.")
 
 
 def log_effective_flags(args):
     mrms_core_only = args.mrms_core_only
-    goes_enabled = not args.disable_goes and not mrms_core_only
+    goes_enabled = not args.disable_glm and not mrms_core_only
     print(
         "[Scheduler] Configuration: "
         f"lat={tuple(args.lat_limits)}, lon={tuple(args.lon_limits)}, "
@@ -219,14 +195,8 @@ def log_effective_flags(args):
         print("[Scheduler] Tracking disabled via --disable-tracking")
     if args.disable_polygon_expansion:
         print("[Scheduler] Polygon expansion disabled via --disable-polygon-expansion; using original ProbSevere polygons")
-    if args.disable_ewmrs:
-        print("[Scheduler] EWMRS pipeline disabled via --disable-ewmrs")
-    if args.disable_nws:
-        print("[Scheduler] NWS background ingest disabled via --disable-nws")
-    if args.disable_metar:
-        print("[Scheduler] METAR background ingest disabled via --disable-metar")
-    if args.disable_goes:
-        print("[Scheduler] GOES/GLM ingest and GOES rendering disabled via --disable-goes")
+    if args.disable_glm:
+        print("[Scheduler] GOES/GLM ingest and GOES rendering disabled via --disable-glm")
     if args.disable_nexrad:
         print("[Scheduler] NEXRAD runs in its own service (run_nexrad.py); this runner never starts it")
     if mrms_core_only:

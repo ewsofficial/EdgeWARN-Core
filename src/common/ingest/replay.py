@@ -5,7 +5,7 @@ are active. Cleanup acquires the same OS lock, closing the select/delete race;
 a crashed process releases the lease automatically.
 
 The lease is a short cross-process mutex, not an ownership lock: ingest, Core
-and EWMRS all take it briefly. :func:`input_lock` therefore waits a bounded
+all take it briefly. :func:`input_lock` therefore waits a bounded
 time (``runtime.handoff.input_lock_timeout_seconds``) instead of failing on the
 first overlap, and is re-entrant per thread so nested critical sections cannot
 deadlock against themselves. Cleanup stays a single non-blocking attempt so it

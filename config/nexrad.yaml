@@ -70,3 +70,10 @@ gui:
   poll_interval_min_seconds: 1.0
   max_workers: 8
   cleanup_max_age_minutes: 120
+variable_colormaps:
+  DBZH: NWS_Reflectivity
+  VRADH: VRADH
+  WRADH: WRADH
+  PHIDP: PHIDP
+  RHOHV: RHOHV
+  ZDR: ZDR

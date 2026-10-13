@@ -1,9 +1,4 @@
-"""NEXRAD GUI serialization (owned by the NEXRAD service).
-
-Reads grouped elevation AR2V artifacts and writes the binary .bin.gz layers
-plus per-site render manifests under ``gui/NEXRAD/``. The colormap mapping is
-read lazily so importing this module does not load the EWMRS render stack.
-"""
+"""NEXRAD-owned compressed polar serialization and render manifests."""
 
 from __future__ import annotations
 
@@ -84,7 +79,7 @@ def _write_nexrad_variable_bin(path: Path, dense_data: np.ndarray, azimuths: np.
         ]
     )
     # mtime=0 makes identical fields reproducible and keeps no filename in
-    # the gzip header (mirrors EWMRS save_float16_chunk).
+    # the gzip header (mirrors retired rendering service save_float16_chunk).
     compressed = gzip.compress(payload, mtime=0)
     # Verify the completed stream can be read before exposing it.
     if gzip.decompress(compressed)[: len(NEXRAD_FIELD_MAGIC)] != NEXRAD_FIELD_MAGIC:
@@ -229,7 +224,7 @@ def _serialize_direct_grouped_ar2v_artifact(site: str, volume_id: str, artifact,
     requested_groups = sorted(sweeps_by_group)
 
     manifest_layers = []
-    from EWMRS.render.config import nexrad_variable_colormaps
+    from NEXRAD.config import nexrad_variable_colormaps
 
     colormap_keys = nexrad_variable_colormaps()
     elevation_label = artifact.elevation

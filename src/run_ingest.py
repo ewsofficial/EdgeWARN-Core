@@ -1,25 +1,4 @@
-"""Supported independent realtime ingest command (plan phase 4).
-
-The ingest service owns every realtime MRMS, raw RAP, and scan-time GLM
-acquisition. It polls its sources on a fixed cadence, publishes each validated
-input to the durable inventory and render outbox, and evaluates per-scan Core
-readiness. It performs no scientific analysis and no rendering, and it never
-imports EWMRS or the Core analysis modules: its outbox describes source
-products, and EWMRS owns the product-to-layer mapping.
-
-Because nothing here waits for Core or EWMRS, a blocked Core worker, a failed
-detection, or a completely stopped consumer never pauses acquisition.
-
-Run directly:
-
-    python src/run_ingest.py
-
-Behavior mirrors the other direct services: a single-instance lock beneath
-``state/realtime/services/``, an atomic canonical heartbeat refreshed by an
-independent liveness thread, and clean SIGINT/SIGTERM shutdown that joins every
-owned download/decode worker within the configured termination bound. No import
-side effects: parsing and runtime initialization happen in ``main()``.
-"""
+"""Independent MRMS, RAP, and GLM acquisition and Core readiness publisher."""
 
 import os
 import signal
@@ -50,7 +29,7 @@ def _parse_args(argv=None):
 
     Resolution order matches the other direct services: an explicit flag wins,
     then the runtime catalog. Acquisition-only flags belong to this service; the
-    dependency-shared flags (``--mrms-core-only``, ``--disable-goes``,
+    dependency-shared flags (``--mrms-core-only``, ``--disable-glm``,
     ``--disable-ctam``, ``--disable-stormprob``) are
     accepted here so the producer's effective dependency agreement is explicit,
     and the launcher propagates the same value to every consumer.
@@ -61,15 +40,13 @@ def _parse_args(argv=None):
         overlay.resolve_base_dir(args.base_dir, filesystem).expanduser().resolve()
     )
     run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
-    for flag, key in (("disable_goes", "run.disable_goes"),
+    for flag, key in (("disable_glm", "run.disable_glm"),
                       ("disable_ctam", "run.disable_ctam"),
                       ("disable_stormprob", "run.disable_stormprob"),
                       ("mrms_core_only", "run.mrms_core_only"),
                       ("profile", "run.profile")):
         setattr(args, flag, overlay.resolve(
             getattr(args, flag), yaml_value=run_cfg[flag], key=key))
-    args.render_consumer = overlay.resolve(
-        args.render_consumer, yaml_value=not run_cfg["disable_ewmrs"], key="run.disable_ewmrs")
     root = config_loader.export_config_root(args.config_dir)
     config_loader.validate_all_configs(config_dir=root)
     return args
@@ -101,7 +78,7 @@ def main():
         sys.exit(1)
     try:
         dependencies = get_ingest_dependencies(
-            mrms_core_only=args.mrms_core_only, disable_goes=args.disable_goes,
+            mrms_core_only=args.mrms_core_only, disable_glm=args.disable_glm,
             disable_ctam=args.disable_ctam, disable_stormprob=args.disable_stormprob)
     except ValueError as exc:
         print(f"[Ingest] Dependency preflight failed: {exc}")
@@ -116,7 +93,7 @@ def main():
         key="handoff.enabled")
     if not handoff_enabled:
         print("[Ingest] handoff.enabled=false is not supported in the independent ingest "
-              "topology: Core and EWMRS both require durable readiness records. Enable it, "
+              "topology: Core requires durable readiness records. Enable it, "
               "or run the retired batch pipeline instead.")
         sys.exit(1)
 
@@ -125,12 +102,12 @@ def main():
     print(f"Independent realtime ingest service started (v{get_release_version()}). "
           "Press CTRL+C to exit.")
     print("[Ingest] Acquisition owner for realtime MRMS, raw RAP, and scan-time GLM.")
-    print("[Ingest] Core consumes its readiness records and EWMRS its render outbox; "
+    print("[Ingest] Core consumes its readiness records; "
           "neither is waited on here.")
     if args.mrms_core_only:
         print("[Ingest] MRMS-core-only: RAP and scan-time GLM acquisition disabled.")
-    if args.disable_goes:
-        print("[Ingest] GOES/GLM acquisition disabled via --disable-goes")
+    if args.disable_glm:
+        print("[Ingest] GOES/GLM acquisition disabled via --disable-glm")
 
     run_id = uuid.uuid4().hex
     lock = ServiceLock(args.base_dir, SERVICE_NAME)
@@ -145,7 +122,7 @@ def main():
         base_dir=fs.BASE_DIR, run_id=run_id, registry=registry,
         dependencies=dependencies,
         resources=IngestResources.resolve(config_dir=args.config_dir),
-        io=io_manager, stop_event=stop_event, render_consumer=args.render_consumer)
+        io=io_manager, stop_event=stop_event)
 
     def _request_stop(_signum, _frame):
         print("[Ingest] Shutdown signal received; stopping after the current atomic unit...")

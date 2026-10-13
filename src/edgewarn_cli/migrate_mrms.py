@@ -65,7 +65,7 @@ def convert_documents(documents, legacy):
     ingest['mrms'].update(products=[p for p in products if p not in protected],
                           ncep_https={key: https[key] for key in retained_https},
                           downloads={'max_concurrency': 8, 'optional_timeout_seconds': 30})
-    for name, key in [('integration', 'stats_datasets'), ('ewmrs_render', 'mrms_layers')]:
+    for name, key in [('integration', 'stats_datasets')]:
         for item in converted[name][key]:
             alias = item.get('filepath')
             if alias not in aliases:
@@ -142,17 +142,6 @@ def _interlocks(base, stack):
         raise ValueError('Active input pins prevent migration') from exc
     for area in ('cycles', 'consumers', 'leases', 'services'):
         _contained(base / 'state/realtime' / area, base)
-    for phase in ('mrms-ready', 'rap-ready'):
-        checkpoint = ConsumerCheckpointStore(base, f'ewmrs-{phase}').load()
-        pending = select_pending_records(base, phase, checkpoint=checkpoint, max_backlog=1000000)
-        # The consumer selector also reports cycle directories where this
-        # phase was never published (for example, RAP disabled). Stopped
-        # producers cannot add those phases; only existing records are backlog.
-        if any(status != 'already-processed' and
-               (phase_record_path(base, cycle_id, phase).exists() or
-                phase_record_path(base, cycle_id, phase).is_symlink())
-               for cycle_id, _, status in pending):
-            raise ValueError(f'Unconsumed {phase} backlog; drain before migration')
 
 
 def _write(path, data):

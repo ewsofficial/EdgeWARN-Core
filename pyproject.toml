@@ -35,7 +35,6 @@ py-modules = [
   "run",
   "run_all",
   "run_edgewarn",
-  "run_ewmrs",
   "run_ingest",
   "run_nexrad",
 ]
@@ -44,7 +43,6 @@ py-modules = [
 where = ["src"]
 include = [
   "EdgeWARN*",
-  "EWMRS*",
   "NEXRAD*",
   "common*",
   "edgewarn_cli*",
@@ -53,7 +51,6 @@ include = [
 namespaces = true
 
 [tool.setuptools.package-data]
-EWMRS = ["*.json"]
 "common.config" = ["mrms-v1.json"]
 "common.ingest.mrms" = ["core-contract.json"]
 

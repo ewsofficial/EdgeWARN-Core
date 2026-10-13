@@ -1,9 +1,4 @@
-"""NEXRAD service package (decomposition Phase 3).
-
-Owns the complete NEXRAD lifecycle: Level-II ingest supervision, GUI
-rendering, manifests/indexes, retention, and cleanup. Neither the primary
-EdgeWARN service nor EWMRS may import, launch, render, or clean NEXRAD work.
-"""
+"""NEXRAD serialization and rendering."""
 
 from NEXRAD.gui_pipeline import (
     cleanup_old_nexrad_gui_files,

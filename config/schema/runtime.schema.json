@@ -246,7 +246,7 @@
         "disable_tracking",
         "disable_polygon_expansion",
         "ctam_module_dir",
-        "disable_goes",
+        "disable_glm",
         "disable_nexrad",
         "mrms_core_only"
       ],
@@ -290,7 +290,7 @@
           "type": "string",
           "pattern": "^[^\\x00-\\x1f]+$"
         },
-        "disable_goes": {
+        "disable_glm": {
           "type": "boolean"
         },
         "disable_nexrad": {

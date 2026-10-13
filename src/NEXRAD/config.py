@@ -34,3 +34,8 @@ def nexrad_render_max_workers() -> int:
 def gui_cleanup_max_age_minutes() -> int:
     """Age above which rendered NEXRAD GUI outputs are removed."""
     return _section("gui")["cleanup_max_age_minutes"]
+
+
+def nexrad_variable_colormaps() -> dict:
+    """Map radar moments to client display keys."""
+    return dict(load_config("nexrad")["variable_colormaps"])

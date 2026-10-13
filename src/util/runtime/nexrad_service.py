@@ -5,7 +5,7 @@ its heartbeat-staleness restart policy) and GUI rendering. Consumed by the
 standalone ``run_nexrad.py`` entry point.
 
 Since Phase 3 the render loop lives in ``NEXRAD.gui_pipeline``; importing this
-module loads neither EWMRS nor any other service's scientific stack.
+module loads neither any other service's scientific stack.
 """
 
 from common.ingest.nexrad.config import (

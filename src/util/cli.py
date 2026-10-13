@@ -3,14 +3,13 @@
 Decomposition Phase 1 (plans/realtime-runner-decomposition-plan.md): the old
 monolithic runner owned every flag in one parser, so no service could expose
 only the flags it honors. These builders compose that same flag set from
-per-service groups so each future entry point (primary, EWMRS, NEXRAD, and the
+per-service groups so each future entry point (primary, ingest, NEXRAD, and the
 optional launcher) can build exactly the parser it owns while ``--base-dir``
 spelling, YAML-default overlay behavior, and validation stay identical.
 
 This module deliberately lives under ``util/`` rather than
 ``util/runtime/``: ``util/io.py`` composes these builders, and importing
-anything inside the ``util.runtime`` package would drag the full EdgeWARN /
-EWMRS scientific import graph into every consumer of ``util.io``.
+anything inside the ``util.runtime`` package would drag the full scientific import graph into every consumer of ``util.io``.
 
 Flag definitions only. Resolution of YAML defaults happens through
 ``common.config.overlay.resolve`` at parse time, exactly as before; see
@@ -25,10 +24,8 @@ def build_service_parser(service, *, add_help=True):
     parser = argparse.ArgumentParser(add_help=add_help, allow_abbrev=False)
     if service == "ingest":
         add_base_directory_flags(parser)
-        parser.add_argument("--render-consumer", action=argparse.BooleanOptionalAction, default=None,
-                            help="Protect inputs for an EWMRS consumer (default: runtime.run.disable_ewmrs)")
         parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
-        parser.add_argument("--disable-goes", action=argparse.BooleanOptionalAction, default=None)
+        parser.add_argument("--disable-glm", action=argparse.BooleanOptionalAction, default=None)
         add_stormprob_dependency_flags(parser)
         add_mrms_core_only_flag(parser)
     elif service == "edgewarn":
@@ -37,13 +34,6 @@ def build_service_parser(service, *, add_help=True):
         add_primary_processing_flags(parser)
         add_ctam_diagnostic_flags(parser)
         add_service_enablement_flags(parser)
-        add_mrms_core_only_flag(parser)
-    elif service == "ewmrs":
-        add_base_directory_flags(parser)
-        parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
-        for flag in ("disable-metar", "disable-nws", "disable-wpc", "disable-goes"):
-            parser.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None)
-        add_stormprob_dependency_flags(parser)
         add_mrms_core_only_flag(parser)
     elif service == "nexrad":
         add_base_directory_flags(parser)
@@ -89,12 +79,12 @@ def add_primary_processing_flags(parser):
 
 
 def add_stormprob_dependency_flags(parser):
-    """Dependency-shared CTAM/StormProb switches for ingest and EWMRS.
+    """Dependency-shared CTAM/StormProb switches for ingest and Core.
 
     With CTAM and StormProb enabled, every StormProb MRMS source is a mandatory
     integration input, which changes the frozen dependency fingerprint. The
     producer and every consumer must therefore see the primary's values; the
-    launcher routes them to all three services, like ``--disable-goes``.
+    launcher routes them to both services, like ``--disable-glm``.
     """
     parser.add_argument("--disable-ctam", action=argparse.BooleanOptionalAction, default=None, help="Match the primary's CTAM setting so the StormProb integration gate agrees (default: from runtime.yaml)")
     parser.add_argument("--disable-stormprob", action=argparse.BooleanOptionalAction, default=None, help="Match the primary's StormProb setting so the StormProb integration gate agrees (default: from runtime.yaml)")
@@ -114,25 +104,13 @@ def add_mrms_core_only_flag(parser):
         default=None,
         help=(
             "Run only MRMS detection, MRMS feature integration, and CTAM; "
-            "disable EWMRS, GOES/GLM, RAP, NEXRAD, NWS, METAR, and WPC. "
+            "disable GLM, RAP, and NEXRAD. "
             "(default: from runtime.yaml)"
         ),
     )
 
 
 def add_service_enablement_flags(parser):
-    """Service enablement switches routed to their owning services.
-
-    ``--disable-ewmrs`` and ``--disable-nexrad`` have no direct meaning inside a
-    single decomposed process; they exist so the optional all-services launcher
-    can omit those children. They are parsed alongside the rest today because
-    the monolithic runner still starts everything in one process.
-    """
-    parser.add_argument("--disable-ewmrs", action=argparse.BooleanOptionalAction, default=None, help="Disable EWMRS workers and rendering pipeline (default: from runtime.yaml)")
-    parser.add_argument("--disable-nws", action=argparse.BooleanOptionalAction, default=None, help="Disable background NWS alert ingestion (default: from runtime.yaml)")
-    parser.add_argument("--disable-metar", action=argparse.BooleanOptionalAction, default=None, help="Disable background METAR ingestion (default: from runtime.yaml)")
-    # Decomposition Phase 4 CLI contract: WPC is EWMRS-owned and previously had
-    # no dedicated flag (it ran unless --mrms-core-only).
-    parser.add_argument("--disable-wpc", action=argparse.BooleanOptionalAction, default=None, help="Disable background WPC surface analysis ingestion (default: from runtime.yaml)")
-    parser.add_argument("--disable-goes", action=argparse.BooleanOptionalAction, default=None, help="Disable GOES ingest, GLM ingest, and GOES rendering components (default: from runtime.yaml)")
+    """Core GLM and supervisor radar controls."""
+    parser.add_argument("--disable-glm", action=argparse.BooleanOptionalAction, default=None, help="Disable scan-time GLM ingest (default: from runtime.yaml)")
     parser.add_argument("--disable-nexrad", action=argparse.BooleanOptionalAction, default=None, help="Disable background NEXRAD ingest and rendering (default: from runtime.yaml)")
