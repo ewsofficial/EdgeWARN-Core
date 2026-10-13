@@ -12,7 +12,6 @@ import { createAccessLog } from './middleware/logging.js';
 import { requestTimeout, securityMiddleware } from './middleware/security.js';
 import { ArtifactRepository } from './repositories/artifactRepository.js';
 import { createAnalysisService } from './services/analysis.js';
-import { createRenderService } from './services/renders.js';
 import { createAncillaryServices } from './services/ancillary.js';
 import { createServiceRegistry } from './services/serviceRegistry.js';
 import { createModulesService } from './services/modules.js';
@@ -26,7 +25,7 @@ export async function createApp(options = {}) {
   const openApi = await fs.readFile(config.openApiPath, 'utf8');
   const routeTemplates = Object.keys(JSON.parse(openApi).paths);
   const repository = new ArtifactRepository(
-    { data: config.dataDir, gui: config.guiDir, wpc: config.wpcDir },
+    { data: config.dataDir, gui: config.guiDir },
     config.api.artifacts.size_limits_bytes,
     config.api.artifacts.json_cache,
     config.api.artifacts.list_limit,
@@ -42,7 +41,7 @@ export async function createApp(options = {}) {
   app.get('/health/live', (req, res) => res.json({ status: 'ok', requestId: req.requestId, config: config.diagnostics }));
   app.get('/health/ready', async (req, res, next) => {
     try {
-    const checks = await Promise.all([config.dataDir, config.guiDir, config.wpcDir].map(async (dir) => { try { return (await fs.stat(dir)).isDirectory(); } catch { return false; } }));
+    const checks = await Promise.all([config.dataDir, config.guiDir].map(async (dir) => { try { return (await fs.stat(dir)).isDirectory(); } catch { return false; } }));
     const services = await servicesSummary();
     const healthy = config.api.server.enabled_services.every((name) => ['active', 'degraded'].includes(services[name]?.state));
     const ready = checks.every(Boolean) && healthy;
@@ -54,7 +53,7 @@ export async function createApp(options = {}) {
     });
     } catch (error) { next(error); }
   });
-  const analysis = createAnalysisService(repository); const renders = createRenderService(repository, config.api.render_defaults, config.api.artifacts.chunk_length_slack_bytes); const ancillary = createAncillaryServices(repository, { validation: config.api.validation, wpc: config.wpc });
+  const analysis = createAnalysisService(repository); const ancillary = createAncillaryServices(repository, { validation: config.api.validation });
   const modules = createModulesService(repository);
   // Service-state visibility (decomposition Phase 3): the scanner classifies
   // the canonical heartbeats under <baseDir>/state/realtime/services/. The
@@ -70,7 +69,7 @@ export async function createApp(options = {}) {
     lastSeen: entry.heartbeat ? entry.heartbeat.updatedAt.toISOString() : null,
     degradedChildren: entry.heartbeat?.degradedChildren ?? [],
   }]));
-  app.use('/api/v3', createV3Router({ analysis, renders, ancillary, modules, openApi, apiConfig: config.api, serviceRegistry }));
+  app.use('/api/v3', createV3Router({ analysis, ancillary, modules, openApi, apiConfig: config.api, serviceRegistry }));
   app.use(notFound); app.use(errorHandler);
   return { app, config };
 }

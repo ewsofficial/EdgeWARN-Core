@@ -184,14 +184,6 @@ class InputInventory:
             if state.data['status'] not in TERMINAL_STATUSES:
                 references.update(state.data['input_ids'])
         return references
-        acks = self.handoff.records('render-ack')
-        plans = self.handoff.records('render-plan')
-        complete = self._render_completion_index(plans, acks)
-        # Inventory without outbox is also pending work: protect the crash window.
-        for record in self.handoff.records('input'):
-            if record.key not in complete:
-                references.add(record.key)
-        return references
 
     def cleanup(self, *, before, protected_products=(), family_before=None):
         """Delete only completed unreferenced inputs older than the rediscovery window.

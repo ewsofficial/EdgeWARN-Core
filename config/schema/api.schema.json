@@ -13,9 +13,7 @@
     "pagination",
     "cache_control_max_age",
     "query",
-    "render_defaults",
-    "validation",
-    "product_catalog"
+    "validation"
   ],
   "properties": {
     "schema_version": {
@@ -250,8 +248,7 @@
       "required": [
         "size_limits_bytes",
         "json_cache",
-        "list_limit",
-        "chunk_length_slack_bytes"
+        "list_limit"
       ],
       "properties": {
         "size_limits_bytes": {
@@ -296,10 +293,6 @@
           }
         },
         "list_limit": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "chunk_length_slack_bytes": {
           "type": "integer",
           "minimum": 0
         }
@@ -372,62 +365,6 @@
         }
       }
     },
-    "render_defaults": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "grid",
-        "grid_maxima"
-      ],
-      "properties": {
-        "grid": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "rows",
-            "cols",
-            "tile_size"
-          ],
-          "properties": {
-            "rows": {
-              "type": "integer",
-              "exclusiveMinimum": 0
-            },
-            "cols": {
-              "type": "integer",
-              "exclusiveMinimum": 0
-            },
-            "tile_size": {
-              "type": "integer",
-              "exclusiveMinimum": 0
-            }
-          }
-        },
-        "grid_maxima": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "rows",
-            "cols",
-            "tile_size"
-          ],
-          "properties": {
-            "rows": {
-              "type": "integer",
-              "exclusiveMinimum": 0
-            },
-            "cols": {
-              "type": "integer",
-              "exclusiveMinimum": 0
-            },
-            "tile_size": {
-              "type": "integer",
-              "exclusiveMinimum": 0
-            }
-          }
-        }
-      }
-    },
     "validation": {
       "type": "object",
       "additionalProperties": false,
@@ -443,19 +380,6 @@
             "type": "string",
             "pattern": "^[A-Z][A-Z0-9]*$"
           }
-        }
-      }
-    },
-    "product_catalog": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "entries"
-      ],
-      "properties": {
-        "entries": {
-          "type": "integer",
-          "minimum": 0
         }
       }
     }

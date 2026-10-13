@@ -9,8 +9,6 @@
     "debug:api": "node src/api/server.js --debug-server",
     "api:edgewarn": "node src/api/server.js --compat=edgewarn",
     "debug:edgewarn": "node src/api/server.js --debug-server --compat=edgewarn",
-    "api:ewmrs": "node src/api/server.js --compat=ewmrs",
-    "debug:ewmrs": "node src/api/server.js --debug-server --compat=ewmrs",
     "validate-config": "node scripts/validate-config.js",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "sbom:prod": "npm sbom --sbom-format cyclonedx --omit=dev --package-lock-only",

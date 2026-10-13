@@ -46,7 +46,7 @@ describe('unified API app', () => {
       source: { schemaVersion: 1 },
       overrides: ['EDGEWARN_BASE_DIR', 'RATE_LIMIT_MAX_SEC', 'RATE_LIMIT_MAX_MIN'],
       restartRequired: true,
-      effective: { baseDir, renderProductCount: 32, radarProductCount: 7 },
+      effective: { baseDir, radarProductCount: 7 },
     });
     const ready = await request(app).get('/health/ready').expect(503);
     expect(ready.body.config).toEqual(live.body.config);
@@ -97,58 +97,7 @@ describe('unified API app', () => {
     expect(cell.modules.StormProb.leads.every((lead) => lead.metadata.geometry_kind === 'instantaneous-probability-contour')).toBe(true);
   });
 
-  it('serves every v3 resource family from one configured runtime tree', async () => {
-    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-all-'));
-    const write = async (relative, contents) => { const target = path.join(baseDir, relative); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, contents); };
-    await write('data/stormcells/stormcell_index.json', '{"timestamps":["20260317-200000"]}');
-    await write('data/stormcells/stormcells_20260317-200000.json', '[]');
-    await write('data/Alerts/official/timestamps/20260317-200000.json', '{"alerts":[]}');
-    await write('data/METAR/METAR_20260317-20z.json', '[]');
-    const renderFormat = { version: 2, encoding: 'float16', file_suffix: '.f16.gz', compression: 'gzip', channels: 1, value_kind: 'scalar', no_data: 'nan', bytes_per_component: 2, pixel_row_order: 'top_to_bottom', grid_origin: 'bottom_left' };
-    await write('gui/MRMS_MergedReflectivityQC/index.json', JSON.stringify({ schema_version: 2, timestamps: ['20260317-200000'], representation: 'binary_chunks', chunk_format: { ...renderFormat, media_type: 'application/octet-stream' }, tile_grid: { rows: 1, cols: 1, tile_size: 2 } }));
-    await write('gui/MRMS_MergedReflectivityQC/20260317-200000/index.json', JSON.stringify({ schema_version: 2, timestamp: '20260317-200000', representation: 'binary_chunks', chunk_format: renderFormat, tile_grid: { rows: 1, cols: 1, tile_size: 2 }, chunks: [[0, 0]] }));
-    await write('gui/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz', Buffer.from('H4sIAAAAAAAC/2NggAAAad8iZQgAAAA=', 'base64'));
-    await write('gui/NEXRAD/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz', 'gzip');
-    // Route families require an active service heartbeat for their owner
-    // (decomposition Phases 3-5); without them these routes return 503.
-    const heartbeat = (service) => JSON.stringify({ schema_version: 1, service, pid: 1, run_id: 'test-run', updated_at: new Date().toISOString(), phase: 'supervising', degraded_children: [] });
-    await write('state/realtime/services/nexrad.json', heartbeat('nexrad'));
-    await write('state/realtime/services/ewmrs.json', heartbeat('ewmrs'));
-    await write('state/realtime/services/edgewarn.json', heartbeat('edgewarn'));
-    await write('gui/RAP/CAPE/index.json', '["20260317-200000"]');
-    await write('gui/RAP/CAPE/20260317-200000/metadata.json', '{"units":"J/kg","grid":{"ni":1,"nj":1}}');
-    await write('gui/RAP/CAPE/20260317-200000/data.u16', 'u16');
-    await write('wpc/surface_analysis/wpc_sfc_20260317-200000.geojson', '{"type":"FeatureCollection","features":[]}');
-    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
-    const paths = [
-      '/api/v3/storm-snapshots', '/api/v3/storm-snapshots/20260317-200000',
-      '/api/v3/alert-snapshots?source=official', '/api/v3/observations/metar',
-      '/api/v3/render-products', '/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots',
-      '/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/chunks',
-      '/api/v3/radar-sites', '/api/v3/radar-sites/KTLH/availability',
-      '/api/v3/models/rap/layers', '/api/v3/models/rap/layers/CAPE/snapshots',
-      '/api/v3/models/rap/layers/CAPE/snapshots/20260317-200000/metadata',
-      '/api/v3/analyses/wpc/surface',
-      '/api/v3/analyses/wpc/surface/20260317-200000'
-    ];
-    for (const endpoint of paths) await request(app).get(endpoint).expect(200);
-    const renderProducts = await request(app).get('/api/v3/render-products').expect(200);
-    expect(renderProducts.body.data[0]).not.toHaveProperty('legacyId');
-    const renderProduct = await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC').expect(200);
-    expect(renderProduct.body.data).not.toHaveProperty('legacyId');
-    expect(renderProduct.body.data.representation).toBe('binary_chunks');
-    await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/image').expect(404);
-    await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/tiles').expect(404);
-    const chunk = await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/chunks/0/0').expect(200).expect('Content-Type', /application\/octet-stream/);
-    expect(chunk.headers['cache-control']).toContain('immutable');
-    expect(chunk.headers['x-data-type']).toBe('float16');
-    expect(chunk.headers['content-length']).toBe('23');
-    await request(app).head('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/chunks/0/0').expect(200).expect('Content-Length', '23');
-    await request(app).get('/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/20260317-200000/chunks/0/0').set('If-None-Match', chunk.headers.etag).expect(304);
-    await request(app).get('/api/v3/radar-sites/KTLH/scans/20260317-200000/elevations/0.5/products/DBZH').expect(200).expect('Content-Type', /application\/gzip/);
-    const rap = await request(app).get('/api/v3/models/rap/layers/CAPE/snapshots/20260317-200000/data').expect(200);
-    expect(rap.headers['x-units']).toBe('J/kg');
-  });
+  
 
   it('paginates numeric cell IDs with string cursors', async () => {
     baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-pages-'));
@@ -165,17 +114,7 @@ describe('unified API app', () => {
     expect(second.body.meta.nextCursor).toBeNull();
   });
 
-  it('serves WPC surface analyses as native GeoJSON', async () => {
-    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-wpc-'));
-    await fs.mkdir(path.join(baseDir, 'wpc', 'surface_analysis'), { recursive: true });
-    await fs.writeFile(path.join(baseDir, 'wpc', 'surface_analysis', 'wpc_sfc_20260317-200000.geojson'), '{"type":"FeatureCollection","features":[]}');
-    // WPC analyses are an EWMRS-owned route family (Phase 4 gating).
-    await fs.mkdir(path.join(baseDir, 'state', 'realtime', 'services'), { recursive: true });
-    await fs.writeFile(path.join(baseDir, 'state', 'realtime', 'services', 'ewmrs.json'), JSON.stringify({ schema_version: 1, service: 'ewmrs', pid: 1, run_id: 'test-run', updated_at: new Date().toISOString(), phase: 'supervising', degraded_children: [] }));
-    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
-    const wpc = await request(app).get('/api/v3/analyses/wpc/surface/20260317-200000').expect(200).expect('Content-Type', /application\/geo\+json/);
-    expect(wpc.body).toEqual({ type: 'FeatureCollection', features: [] });
-  });
+  
 
   it('masks the exact version in production on all version surfaces', async () => {
     baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-version-'));

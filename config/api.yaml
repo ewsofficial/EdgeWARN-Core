@@ -16,7 +16,7 @@ server:
   openapi_spec: <src_dir>/api/openapi/v3.yaml
   production_version_label: '2.x'
 
-  v3_api_version: '3.0.2'
+  v3_api_version: '3.1.0'
 
 security:
   # One year; do not lower for production HTTPS deployments.
@@ -53,7 +53,6 @@ artifacts:
   json_cache: {max_entries: 256, max_size_bytes: 33554432}
   list_limit: 1000
 
-  chunk_length_slack_bytes: 1024
 
 pagination:
   default_limit: 100
@@ -69,14 +68,6 @@ query:
   max_value_length: 256
   limit_pattern: '^(?:[1-9][0-9]{0,2}|1000)$'
 
-render_defaults:
-  grid: {rows: 5, cols: 10, tile_size: 700}
-
-  # Hard safety ceiling for artifact metadata; keep aligned with renderer capabilities.
-  grid_maxima: {rows: 100, cols: 100, tile_size: 4096}
-
 validation:
   radar_products: [DBZH, VRADH, WRADH, PHIDP, CCORH, RHOHV, ZDR]
 
-product_catalog:
-  entries: 32

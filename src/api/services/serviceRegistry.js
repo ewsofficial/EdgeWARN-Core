@@ -8,7 +8,7 @@ import path from 'path';
 // 'ingest' is diagnostic poll liveness for the independent acquisition
 // service. It deliberately has no route-family requirement: an ingest outage
 // must be visible without gating artifacts that are already published.
-export const CANONICAL_SERVICE_NAMES = ['ingest', 'edgewarn', 'ewmrs', 'nexrad'];
+export const CANONICAL_SERVICE_NAMES = ['ingest', 'edgewarn', 'nexrad'];
 export const HEARTBEAT_SCHEMA_VERSION = 1;
 
 export const ROUTE_SERVICE_REQUIREMENTS = {
@@ -16,9 +16,6 @@ export const ROUTE_SERVICE_REQUIREMENTS = {
   '/api/v3/storm-snapshots': 'edgewarn',
   '/api/v3/alert-snapshots': 'edgewarn',
   '/api/v3/alerts': 'edgewarn',
-  '/api/v3/render-products': 'ewmrs',
-  '/api/v3/models/rap': 'ewmrs',
-  '/api/v3/analyses/wpc': 'ewmrs',
   '/api/v3/radar-sites': 'nexrad',
 };
 

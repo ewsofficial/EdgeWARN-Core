@@ -112,12 +112,8 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
   validateAllConfigs({ configDir: selectedConfigDir });
   const api = loadConfig('api', { configDir: selectedConfigDir });
   const filesystem = loadConfig('filesystem', { configDir: selectedConfigDir });
-  // The API serves WPC surface analyses out of a directory the ingest side names,
-  // so it reads that file's naming keys rather than restating them here.
-  const wpc = loadConfig('wpc', { configDir: selectedConfigDir }).wpc;
   const resolvedConfigRoot = configRoot(selectedConfigDir);
   const apiProvenance = getProvenance('api', { configDir: selectedConfigDir });
-  const wpcProvenance = getProvenance('wpc', { configDir: selectedConfigDir });
   const canonicalCli = oneValue(readFlag(argv, ['--base-dir']), '--base-dir');
   const deprecatedCli = oneValue(readFlag(argv, ['--base_dir']), '--base_dir');
   const canonicalEnv = env.EDGEWARN_BASE_DIR;
@@ -149,9 +145,6 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
       file: apiProvenance.path,
       schemaVersion: apiProvenance.schema_version,
       root: resolvedConfigRoot,
-      // ancillary.js derives the surface-analysis filenames from wpc.yaml, making it
-      // a second effective source that /health/live would otherwise not name.
-      wpc: Object.freeze({ file: wpcProvenance.path, schemaVersion: wpcProvenance.schema_version }),
     }),
     overrides: Object.freeze(activeOverrides),
     restartRequired: true,
@@ -161,7 +154,6 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
       requestTimeoutMs,
       rateLimits: Object.freeze({ perSecond: rateLimitMaxSec, perMinute: rateLimitMaxMin }),
       allowedOriginCount: env.ALLOWED_ORIGINS === undefined ? api.security.allowed_origins.length : parseOrigins(env.ALLOWED_ORIGINS).length,
-      renderProductCount: api.product_catalog.entries,
       radarProductCount: api.validation.radar_products.length,
     }),
   });
@@ -169,12 +161,10 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
     baseDir,
     dataDir: path.join(baseDir, 'data'),
     guiDir: path.join(baseDir, 'gui'),
-    wpcDir: path.join(baseDir, 'wpc'),
     configDir: resolvedConfigRoot,
     repoDir: repoRoot(selectedConfigDir),
     openApiPath: resolveSourcePath(api.server.openapi_spec, 'openapi_spec'),
     api,
-    wpc,
     diagnostics,
     port, packageVersion, isProduction: env.NODE_ENV === 'production', requestTimeoutMs,
     allowedOrigins: parseOrigins(env.ALLOWED_ORIGINS === undefined ? api.security.allowed_origins : env.ALLOWED_ORIGINS),
