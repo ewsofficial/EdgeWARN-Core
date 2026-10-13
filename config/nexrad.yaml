@@ -62,3 +62,11 @@ retention:
   scan_dirs_to_keep: 3
   elevation_dirs_to_keep: 2
   stale_manifest_max_age_hours: 12
+
+# NEXRAD-owned render cadence and retention.
+gui:
+  retention_minutes: 120
+  poll_interval_seconds: 30.0
+  poll_interval_min_seconds: 1.0
+  max_workers: 8
+  cleanup_max_age_minutes: 120

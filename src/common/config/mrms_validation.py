@@ -13,7 +13,7 @@ def validate_mrms_document(name, document):
         asset = Path(__file__).parents[1] / 'ingest/mrms/core-contract.json'
         protected = [p['configured_id'] for p in json.loads(asset.read_text())['products']]
         normalize_products(document['mrms']['products'], protected_ids=protected)
-    key = {'integration': 'stats_datasets', 'ewmrs_render': 'mrms_layers'}.get(name)
+    key = {'integration': 'stats_datasets'}.get(name)
     if key:
         for index, item in enumerate(document[key]):
             if ('product' in item) == ('filepath' in item):

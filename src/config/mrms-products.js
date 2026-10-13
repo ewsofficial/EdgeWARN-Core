@@ -30,7 +30,7 @@ export function validateMrmsDocument(name, document) {
     const asset = JSON.parse(fs.readFileSync(new URL('../common/ingest/mrms/core-contract.json', import.meta.url), 'utf8'));
     normalizeProducts(document.mrms.products, asset.products.map((p) => p.configured_id));
   }
-  const key = { integration: 'stats_datasets', ewmrs_render: 'mrms_layers' }[name];
+  const key = { integration: 'stats_datasets' }[name];
   if (key) document[key].forEach((item, index) => {
     if (('product' in item) === ('filepath' in item)) throw new Error(`${key}[${index}] requires exactly one of product or legacy filepath`);
     if ('product' in item) parseProductId(`MRMS_${item.product}`);

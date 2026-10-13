@@ -1,12 +1,4 @@
-"""NEXRAD GUI orchestration settings.
-
-Reads the same catalog keys that previously served the render loop while it
-lived inside ``EWMRS.pipeline_config`` (``config/ewmrs_pipeline.yaml``,
-sections ``nexrad_gui`` and ``render``). The YAML keys keep a single owner;
-these accessors exist so the NEXRAD service never has to import an EWMRS
-module to tune its own loop. Relocating the keys into ``nexrad.yaml`` is left
-to the documentation/deployment phase so operators see one move, not two.
-"""
+"""NEXRAD-owned GUI orchestration settings."""
 
 from __future__ import annotations
 
@@ -15,7 +7,7 @@ from common.config.loader import load_config
 
 def _section(name: str):
     """One top-level section. ``load_config`` is memoized, so this is cheap."""
-    return load_config("ewmrs_pipeline")[name]
+    return load_config("nexrad")["gui"]
 
 
 def nexrad_source_max_age_minutes() -> int:
@@ -41,4 +33,4 @@ def nexrad_render_max_workers() -> int:
 
 def gui_cleanup_max_age_minutes() -> int:
     """Age above which rendered NEXRAD GUI outputs are removed."""
-    return _section("render")["gui_cleanup_max_age_minutes"]
+    return _section("gui")["cleanup_max_age_minutes"]

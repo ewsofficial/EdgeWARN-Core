@@ -12,7 +12,7 @@ server:
   # Progress deadline for Core/ingest; quiet upstream is reported as stalled.
   service_progress_stale_after_seconds: 600
   # Match the deployed Python topology for readiness checks.
-  enabled_services: [ingest, edgewarn, ewmrs, nexrad]
+  enabled_services: [ingest, edgewarn, nexrad]
   openapi_spec: <src_dir>/api/openapi/v3.yaml
   production_version_label: '2.x'
 

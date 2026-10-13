@@ -3,45 +3,118 @@
   "title": "nexrad.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "buckets", "stations", "selection", "timeouts", "concurrency", "realtime", "cli", "retention"],
+  "required": [
+    "schema_version",
+    "buckets",
+    "stations",
+    "selection",
+    "timeouts",
+    "concurrency",
+    "realtime",
+    "cli",
+    "retention",
+    "gui"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": {
+      "const": 1
+    },
     "buckets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["chunks"],
+      "required": [
+        "chunks"
+      ],
       "properties": {
-        "chunks": { "type": "string" }
+        "chunks": {
+          "type": "string"
+        }
       }
     },
     "stations": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["catalog_url", "api_timeout_seconds", "api_cache_ttl_seconds"],
+      "required": [
+        "catalog_url",
+        "api_timeout_seconds",
+        "api_cache_ttl_seconds"
+      ],
       "properties": {
-        "catalog_url": { "type": "string" },
-        "api_timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "api_cache_ttl_seconds": { "type": "number", "minimum": 0 }
+        "catalog_url": {
+          "type": "string"
+        },
+        "api_timeout_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "api_cache_ttl_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "selection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowed_vcps", "high_max_angle_deg", "min_sweep_angle_deg", "canonical_elevation_bins", "min_required_volume_chunks", "waveforms"],
+      "required": [
+        "allowed_vcps",
+        "high_max_angle_deg",
+        "min_sweep_angle_deg",
+        "canonical_elevation_bins",
+        "min_required_volume_chunks",
+        "waveforms"
+      ],
       "properties": {
-        "allowed_vcps": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer" } },
-        "high_max_angle_deg": { "type": "number" },
-        "min_sweep_angle_deg": { "type": "number", "minimum": 0 },
-        "canonical_elevation_bins": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "number" } },
-        "min_required_volume_chunks": { "type": "integer", "minimum": 0 },
+        "allowed_vcps": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "high_max_angle_deg": {
+          "type": "number"
+        },
+        "min_sweep_angle_deg": {
+          "type": "number",
+          "minimum": 0
+        },
+        "canonical_elevation_bins": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "number"
+          }
+        },
+        "min_required_volume_chunks": {
+          "type": "integer",
+          "minimum": 0
+        },
         "waveforms": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["surveillance", "doppler", "single_elevation"],
+          "required": [
+            "surveillance",
+            "doppler",
+            "single_elevation"
+          ],
           "properties": {
-            "surveillance": { "type": "string" },
-            "doppler": { "type": "string" },
-            "single_elevation": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+            "surveillance": {
+              "type": "string"
+            },
+            "doppler": {
+              "type": "string"
+            },
+            "single_elevation": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            }
           }
         }
       }
@@ -49,58 +122,190 @@
     "timeouts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["volume_discovery_seconds", "chunk_list_seconds", "ingest_seconds", "scan_seconds", "cancellation_grace_seconds", "heartbeat_stale_seconds", "heartbeat_startup_grace_seconds"],
+      "required": [
+        "volume_discovery_seconds",
+        "chunk_list_seconds",
+        "ingest_seconds",
+        "scan_seconds",
+        "cancellation_grace_seconds",
+        "heartbeat_stale_seconds",
+        "heartbeat_startup_grace_seconds"
+      ],
       "properties": {
-        "volume_discovery_seconds": { "type": "number", "minimum": 0.01 },
-        "chunk_list_seconds": { "type": "number", "minimum": 0.01 },
-        "ingest_seconds": { "type": "number", "minimum": 0.01 },
-        "scan_seconds": { "type": "number", "minimum": 0.01 },
-        "cancellation_grace_seconds": { "type": "number", "minimum": 0 },
-        "heartbeat_stale_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "heartbeat_startup_grace_seconds": { "type": "number", "minimum": 0 }
+        "volume_discovery_seconds": {
+          "type": "number",
+          "minimum": 0.01
+        },
+        "chunk_list_seconds": {
+          "type": "number",
+          "minimum": 0.01
+        },
+        "ingest_seconds": {
+          "type": "number",
+          "minimum": 0.01
+        },
+        "scan_seconds": {
+          "type": "number",
+          "minimum": 0.01
+        },
+        "cancellation_grace_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "heartbeat_stale_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "heartbeat_startup_grace_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "concurrency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_site_tasks", "max_chunk_downloads", "worker_pool_size", "worker_recycle_interval", "worker_timeout_seconds", "parse_checkpoint_chunk_interval", "in_volume_prefetch"],
+      "required": [
+        "max_site_tasks",
+        "max_chunk_downloads",
+        "worker_pool_size",
+        "worker_recycle_interval",
+        "worker_timeout_seconds",
+        "parse_checkpoint_chunk_interval",
+        "in_volume_prefetch"
+      ],
       "properties": {
-        "max_site_tasks": { "type": "integer", "minimum": 1 },
-        "max_chunk_downloads": { "type": "integer", "minimum": 1 },
-        "worker_pool_size": { "type": "integer", "minimum": 1 },
-        "worker_recycle_interval": { "type": "integer" },
-        "worker_timeout_seconds": { "type": "number", "minimum": 1 },
-        "parse_checkpoint_chunk_interval": { "type": "integer", "minimum": 1 },
-        "in_volume_prefetch": { "type": "integer", "minimum": 1 }
+        "max_site_tasks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_chunk_downloads": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "worker_pool_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "worker_recycle_interval": {
+          "type": "integer"
+        },
+        "worker_timeout_seconds": {
+          "type": "number",
+          "minimum": 1
+        },
+        "parse_checkpoint_chunk_interval": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "in_volume_prefetch": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "realtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scan_interval_seconds", "completion_interval_seconds", "max_candidate_volumes_per_site"],
+      "required": [
+        "scan_interval_seconds",
+        "completion_interval_seconds",
+        "max_candidate_volumes_per_site"
+      ],
       "properties": {
-        "scan_interval_seconds": { "type": "number", "minimum": 1 },
-        "completion_interval_seconds": { "type": "number", "minimum": 1 },
-        "max_candidate_volumes_per_site": { "type": "integer", "minimum": 1 }
+        "scan_interval_seconds": {
+          "type": "number",
+          "minimum": 1
+        },
+        "completion_interval_seconds": {
+          "type": "number",
+          "minimum": 1
+        },
+        "max_candidate_volumes_per_site": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "cli": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sites", "base_dir"],
+      "required": [
+        "sites",
+        "base_dir"
+      ],
       "properties": {
-        "sites": { "type": ["array", "null"], "items": { "type": "string" } },
-        "base_dir": { "type": ["string", "null"] }
+        "sites": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "base_dir": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "retention": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scan_dirs_to_keep", "elevation_dirs_to_keep", "stale_manifest_max_age_hours"],
+      "required": [
+        "scan_dirs_to_keep",
+        "elevation_dirs_to_keep",
+        "stale_manifest_max_age_hours"
+      ],
       "properties": {
-        "scan_dirs_to_keep": { "type": "integer", "minimum": 1 },
-        "elevation_dirs_to_keep": { "type": "integer", "minimum": 1 },
-        "stale_manifest_max_age_hours": { "type": "number", "exclusiveMinimum": 0 }
+        "scan_dirs_to_keep": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "elevation_dirs_to_keep": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stale_manifest_max_age_hours": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "gui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retention_minutes",
+        "poll_interval_seconds",
+        "poll_interval_min_seconds",
+        "max_workers",
+        "cleanup_max_age_minutes"
+      ],
+      "properties": {
+        "retention_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "poll_interval_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "poll_interval_min_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_workers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cleanup_max_age_minutes": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     }
   }
