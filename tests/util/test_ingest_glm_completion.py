@@ -5,7 +5,7 @@ import pytest
 import xarray as xr
 
 from common.ingest.mrms.config import GoesIngestSpec
-from util.runtime import goes
+from util.runtime import glm as goes
 import util.file as fs
 
 DT = datetime(2026, 1, 1, tzinfo=timezone.utc)

@@ -816,7 +816,7 @@ class IngestService:
             from common.ingest.synoptic.main import acquire_rap_input
 
             return (asyncio.run(acquire_rap_input(job.target)),)
-        from util.runtime.goes import acquire_glm_inputs_for_scan
+        from util.runtime.glm import acquire_glm_inputs_for_scan
 
         return acquire_glm_inputs_for_scan(job.target)
 

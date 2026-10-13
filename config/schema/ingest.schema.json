@@ -3,58 +3,122 @@
   "title": "ingest.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "mrms", "goes"],
+  "required": [
+    "schema_version",
+    "mrms",
+    "goes"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": {
+      "const": 1
+    },
     "mrms": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "bucket", "decompress_chunk_size_bytes",
-        "remove_old_files", "cleanup_max_age_minutes", "path_patterns",
-        "ncep_https", "products", "check_products", "membership_lists"
+        "bucket",
+        "decompress_chunk_size_bytes",
+        "remove_old_files",
+        "cleanup_max_age_minutes",
+        "path_patterns",
+        "ncep_https",
+        "products",
+        "check_products",
+        "membership_lists"
       ],
       "properties": {
-        "bucket": { "type": "string" },
-        "decompress_chunk_size_bytes": { "type": "integer", "exclusiveMinimum": 0 },
-        "remove_old_files": { "type": "boolean" },
-        "cleanup_max_age_minutes": { "type": "integer", "minimum": 1 },
+        "bucket": {
+          "type": "string"
+        },
+        "decompress_chunk_size_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "remove_old_files": {
+          "type": "boolean"
+        },
+        "cleanup_max_age_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
         "path_patterns": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "s3_prefix", "s3_prefix_no_modifier", "filename_prefix",
-            "probsevere_start_after", "probsevere_start_after_lookback_hours",
-            "filename_start_after_minute", "probsevere_start_after_minute"
+            "s3_prefix",
+            "s3_prefix_no_modifier",
+            "filename_prefix",
+            "probsevere_start_after",
+            "probsevere_start_after_lookback_hours",
+            "filename_start_after_minute",
+            "probsevere_start_after_minute"
           ],
           "properties": {
-            "s3_prefix": { "type": "string" },
-            "s3_prefix_no_modifier": { "type": "string" },
-            "filename_prefix": { "type": "string" },
-            "probsevere_start_after": { "type": "string" },
-            "probsevere_start_after_lookback_hours": { "type": "integer", "minimum": 0 },
-            "filename_start_after_minute": { "type": "string" },
-            "probsevere_start_after_minute": { "type": "string" }
+            "s3_prefix": {
+              "type": "string"
+            },
+            "s3_prefix_no_modifier": {
+              "type": "string"
+            },
+            "filename_prefix": {
+              "type": "string"
+            },
+            "probsevere_start_after": {
+              "type": "string"
+            },
+            "probsevere_start_after_lookback_hours": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "filename_start_after_minute": {
+              "type": "string"
+            },
+            "probsevere_start_after_minute": {
+              "type": "string"
+            }
           }
         },
         "ncep_https": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "base_url", "probsevere_url", "sync_timeout_seconds",
-            "match_window_seconds", "download_chunk_size_bytes",
-            "directory_split_token", "directory_map"
+            "base_url",
+            "probsevere_url",
+            "sync_timeout_seconds",
+            "match_window_seconds",
+            "download_chunk_size_bytes",
+            "directory_split_token",
+            "directory_map"
           ],
           "properties": {
-            "base_url": { "type": "string", "pattern": "^https://" },
-            "probsevere_url": { "type": "string", "pattern": "^https://" },
-            "sync_timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
-            "match_window_seconds": { "type": "number", "exclusiveMinimum": 0 },
-            "download_chunk_size_bytes": { "type": "integer", "exclusiveMinimum": 0 },
-            "directory_split_token": { "type": "string" },
+            "base_url": {
+              "type": "string",
+              "pattern": "^https://"
+            },
+            "probsevere_url": {
+              "type": "string",
+              "pattern": "^https://"
+            },
+            "sync_timeout_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "match_window_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "download_chunk_size_bytes": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "directory_split_token": {
+              "type": "string"
+            },
             "directory_map": {
               "type": "object",
-              "additionalProperties": { "type": "string" }
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           }
         },
@@ -64,11 +128,25 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["region", "product", "outdir"],
+            "required": [
+              "region",
+              "product",
+              "outdir"
+            ],
             "properties": {
-              "region": { "type": "string" },
-              "product": { "type": ["string", "null"] },
-              "outdir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+              "region": {
+                "type": "string"
+              },
+              "product": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outdir": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              }
             }
           }
         },
@@ -78,24 +156,45 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["region", "product", "outdir"],
+            "required": [
+              "region",
+              "product",
+              "outdir"
+            ],
             "properties": {
-              "region": { "type": "string" },
-              "product": { "type": ["string", "null"] },
-              "outdir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+              "region": {
+                "type": "string"
+              },
+              "product": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outdir": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              }
             }
           }
         },
         "membership_lists": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["detection"],
+          "required": [
+            "detection"
+          ],
           "properties": {
             "detection": {
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
-              "items": { "type": ["string", "null"] }
+              "items": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           }
         }
@@ -105,35 +204,44 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "bucket", "abi_product", "glm_product", "glm_outdir",
-        "max_files_per_spec", "max_entries", "hour_lookback",
-        "cleanup_max_age_minutes", "bucket_path_pattern",
-        "filename_matcher_template", "abi_channels"
+        "bucket",
+        "glm_product",
+        "glm_outdir",
+        "max_files_per_spec",
+        "max_entries",
+        "hour_lookback",
+        "cleanup_max_age_minutes",
+        "bucket_path_pattern"
       ],
       "properties": {
-        "bucket": { "type": "string" },
-        "abi_product": { "type": "string" },
-        "glm_product": { "type": "string" },
-        "glm_outdir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
-        "max_files_per_spec": { "type": "integer", "minimum": 1 },
-        "max_entries": { "type": "integer", "minimum": 1 },
-        "hour_lookback": { "type": "integer", "minimum": 1 },
-        "cleanup_max_age_minutes": { "type": "integer", "minimum": 1 },
-        "bucket_path_pattern": { "type": "string" },
-        "filename_matcher_template": { "type": "string" },
-        "abi_channels": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["id", "name", "outdir"],
-            "properties": {
-              "id": { "type": "string", "pattern": "^C[0-9]{2}$" },
-              "name": { "type": "string" },
-              "outdir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
-            }
-          }
+        "bucket": {
+          "type": "string"
+        },
+        "glm_product": {
+          "type": "string"
+        },
+        "glm_outdir": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "max_files_per_spec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_entries": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "hour_lookback": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cleanup_max_age_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bucket_path_pattern": {
+          "type": "string"
         }
       }
     }

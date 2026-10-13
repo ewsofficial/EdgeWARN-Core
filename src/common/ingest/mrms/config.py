@@ -261,21 +261,10 @@ def goes_hour_lookback() -> int:
     return _catalog()["goes"]["hour_lookback"]
 
 
-def abi_radc_product() -> str:
-    """The ABI product every RadC channel spec is built against."""
-    return _catalog()["goes"]["abi_product"]
 
 
-def _abi_channel_definitions():
-    return tuple(
-        (channel["id"], channel["name"], channel["outdir"])
-        for channel in _catalog()["goes"]["abi_channels"]
-    )
 
 
-def default_abi_radc_channel_ids() -> tuple:
-    """Every ABI channel id in the catalog, in catalog order."""
-    return tuple(channel_id for channel_id, _, _ in _abi_channel_definitions())
 
 
 def goes_max_files_per_spec() -> int:
@@ -340,7 +329,6 @@ def get_goes_modifiers():
     goes = _catalog()["goes"]
     return [
         GoesIngestSpec(goes["glm_product"], _resolve_outdir(goes["glm_outdir"])),
-        *get_abi_radc_channel_specs(),
     ]
 
 
@@ -349,34 +337,6 @@ def get_goes_max_entries():
     return _catalog()["goes"]["max_entries"]
 
 
-def get_abi_radc_channel_specs(channel_ids=None):
-    """Build a spec per ABI channel, optionally restricted to ``channel_ids``.
-
-    ``None`` means every channel in the catalog. It used to mean that indirectly,
-    via a signature default of ``DEFAULT_ABI_RADC_CHANNEL_IDS`` -- which selected
-    every catalog channel and so produced the same result, but bound the channel
-    list at import time and put it out of reach of ``--config-dir``.
-    """
-    selected_channel_ids = set(channel_ids) if channel_ids is not None else None
-    specs = []
-    product = abi_radc_product()
-    matcher_template = _catalog()["goes"]["filename_matcher_template"]
-
-    for channel_id, channel_name, outdir_attr in _abi_channel_definitions():
-        if selected_channel_ids is not None and channel_id not in selected_channel_ids:
-            continue
-
-        specs.append(
-            GoesIngestSpec(
-                product=product,
-                outdir=_resolve_outdir(outdir_attr),
-                channel_id=channel_id,
-                channel_name=channel_name,
-                filename_matcher=matcher_template.format(channel_id=channel_id),
-            )
-        )
-
-    return specs
 
 
 def normalize_goes_modifier(spec):
