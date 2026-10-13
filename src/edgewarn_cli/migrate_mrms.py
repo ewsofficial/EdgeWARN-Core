@@ -125,7 +125,7 @@ def _contained(path, root):
 
 
 def _interlocks(base, stack):
-    from util.runtime.handoff import _AdvisoryFileLock, select_pending_records, ConsumerCheckpointStore, phase_record_path
+    from util.runtime.handoff import _AdvisoryFileLock
     from common.ingest.replay import input_lock_path
     from util.runtime.services import CANONICAL_SERVICE_NAMES
     for name in CANONICAL_SERVICE_NAMES:
@@ -208,7 +208,6 @@ def _run_steps(journal, journal_path, rollback=False):
     journal['status'] = 'rolled-back' if rollback else 'complete'
     _save(journal_path, journal)
     return {'journal': str(journal_path), 'status': journal['status'], 'steps': len(steps)}
-
 
 
 def validate_node_catalog(root):

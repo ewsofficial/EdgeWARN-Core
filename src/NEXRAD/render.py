@@ -79,7 +79,7 @@ def _write_nexrad_variable_bin(path: Path, dense_data: np.ndarray, azimuths: np.
         ]
     )
     # mtime=0 makes identical fields reproducible and keeps no filename in
-    # the gzip header (mirrors retired rendering service save_float16_chunk).
+    # the gzip header.
     compressed = gzip.compress(payload, mtime=0)
     # Verify the completed stream can be read before exposing it.
     if gzip.decompress(compressed)[: len(NEXRAD_FIELD_MAGIC)] != NEXRAD_FIELD_MAGIC:

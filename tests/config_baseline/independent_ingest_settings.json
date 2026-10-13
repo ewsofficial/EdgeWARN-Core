@@ -27,8 +27,7 @@
     "shutdown_timeout_seconds": 30
   },
   "consumers": {
-    "core_readiness_seconds": 1.0,
-    "ewmrs_notification_seconds": 1.0
+    "core_readiness_seconds": 1.0
   },
   "input_jobs": {
     "render_timeout_seconds": 300,

@@ -12,10 +12,9 @@ from common.ingest.mrms.core_contract import IngestDependencies
 from common.ingest.objects import CommittedInput
 from common.pipeline.readiness import evaluate_scan
 from util.runtime.handoff import canonical_cycle_id
-from util.runtime.ingest_handoff import IngestHandoff, IngestRecordError, render_job_id
+from util.runtime.ingest_handoff import IngestHandoff, IngestRecordError
 
 T = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
-RENDER = 'a' * 64
 
 
 @pytest.fixture
@@ -47,40 +46,22 @@ def checks(inventory):
     return [add(inventory, p) for p in ('A', 'B', 'ProbSevere')]
 
 
-def no_mapping(inventory, input_id, fingerprint=RENDER):
-    inventory.handoff.publish_render_ready(input_id)
-    inventory.handoff.plan_render(input_id, [], fingerprint)
-    inventory.handoff.acknowledge_input(input_id, fingerprint)
 
 
-def test_recover_file_inventory_outbox_and_ack_crash_windows(inventory, dependencies):
+def test_recover_file_inventory_commit_crash_windows(inventory, dependencies):
     committed = completion(inventory.base_dir)
     with pytest.raises(IngestRecordError, match='validator'):
         inventory.reconcile([committed.record.path])
     adopted = inventory.reconcile([committed.record.path], revalidate=lambda path: committed)
-    assert adopted['adopted'] == adopted['published'] == adopted['pending'] == (committed.input_id,)
+    assert adopted['adopted'] == (committed.input_id,)
     # Restart has no source acquisition and uses the same committed bytes/identity.
     restarted = InputInventory(inventory.base_dir, fingerprint=dependencies.fingerprint, run_id='restart')
     assert restarted.commit_input(replace(committed, source_locator='https://mirror', reused=True)).run_id == 'first'
-    assert restarted.reconcile()['published'] == ()
-    assert restarted.reconcile()['pending'] == (committed.input_id,)
-    no_mapping(restarted, committed.input_id)
-    assert restarted.reconcile()['pending'] == ()
+    assert restarted.reconcile()['adopted'] == ()
+    assert restarted.handoff.read('input', committed.input_id)
+    assert restarted.reconcile()['adopted'] == ()
 
 
-def test_inventory_notification_failure_does_not_redownload(inventory, monkeypatch):
-    committed = add(inventory)
-    original = inventory.handoff._write
-    def fail(kind, *args, **kwargs):
-        if kind == 'render-ready':
-            raise OSError('publication interrupted')
-        return original(kind, *args, **kwargs)
-    monkeypatch.setattr(inventory.handoff, '_write', fail)
-    with pytest.raises(OSError):
-        inventory.handoff.publish_render_ready(committed.input_id)
-    assert inventory.handoff.read('input', committed.input_id)
-    monkeypatch.setattr(inventory.handoff, '_write', original)
-    assert inventory.reconcile()['published'] == (committed.input_id,)
 
 
 @pytest.mark.parametrize('missing', ['A', 'B', 'ProbSevere'])
@@ -127,19 +108,10 @@ def test_start_integration_final_pin_identical_detection_and_history(inventory, 
     late = add(restarted, 'Late')
     restarted.publish_scan(T, dependencies, at=T + timedelta(seconds=40))
     assert restarted.handoff.read('core-final-ready', key).data == frozen.data
-    restarted.handoff.publish_render_ready(late.input_id)
-    assert late.input_id in restarted.reconcile()['pending']
+    assert restarted.handoff.read('input', late.input_id)
     assert current[0].input_id in frozen.data['input_ids']
 
 
-def test_two_late_same_scan_inputs_are_independent(inventory):
-    first = add(inventory, 'Late')
-    second = add(inventory, 'Other')
-    for item in (first, second):
-        inventory.handoff.publish_render_ready(item.input_id)
-    assert set(inventory.reconcile()['pending']) == {first.input_id, second.input_id}
-    no_mapping(inventory, first.input_id)
-    assert inventory.reconcile()['pending'] == (second.input_id,)
 
 
 def test_optional_success_and_failure_snapshot(inventory, dependencies):
@@ -168,7 +140,7 @@ def test_auxiliary_gates_and_rap_reuse(tmp_path, dependencies):
     assert inventory.publish_scan(T, deps, at=T).integration is not None
     inventory.commit_input(replace(rap, reused=True))
     inventory.reconcile()
-    assert len([r for r in inventory.handoff.records('render-ready') if r.data['input']['family'] == 'rap']) == 1
+    assert len([r for r in inventory.handoff.records('input') if r.data['input']['family'] == 'rap']) == 1
 
 
 @pytest.mark.parametrize('failure', ['timestamp', 'digest', 'outside', 'unvalidated'])
@@ -238,27 +210,6 @@ def test_phase_republication_refuses_changed_selection(inventory, dependencies):
         inventory.handoff.publish_phase('core-start-ready', evaluation.start, [])
 
 
-def test_render_layers_retry_and_ack_loss(inventory, dependencies):
-    item = add(inventory)
-    h = inventory.handoff
-    h.publish_render_ready(item.input_id)
-    h.plan_render(item.input_id, ['reflectivity', 'quality'], RENDER)
-    h.disposition('render-ack', '', input_id=item.input_id, layer_id='reflectivity',
-                  render_fingerprint=RENDER, status='success')
-    retry = h.disposition('render-ack', '', input_id=item.input_id, layer_id='quality',
-                  render_fingerprint=RENDER, status='retry', attempts=1, retry_at=T + timedelta(seconds=5))
-    assert not retry.retry_eligible(T) and retry.retry_eligible(T + timedelta(seconds=5))
-    with pytest.raises(IngestRecordError, match='pending'):
-        h.acknowledge_input(item.input_id, RENDER)
-    assert inventory.reconcile()['pending'] == (item.input_id,)
-    restart = IngestHandoff(inventory.base_dir, fingerprint=dependencies.fingerprint, run_id='restart')
-    restart.disposition('render-ack', '', input_id=item.input_id, layer_id='quality',
-                        render_fingerprint=RENDER, status='success', attempts=2)
-    restart.acknowledge_input(item.input_id, RENDER)
-    assert inventory.reconcile()['pending'] == ()
-    # A new render configuration owns another reference even after old success.
-    restart.plan_render(item.input_id, ['quality'], 'f' * 64)
-    assert inventory.reconcile()['pending'] == (item.input_id,)
 
 
 def test_expiry_terminal_and_core_consumption_are_durable(inventory, dependencies):
@@ -274,12 +225,11 @@ def test_expiry_terminal_and_core_consumption_are_durable(inventory, dependencie
     add(inventory, 'I')
     with pytest.raises(IngestRecordError, match='terminal'):
         inventory.publish_scan(T, dependencies, at=T + timedelta(minutes=2))
-    assert inventory.reconcile()['pending']  # Late inputs still create render work.
+    assert inventory.handoff.records('input')
 
 
 def test_retention_protects_pins_and_shared_replay_lock(inventory, monkeypatch):
     item = add(inventory)
-    no_mapping(inventory, item.input_id)
     h = inventory.handoff
     h.pin('history', [item.input_id])
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
@@ -298,15 +248,13 @@ def test_retention_protects_pins_and_shared_replay_lock(inventory, monkeypatch):
     assert inventory.cleanup(before=T + timedelta(days=1)) == (item.input_id,)
     assert not item.record.local_path.exists()
     assert h.read('retired-input', item.input_id)
-    assert inventory.reconcile()['pending'] == ()
+    assert inventory.reconcile()['adopted'] == ()
 
 
-def test_pending_core_phase_and_unpublished_outbox_protect_inputs(inventory, dependencies):
+def test_pending_core_phase_protects_inputs(inventory, dependencies):
     items = checks(inventory)
-    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     inventory.publish_scan(T, dependencies, at=T)
-    for item in items:
-        no_mapping(inventory, item.input_id)
+    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     inventory.handoff.disposition('core-state', canonical_cycle_id(T), status='success')
     assert inventory.cleanup(before=T + timedelta(days=1)) == (items[1].input_id,)
@@ -317,7 +265,7 @@ def test_pending_core_phase_and_unpublished_outbox_protect_inputs(inventory, dep
 
 
 def test_restart_finishes_interrupted_retention(inventory, monkeypatch):
-    item = add(inventory); no_mapping(inventory, item.input_id)
+    item = add(inventory)
     original = type(item.record.local_path).unlink
     def crash(path, *args, **kwargs):
         if path == item.record.local_path:
@@ -327,7 +275,7 @@ def test_restart_finishes_interrupted_retention(inventory, monkeypatch):
     with pytest.raises(OSError):
         inventory.cleanup(before=T + timedelta(days=1))
     monkeypatch.setattr(type(item.record.local_path), 'unlink', original)
-    assert inventory.reconcile()['pending'] == ()
+    assert inventory.reconcile()['adopted'] == ()
     assert not item.record.local_path.exists()
 
 
@@ -402,12 +350,12 @@ def test_failed_payload_adoption_never_publishes(inventory):
         raise ValueError('Corrupt payload')
     with pytest.raises(ValueError, match='Corrupt'):
         inventory.reconcile([item.record.path], revalidate=reject)
-    assert inventory.handoff.records('input') == inventory.handoff.records('render-ready') == ()
+    assert inventory.handoff.records('input') == inventory.handoff.records('input') == ()
 
 
 def test_cleanup_racing_pin_defers_then_observes_reference(inventory, monkeypatch):
     import threading
-    item = add(inventory); no_mapping(inventory, item.input_id)
+    item = add(inventory)
     acquired = threading.Event()
     release = threading.Event()
     failures = []
@@ -440,18 +388,6 @@ def test_cleanup_racing_pin_defers_then_observes_reference(inventory, monkeypatc
     assert item.record.local_path.exists()
 
 
-def test_expired_layer_releases_only_after_input_acknowledgment(inventory):
-    item = add(inventory)
-    h = inventory.handoff
-    h.publish_render_ready(item.input_id)
-    h.plan_render(item.input_id, ['one', 'two'], RENDER)
-    h.disposition('render-ack', '', status='success', input_id=item.input_id,
-                  layer_id='one', render_fingerprint=RENDER)
-    h.disposition('render-ack', '', status='expired', reason='Retry budget exhausted',
-                  input_id=item.input_id, layer_id='two', render_fingerprint=RENDER)
-    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
-    assert h.acknowledge_input(item.input_id, RENDER).data['status'] == 'expired'
-    assert inventory.cleanup(before=T + timedelta(days=1)) == (item.input_id,)
 
 
 def test_disabled_auxiliary_sources_do_not_create_missing_requirements(inventory, dependencies):
@@ -464,8 +400,6 @@ def test_disabled_auxiliary_sources_do_not_create_missing_requirements(inventory
 def test_protected_history_and_rap_pin_yield_to_active_references(inventory):
     older = add(inventory, 'A', T - timedelta(minutes=2))
     newer = add(inventory, 'A')
-    for item in (older, newer):
-        no_mapping(inventory, item.input_id)
     assert inventory.cleanup(before=T + timedelta(days=1), protected_products=['A']) == (older.input_id,)
     assert newer.record.local_path.exists()
 
@@ -485,8 +419,6 @@ def test_active_core_keeps_phase_inputs_after_scan_expiry(inventory, dependencie
     active = inventory.handoff.disposition('core-state', key, status='active')
     assert set(active.data['input_ids']) == {item.input_id for item in items}
     inventory.handoff.disposition('terminal', key, status='expired', reason='Missing I')
-    for item in items:
-        no_mapping(inventory, item.input_id)
     inventory.handoff.release_pin('core-history')
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     inventory.handoff.disposition('core-state', key, status='abandoned', reason='Worker stopped')
@@ -530,8 +462,6 @@ def test_reused_rap_is_pinned_by_two_active_scans(tmp_path, dependencies):
         result = inventory.publish_scan(scan, deps, at=scan)
         assert rap.input_id in result.integration_ids
         inventory.handoff.disposition('core-state', canonical_cycle_id(scan), status='active')
-    for record in inventory.handoff.records('input'):
-        no_mapping(inventory, record.key)
     inventory.handoff.disposition('core-state', canonical_cycle_id(T), status='success')
     inventory.cleanup(before=T + timedelta(days=1))
     assert path.exists()
@@ -623,7 +553,7 @@ def test_stale_fingerprint_state_is_quarantined_not_read(inventory):
     assert item.record.local_path.exists()
 
 
-@pytest.mark.parametrize('kind', ['input', 'core-state', 'render-ack'])
+@pytest.mark.parametrize('kind', ['input', 'core-state'])
 def test_quarantine_handles_each_state_tree_and_repeated_upgrades(inventory, kind, monkeypatch):
     from common.ingest.replay import input_lock
     from util.runtime import ingest_handoff
@@ -640,13 +570,7 @@ def test_quarantine_handles_each_state_tree_and_repeated_upgrades(inventory, kin
             key = canonical_cycle_id(T)
             old.disposition(kind, key, status='success')
             return old.path(kind, key)
-        item = add(inventory)
-        no_mapping(inventory, item.input_id)
-        path = next(old.path(kind, '0' * 64).parent.glob('*.json'))
-        payload = json.loads(path.read_text())
-        payload['fingerprint'] = old.fingerprint
-        path.write_text(json.dumps(payload))
-        return path
+        raise AssertionError("unknown state kind")
 
     archives = []
     for _ in range(2):
@@ -695,12 +619,6 @@ def test_missing_input_does_not_block_new_scan(inventory, dependencies):
     assert inventory.handoff.read('input', missing.input_id) is None
 
 
-def test_core_only_retention_releases_unacknowledged_render_inputs(inventory):
-    item = add(inventory)
-    inventory.handoff.publish_render_ready(item.input_id)
-    inventory.render_consumer = False
-    assert inventory.cleanup(before=T + timedelta(hours=1)) == (item.input_id,)
-    assert not item.record.local_path.exists()
 
 
 def test_compaction_bounds_a_day_of_terminal_scans_and_caches(inventory, dependencies):

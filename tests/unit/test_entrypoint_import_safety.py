@@ -79,5 +79,4 @@ def test_run_py_refuses_the_silent_partial_topology():
     assert result.returncode == 2
     assert "retired" in result.stderr
     assert "python src/run_all.py" in result.stderr
-    assert "python src/run_ewmrs.py" in result.stderr
     assert "python src/run_nexrad.py" in result.stderr

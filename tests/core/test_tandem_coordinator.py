@@ -39,12 +39,7 @@ def _complete_batch(tmp_path, product, timestamp):
 
 
 def test_tandem_cycle_publishes_rap_record_without_converting_it(tmp_path):
-    """Phase 4: the coordinator only stages raw RAP; the EWMRS service converts.
-
-    The Uint16 conversion moved to ``run_ewmrs.py``'s consumer, which acts on
-    committed rap-ready records. The coordinator's job ends at a validated
-    manifest entry and a truthful rap_inputs_ready flag.
-    """
+    """Core stages validated raw RAP inputs for integration."""
     logs = []
     rap_file = tmp_path / "RAP.20260427-13z.awp130pgrbf00.grib2"
     rap_file.write_bytes(b"grib")
@@ -52,11 +47,9 @@ def test_tandem_cycle_publishes_rap_record_without_converting_it(tmp_path):
     timestamp = datetime(2026, 4, 27, 13, 0, tzinfo=timezone.utc)
     with patch.object(coordinator.mrms_ingest, "download_detection_files_async", new=AsyncMock(return_value=_complete_batch(tmp_path, "Detection", timestamp))), \
          patch.object(coordinator.mrms_ingest, "download_integration_files_async", new=AsyncMock(return_value=_complete_batch(tmp_path, "Integration", timestamp))), \
-         patch.object(coordinator, "download_rap_async", new=AsyncMock(return_value=rap_file)), \
-         patch("EWMRS.pipeline.run_rap_uint16_pipeline") as mock_convert:
+         patch.object(coordinator, "download_rap_async", new=AsyncMock(return_value=rap_file)):
         state = _run_cycle(logs)
 
-    mock_convert.assert_not_called()
     assert state.rap_inputs_ready is True
     assert state.input_manifest.latest_for_product("RAP").local_path == rap_file
     assert "rap_ingest" not in state.errors
@@ -92,12 +85,8 @@ def test_tandem_cycle_rejects_partial_detection_batch(tmp_path):
     with patch.object(coordinator.mrms_ingest, "download_detection_files_async", new=AsyncMock(return_value=partial)), \
          patch.object(coordinator.mrms_ingest, "download_detection_files", return_value=partial), \
          patch.object(coordinator.mrms_ingest, "download_integration_files_async", new=AsyncMock(return_value=complete)), \
-         patch.object(coordinator, "download_rap_async", new=AsyncMock(return_value=rap_file)), \
-         patch("EWMRS.pipeline.run_rap_uint16_pipeline", return_value={}):
+         patch.object(coordinator, "download_rap_async", new=AsyncMock(return_value=rap_file)):
         state = _run_cycle(logs)
 
     assert state.detection_inputs_ready is False
     assert state.errors["detection_ingest"] == "Detection inputs unavailable"
-    # EWMRS is triggered for every cycle and independently scans the local
-    # source directory of each layer; detection completeness gates Core only.
-    assert state.ewmrs_mrms_inputs_ready is True

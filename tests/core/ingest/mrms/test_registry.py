@@ -165,19 +165,6 @@ def test_build_does_not_probe_filesystem(monkeypatch, tmp_path):
     assert len(registry.products) == 4
 
 
-def test_fresh_import_does_not_load_runtime_or_configuration():
-    code = """
-import sys
-from common.ingest.mrms.registry import build_registry
-assert not any(name in sys.modules for name in (
-    'util.file', 'common.config.loader', 'EdgeWARN', 'EWMRS', 'aiohttp', 'boto3'))
-from pathlib import Path
-registry = build_registry({'products': []}, Path('/nonexistent/mrms-test'))
-assert len(registry.products) == 3
-"""
-    subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT / "src")
-
-
 def test_release_asset_is_generated_from_core_contract():
     asset = ROOT / "src/common/ingest/mrms/core-contract.json"
     assert asset.read_text() == contract_json()

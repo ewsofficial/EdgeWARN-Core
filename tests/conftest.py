@@ -48,21 +48,12 @@ def mock_io_manager():
     mock.write_debug = MagicMock()
     return mock
 
+
 @pytest.fixture
 def mock_fs(tmp_path):
-    """
-    Mock file system constants.
-    Uses tmp_path to create a safe playground for file operations.
-    """
-    # Create the directory structure in tmp_path
-    (tmp_path / "surface").mkdir()
-    (tmp_path / "metar").mkdir()
-    (tmp_path / "nws").mkdir()
-    (tmp_path / "stormcell").mkdir()
-    (tmp_path / "cell").mkdir()
-    
-    # We'll need to patch util.file within the tests usually, 
-    # but we can provide the paths here for convenience
+    """Temporary Core history and snapshot directories."""
+    for name in ("stormcell", "cell"):
+        (tmp_path / name).mkdir()
     return tmp_path
 
 @pytest.fixture(autouse=True)

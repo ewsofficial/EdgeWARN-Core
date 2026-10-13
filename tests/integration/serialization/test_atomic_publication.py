@@ -87,27 +87,3 @@ class TestNexradScanStateWriter:
             nexrad_service._write_text_if_changed(path, '{"new": true}')
         assert json.loads(path.read_text(encoding="utf-8")) == {"kept": True}
         assert list(tmp_path.iterdir()) == [path]
-
-
-class TestOverlayManifestWriter:
-    def test_save_to_json_writes_parseable_layers(self, tmp_path):
-        from EWMRS.render.tools import OverlayManifestUtils
-
-        utils = OverlayManifestUtils()
-        utils.layers = [{"name": "MRMS_EchoTop18", "opacity": 1}]
-        target = tmp_path / "overlay_manifest.json"
-        utils.save_to_json(str(target))
-        assert json.loads(target.read_text(encoding="utf-8")) == utils.layers
-        assert list(tmp_path.iterdir()) == [target]
-
-    def test_serialization_failure_never_touches_destination(self, tmp_path):
-        from EWMRS.render.tools import OverlayManifestUtils
-
-        utils = OverlayManifestUtils()
-        utils.layers = [{"bad": object()}]  # not JSON-serializable
-        target = tmp_path / "overlay_manifest.json"
-        target.write_text("[]", encoding="utf-8")
-        with pytest.raises(TypeError):
-            utils.save_to_json(str(target))
-        assert target.read_text(encoding="utf-8") == "[]"
-        assert list(tmp_path.iterdir()) == [target]

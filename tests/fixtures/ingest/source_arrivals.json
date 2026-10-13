@@ -1,5 +1,5 @@
 {
-  "disable_goes": true,
+  "disable_glm": true,
   "optional_completion_seconds": 30,
   "arrivals": [
     {

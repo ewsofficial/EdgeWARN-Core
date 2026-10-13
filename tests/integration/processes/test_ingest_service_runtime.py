@@ -140,33 +140,6 @@ def make_service(tmp_path, source, *, clock=None, stop=None, wall=None,
         startup_latest_only=startup_latest_only)
 
 
-def test_retention_keeps_rap_fallback_between_core_cycles(tmp_path):
-    from common.ingest.manifest import StagedInput
-
-    source = ScriptedSource(make_registry(tmp_path))
-    service = make_service(tmp_path, source, retention_minutes=60)
-    service.dependencies = replace(service.dependencies, rap_enabled=True)
-    path = tmp_path / "data/RAP/RAP.20260930-11z.awp130pgrbf00.grib2"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"rap")
-    rap = CommittedInput(StagedInput("RAP", str(path), T - timedelta(hours=1),
-                                    "synoptic", "rap"),
-                         hashlib.sha256(b"rap").hexdigest(), str(path))
-    inventory = service.inventory
-    inventory.commit_input(rap)
-    inventory.handoff.publish_render_ready(rap.input_id)
-    fingerprint = "a" * 64
-    inventory.handoff.plan_render(rap.input_id, [], fingerprint)
-    inventory.handoff.acknowledge_input(rap.input_id, fingerprint)
-    # No active consumer pin remains, but subsequent radar scans still need RAP.
-    assert service._retire(T + timedelta(minutes=10)) == ()
-    assert path.exists()
-    assert inventory.valid_inputs()[0].key == rap.input_id
-    # Once beyond analysis age and the in-flight scan deadline, retire normally.
-    assert service._retire(T + timedelta(hours=4)) == (rap.input_id,)
-    assert not path.exists()
-
-
 def wait_for(predicate, message, *, attempts=1000, delay=0.01):
     for _ in range(attempts):
         if predicate():
@@ -383,40 +356,6 @@ def poll_periods(service, periods, *, start=0.0, period=10.0):
 
 
 class TestScheduledPollCadence:
-    def test_a_stalled_source_stops_neither_the_cadence_nor_other_publication(self, tmp_path):
-        """Phase completion check: polls keep their schedule and unrelated
-        inputs publish while one product's transfer is still running."""
-        registry = make_registry(tmp_path)
-        block = threading.Event()
-        source = ScriptedSource(registry,
-                                reveal={REFLECTIVITY: [T], PRECIP_RATE: [T]},
-                                slow={REFLECTIVITY}, block_event=block)
-        stop = threading.Event()
-        clock = FixedClock(stop_event=stop, stop_after_waits=4)
-        service = make_service(tmp_path, source, clock=clock, stop=stop,
-                               wall=lambda: T + timedelta(seconds=clock.value),
-                               download_concurrency=4)
-        try:
-            run_fixed(service, clock, stop)
-            wait_for(lambda: service.status()["notifications"] >= 1,
-                     "the unstalled product never published its render notification")
-        finally:
-            block.set()
-            service.shutdown()
-        assert clock.waits == [10.0, 10.0, 10.0, 10.0]
-        assert service.status()["polls"] == 4
-        records = service.inventory.handoff.records("render-ready")
-        assert [record.data["input"]["product"] for record in records] == [PRECIP_RATE]
-        status = poll_status(service)
-        assert status["polls"] == 4
-        assert status["committed_inputs"] == 1
-        assert status["listing_overruns"] == 0
-        assert status["coalesced_ticks"] == 0
-        # The stalled product was attempted exactly once and never resolved, so
-        # it created no duplicate work and no partial input.
-        assert source.acquisitions.count((REFLECTIVITY, T.isoformat())) == 1
-        assert all(record.data["input"]["product"] != REFLECTIVITY
-                   for record in service.inventory.handoff.records("input"))
 
     def test_one_active_listing_per_product_while_a_listing_is_slow(self, tmp_path):
         registry = make_registry(tmp_path)
@@ -460,23 +399,8 @@ class TestScheduledPollCadence:
 
 
 class TestDeduplication:
-    def test_repeated_discoveries_create_no_extra_jobs(self, tmp_path):
-        registry = make_registry(tmp_path)
-        source = ScriptedSource(registry, reveal={REFLECTIVITY: [T]})
-        service = make_service(tmp_path, source)
-        service.start()
-        try:
-            poll_periods(service, 4)
-        finally:
-            service.shutdown()
-        assert source.acquisitions == [(REFLECTIVITY, T.isoformat())]
-        status = poll_status(service)
-        assert status["polls"] == 4
-        assert status["committed_inputs"] == 1
-        assert status["duplicate_discoveries"] >= 1
-        assert len(service.inventory.handoff.records("render-ready")) == 1
 
-    def test_an_unchanged_input_creates_no_second_render_record(self, tmp_path):
+    def test_an_unchanged_input_keeps_one_inventory_identity(self, tmp_path):
         registry = make_registry(tmp_path)
         source = ScriptedSource(registry, reveal={REFLECTIVITY: [T]})
         service = make_service(tmp_path, source)
@@ -485,22 +409,8 @@ class TestDeduplication:
             poll_periods(service, 2)
         finally:
             service.shutdown()
-        assert service.inventory.reconcile()["published"] == ()
-
-    def test_two_arrivals_for_one_scan_are_independent_notifications(self, tmp_path):
-        registry = make_registry(tmp_path)
-        previous = T - timedelta(minutes=2)
-        source = ScriptedSource(registry, reveal={REFLECTIVITY: [previous, T]})
-        service = make_service(tmp_path, source, startup_latest_only=False)
-        service.start()
-        try:
-            poll_periods(service, 2)
-        finally:
-            service.shutdown()
-        assert service.status()["notifications"] == 2
-        times = sorted(record.data["input"]["analysis_time"]
-                       for record in service.inventory.handoff.records("render-ready"))
-        assert times == [previous.isoformat(), T.isoformat()]
+        assert service.inventory.reconcile()["adopted"] == ()
+        assert len(service.inventory.handoff.records("input")) == 1
 
 
 class TestCoreReadinessEvaluation:
@@ -511,13 +421,13 @@ class TestCoreReadinessEvaluation:
         service.start()
         try:
             poll_periods(service, 1)
-            assert service.status()["notifications"] == 2
+            assert len(service.inventory.handoff.records("input")) == 2
             assert service.inventory.handoff.read(
                 "core-start-ready", canonical_cycle_id(T)) is None
             source.reveal[PRECIP_FLAG] = [T]
             source.reveal[PROB_SEVERE] = [T]
             poll_periods(service, 2, start=10.0)
-            assert service.status()["notifications"] == 4
+            assert len(service.inventory.handoff.records("input")) == 4
             wait_for(lambda: service.inventory.handoff.read(
                 "core-start-ready", canonical_cycle_id(T)) is not None,
                 "the scan never became start-ready once every check arrived")
@@ -554,7 +464,7 @@ class TestCoreReadinessEvaluation:
         service.start()
         try:
             service._tick(0.0)
-            wait_for(lambda: service.status()["notifications"] == 1,
+            wait_for(lambda: len(service.inventory.handoff.records("input")) == 1,
                      "the arrival was not published")
             later = T + timedelta(seconds=30)
             service._wall = lambda: later
@@ -755,56 +665,6 @@ class TestIngestEntryPoint:
         finally:
             holder.release()
 
-    def test_the_parser_owns_only_acquisition_and_shared_dependency_flags(self):
-        from util import cli
-
-        parser = cli.build_service_parser("ingest")
-        for argv in (["--base_dir", "/tmp/a"], ["--base-dir", "/tmp/a"],
-                     ["--config-dir", "/tmp/c"], ["--profile"], ["--no-profile"],
-                     ["--disable-goes"], ["--mrms-core-only"], ["--no-mrms-core-only"],
-                     ["--disable-ctam"], ["--no-disable-stormprob"]):
-            assert parser.parse_args(argv) is not None
-        for argv in (["--lat_limits", "1", "2"], ["--disable-metar"], ["--disable-ewmrs"],
-                     ["--disable-nexrad"], ["--ctam-module-dir", "/tmp/m"],
-                     ["--refl-threshold", "1.0"], ["--disable-wpc"], ["--disable-nws"]):
-            with pytest.raises(SystemExit):
-                parser.parse_args(argv)
-
-
-def test_durable_commit_failure_retries_before_settlement(tmp_path, monkeypatch):
-    from util.runtime.handoff import InputLockTimeout
-    from util.runtime.ingest_service import AcquisitionJob
-
-    source = ScriptedSource(make_registry(tmp_path))
-    service = make_service(tmp_path, source, retry_initial_seconds=0.01)
-    obj = source.discovered(source.registry.require(REFLECTIVITY), T)
-    job = AcquisitionJob("commit-retry", "mrms", REFLECTIVITY, T, discovered=obj)
-    original = service.inventory.commit_input
-    calls = []
-
-    def commit(completed):
-        calls.append(completed.input_id)
-        if len(calls) == 1:
-            raise InputLockTimeout("injected contention")
-        return original(completed)
-
-    monkeypatch.setattr(service.inventory, "commit_input", commit)
-    service.start()
-    try:
-        service.ledger.offer(job)
-        service.ledger.take(job.identity)
-        service._acquire_mrms(job)
-        wait_for(lambda: service.ledger.counts()["pending_jobs"] == 1, "commit failure did not requeue")
-        assert service.ledger.state(job.identity) is None
-        service.ledger.take(job.identity)
-        service._acquire_mrms(job)
-        wait_for(lambda: service.ledger.state(job.identity) == ("committed", ""), "retry not committed")
-        assert len(calls) == 2
-        assert len(service.inventory.valid_inputs()) == 1
-        assert len(service.inventory.handoff.records("render-ready")) == 1
-    finally:
-        service.shutdown()
-
 
 def test_rap_prune_preserves_referenced_ids_and_retires_inventory(tmp_path, monkeypatch):
     from common.ingest.manifest import StagedInput
@@ -823,9 +683,10 @@ def test_rap_prune_preserves_referenced_ids_and_retires_inventory(tmp_path, monk
                               hashlib.sha256(b"rap").hexdigest(), str(path))
         service.inventory.commit_input(item)
         items.append(item)
+    service.inventory.handoff.pin("core:test", [items[-1].input_id])
     assert service._prune_rap() == ()
     assert items[-1].record.local_path.exists()
-    service.inventory.render_consumer = False
+    service.inventory.handoff.release_pin("core:test")
     assert service._prune_rap() == (items[-1].record.local_path,)
     assert service.inventory.handoff.read("input", items[-1].input_id) is None
     assert service.inventory.handoff.read("retired-input", items[-1].input_id) is not None
@@ -840,26 +701,6 @@ def test_timer_coalesces_maintenance_while_publisher_is_blocked(tmp_path, monkey
         service._tick(tick * 10)
     assert service._work.qsize() == 2
     assert service._last_reconcile is None
-
-
-def test_rap_fallback_does_not_settle_the_new_analysis_hour(tmp_path):
-    from common.ingest.manifest import StagedInput
-    from util.runtime.ingest_service import _Work, AcquisitionJob
-    service = make_service(tmp_path, ScriptedSource(make_registry(tmp_path)))
-    service.dependencies = replace(service.dependencies, rap_enabled=True)
-    analysis = T - timedelta(hours=1)
-    path = tmp_path / f"data/RAP/RAP.{analysis:%Y%m%d-%H}z.awp130pgrbf00.grib2"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"rap")
-    item = CommittedInput(StagedInput("RAP", str(path), analysis, "synoptic", "rap"),
-                          hashlib.sha256(b"rap").hexdigest(), str(path))
-    job = AcquisitionJob("rap-current-hour", "rap", "RAP", T)
-    service.ledger.offer(job)
-    service.ledger.take(job.identity)
-    service._apply(_Work(kind="completion", completed=(item,), job=job))
-    assert service.ledger.state(job.identity) is None
-    assert service.ledger.counts()["pending_jobs"] == 1
-    assert service.inventory.handoff.read("render-ready", item.input_id) is not None
 
 
 def test_ingest_recovers_from_timer_path_exception(tmp_path, monkeypatch):

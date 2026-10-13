@@ -2,20 +2,6 @@
 from common.ingest.mrms.registry import build_registry
 
 
-def test_render_disabled_layer_has_diagnostic_without_path_lookup(tmp_path, monkeypatch):
-    from EWMRS.render import config
-    from common.ingest.mrms import config as ingest
-    registry = build_registry({"products": []}, tmp_path)
-    monkeypatch.setattr(ingest, "get_registry", lambda: registry)
-    monkeypatch.setattr(config, "_render_config", lambda: {"mrms_layers": [{
-        "name": "MESH", "product": "MESH_00.50", "outdir": "old",
-        "colormap_key": "mesh",
-    }]})
-    monkeypatch.setattr(config, "_resolve_dir", lambda _: (_ for _ in ()).throw(AssertionError("probe")))
-    assert config.get_mrms_file_list() == []
-    assert config.get_mrms_file_list(include_inactive=True)[0]["reason"] == "ingestion-disabled"
-
-
 def test_stats_disabled_diagnostics_and_active_identity(tmp_path, monkeypatch):
     from EdgeWARN.process.integrate import config
     registry = build_registry({"products": []}, tmp_path)

@@ -1,25 +1,4 @@
 {
   "bucket": "noaa-mrms-pds",
-  "goes_bucket": "noaa-goes19",
-  "abi_radc_product": "ABI-L1b-RadC",
-  "default_abi_radc_channel_ids": {
-    "@tuple": [
-      "C01",
-      "C02",
-      "C03",
-      "C04",
-      "C05",
-      "C06",
-      "C07",
-      "C08",
-      "C09",
-      "C10",
-      "C11",
-      "C12",
-      "C13",
-      "C14",
-      "C15",
-      "C16"
-    ]
-  }
+  "goes_bucket": "noaa-goes19"
 }

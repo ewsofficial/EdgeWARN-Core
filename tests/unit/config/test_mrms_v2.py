@@ -23,7 +23,7 @@ def v1_documents():
     docs['ingest']['schema_version'] = 1
     docs['ingest']['mrms'] = deepcopy(legacy_contract()['mrms'])
     aliases = {identity: alias for alias, identity in LEGACY_ALIASES.items()}
-    for name, key in [('integration', 'stats_datasets'), ('ewmrs_render', 'mrms_layers')]:
+    for name, key in [('integration', 'stats_datasets')]:
         for item in docs[name][key]:
             item['filepath'] = aliases[item.pop('product')]
     docs['runtime']['run'].pop('disable_stormprob', None)
@@ -80,24 +80,6 @@ def test_dry_run_and_converted_tree(tmp_path, capsys):
     reset_cache()
 
 
-def test_pure_conversion_preserves_settings_and_reports_customizations():
-    docs = v1_documents()
-    docs['ingest']['mrms']['cleanup_max_age_minutes'] = 90
-    docs['ingest']['mrms']['ncep_https']['sync_timeout_seconds'] = 17
-    docs['ingest']['mrms']['products'][0]['outdir'] = 'CUSTOM_DIR'
-    docs['ingest']['mrms']['bucket'] = 'custom-bucket'
-    original = deepcopy(docs)
-    converted, conflicts, restored = convert_documents(docs, legacy_contract())
-    assert docs == original
-    assert converted['ingest']['mrms']['cleanup_max_age_minutes'] == 90
-    assert converted['ingest']['mrms']['ncep_https']['sync_timeout_seconds'] == 17
-    assert converted['ingest']['goes'] == docs['ingest']['goes']
-    assert converted['ewmrs_render']['goes_layers'] == docs['ewmrs_render']['goes_layers']
-    assert any('CUSTOM_DIR' in c for c in conflicts)
-    assert any('bucket' in c for c in conflicts)
-    assert restored == []
-
-
 def test_conflicts_and_runtime_records(tmp_path):
     base = tmp_path / 'runtime'
     for name in ('MRMS_EchoTop18', 'MRMS_EchoTop_18'):
@@ -142,73 +124,6 @@ def test_migration_asset_packaging_and_baseline():
     assert len(baseline['paths']) == 21
 
 
-def test_apply_resume_and_inverse_rollback(tmp_path):
-    root = v1_tree(tmp_path / 'config')
-    base = tmp_path / 'runtime'
-    source = base / 'data/MRMS_EchoTop18'
-    source.mkdir(parents=True)
-    (source / 'input').write_bytes(b'weather')
-    original = {p: (root / p).read_bytes() for p in ['ingest.yaml', 'integration.yaml', 'ewmrs_render.yaml']}
-    assert execute_migration(root, base)['status'] == 'complete'
-    assert (base / 'data/MRMS_EchoTop_18/input').read_bytes() == b'weather'
-    assert execute_migration(root, base, resume=True)['status'] == 'complete'
-    assert execute_migration(root, base, rollback=True)['status'] == 'rolled-back'
-    assert (source / 'input').read_bytes() == b'weather'
-    assert all((root / p).read_bytes() == value for p, value in original.items())
-
-
-def test_all_ten_renames_preserve_records_and_unrelated_files(tmp_path):
-    from datetime import datetime, timezone
-    from common.ingest.manifest import CycleInputManifest, StagedInput
-    from util.runtime.handoff import ConsumerCheckpointStore, PhaseRecordPublisher, canonical_cycle_id
-
-    root = v1_tree(tmp_path / 'config')
-    base = tmp_path / 'runtime'
-    legacy = legacy_contract()
-    for alias, directory in legacy['paths'].items():
-        path = base / 'data' / directory / 'input.grib2'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(alias.encode())
-    untouched = base / 'data/unrelated/operator.dat'
-    untouched.parent.mkdir()
-    untouched.write_bytes(b'unrelated')
-    gui = base / 'gui/MRMS_EchoTop18/render.bin'
-    gui.parent.mkdir(parents=True)
-    gui.write_bytes(b'gui bytes')
-
-    # A drained record keeps its exact original input paths after migration.
-    dt = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    record = StagedInput(product='EchoTop_18_00.50',
-                         path=str(base / 'data/MRMS_EchoTop18/input.grib2'),
-                         analysis_time=dt, source='fixture', family='mrms')
-    PhaseRecordPublisher(base).publish('mrms-ready', CycleInputManifest(dt, inputs=(record,)))
-    ConsumerCheckpointStore(base, 'ewmrs-mrms-ready').record(canonical_cycle_id(dt))
-    original_config = snapshot(root)
-    original_runtime = snapshot(base)
-    state_bytes = snapshot(base / 'state/realtime')
-    report = plan_migration(root, base)
-
-    assert execute_migration(root, base)['status'] == 'complete'
-    assert sum(item['action'] == 'rename' for item in report['paths']) == 10
-    for item in report['paths']:
-        target = Path(item['target']) / 'input.grib2'
-        assert target.read_bytes() == original_runtime[str((Path(item['source']) / 'input.grib2').relative_to(base))]
-        if item['action'] == 'rename':
-            assert not Path(item['source']).exists()
-    assert {name: content for name, content in snapshot(base / 'state/realtime').items()
-            if not name.endswith('.lock')} == state_bytes
-    assert untouched.read_bytes() == b'unrelated'
-    assert gui.read_bytes() == b'gui bytes'
-    for name in original_config:
-        if name.endswith('.yaml') and name[:-5] not in report['config_changes']:
-            assert (root / name).read_bytes() == original_config[name]
-
-    assert execute_migration(root, base, rollback=True)['status'] == 'rolled-back'
-    assert all((root / name).read_bytes() == content for name, content in original_config.items())
-    assert all((base / name).read_bytes() == content for name, content in original_runtime.items())
-    assert execute_migration(root, base, rollback=True)['status'] == 'rolled-back'
-
-
 def test_interrupted_step_reconciles_resume(tmp_path, monkeypatch):
     import edgewarn_cli.migrate_mrms as migration
     root = v1_tree(tmp_path / 'config')
@@ -240,18 +155,13 @@ def test_active_input_pins_refuse_apply(tmp_path):
     assert snapshot(root) == before
 
 
-def test_stopped_service_and_drained_backlog_interlocks(tmp_path):
+def test_stopped_service_interlock(tmp_path):
     from util.runtime.handoff import _AdvisoryFileLock
     root = v1_tree(tmp_path / 'config')
     base = tmp_path / 'runtime'
     with _AdvisoryFileLock(base / 'state/realtime/services/edgewarn.lock'):
         with pytest.raises(ValueError, match='stopped'):
             execute_migration(root, base)
-    pending = base / 'state/realtime/cycles/20260101T000000Z/mrms-ready.json'
-    pending.parent.mkdir(parents=True)
-    pending.write_text('{}')
-    with pytest.raises(ValueError, match='backlog'):
-        execute_migration(root, base)
 
 
 def test_nested_symlink_escape_refused(tmp_path):

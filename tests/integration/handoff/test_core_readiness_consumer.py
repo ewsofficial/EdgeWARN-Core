@@ -53,7 +53,7 @@ def no_source_clients(monkeypatch):
     from common.ingest.mrms import acquisition, discovery
     from common.ingest.synoptic import main as synoptic
     from common.pipeline import coordinator
-    from util.runtime import cycle as cycle_module, goes
+    from util.runtime import cycle as cycle_module, glm
 
     for module, name in (
         (acquisition, "acquire_batch"),
@@ -63,8 +63,7 @@ def no_source_clients(monkeypatch):
         (discovery, "discover_objects"),
         (discovery, "discover_objects_sync"),
         (coordinator, "run_staged_ingest_cycle"),
-        (goes, "download_glm_for_scan"),
-        (goes, "acquire_glm_inputs_for_scan"),
+        (glm, "acquire_glm_inputs_for_scan"),
         (synoptic, "download_rap"),
         (synoptic, "download_rap_async"),
         (synoptic, "acquire_rap_input"),
@@ -107,7 +106,7 @@ def commit(inventory, product, at=T):
 
 
 def notify(inventory, committed):
-    return inventory.handoff.publish_render_ready(committed.key)
+    return committed
 
 
 def publish(inventory, dependencies, at=T, **options):
@@ -442,8 +441,7 @@ class TestPinLifecycle:
         # the consumer takes is what keeps the exact bytes on disk.
         assert not any(pin.key.startswith("core:")
                       for pin in inventory.handoff.records("pin"))
-        # Unreferenced, unrendered inputs stay referenced by the outbox, so a
-        # live phase or a pending render job always wins over the age window.
+        # Core selections stay present until reference-aware retention runs.
         assert {record.key for record in committed} == {
             record.key for record in inventory.handoff.records("input")}
 

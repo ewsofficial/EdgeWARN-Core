@@ -73,7 +73,7 @@ async def qualify(base, short, replay):
         return lambda state: callbacks.setdefault(name,time.monotonic()-started)
     with patch.object(a,'_async_s3',s3), patch.object(a.AsyncFileFinder,'async_lookup_files',lookup), patch.object(a,'_fetch',fetch), patch.object(a.HttpsFileFinder,'find_files',https), patch.object(c.mrms_ingest,'download_detection_files',forbidden), patch.object(c.mrms_ingest,'get_registry',lambda:registry), patch.object(c.mrms_ingest,'get_detection_modifiers',lambda:[p.source_modifier for p in registry.for_phase('detection')]), patch.object(c.mrms_ingest,'download_detection_files_async',detection), patch.object(c.mrms_ingest,'download_integration_files_async',optional):
         state = await c.run_staged_ingest_cycle(DT,lambda msg:print(msg,file=sys.stderr),include_goes=False,include_rap=False,
-            on_detection_ready=callback('detection'),on_ewmrs_mrms_ready=callback('ewmrs'),
+            on_detection_ready=callback('detection'),
             on_edgewarn_integration_ready=callback('integration'))
     elapsed = time.monotonic()-started
     assert outcomes.count("failed" if short else "ready") == 18

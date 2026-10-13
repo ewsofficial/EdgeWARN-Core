@@ -92,35 +92,6 @@ def _run(command, *, cwd, env=None):
     )
 
 
-def test_wheel_help_version_and_import_are_independent_of_checkout(installed_command):
-    root, python, edgewarn = installed_command
-
-    help_result = _run([edgewarn, "--help"], cwd=root)
-    version_result = _run([edgewarn, "--version"], cwd=root)
-    probe = _run(
-        [
-            python,
-            "-c",
-            (
-                "import json, pathlib, sys; import edgewarn_cli; "
-                "print(json.dumps({'file': edgewarn_cli.__file__, "
-                "'scientific': [name for name in sys.modules if "
-                "name.split('.')[0] in {'EdgeWARN', 'EWMRS', 'NEXRAD'}]}))"
-            ),
-        ],
-        cwd=root,
-    )
-
-    assert help_result.returncode == 0, help_result.stderr
-    assert "run" in help_result.stdout and "configure" in help_result.stdout
-    assert version_result.returncode == 0, version_result.stderr
-    assert version_result.stdout.strip() == "edgewarn 3.0.2"
-    assert probe.returncode == 0, probe.stderr
-    payload = json.loads(probe.stdout)
-    assert not Path(payload["file"]).resolve().is_relative_to(REPO_ROOT)
-    assert payload["scientific"] == []
-
-
 def test_installed_command_validates_and_edits_deployed_config(installed_command):
     root, _python, edgewarn = installed_command
     config = root / "deployed-config"

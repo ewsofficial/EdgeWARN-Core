@@ -228,8 +228,6 @@ class IngestRecord:
             self.data['retry_at'] is None or utc(self.data['retry_at']) <= utc(at))
 
 
-
-
 class IngestHandoff:
     def __init__(self, base_dir, *, fingerprint, run_id):
         self.base_dir = Path(base_dir).resolve()
@@ -246,6 +244,8 @@ class IngestHandoff:
         self._cache_lock = threading.RLock()
 
     def path(self, kind, key):
+        if kind not in KINDS:
+            raise IngestRecordError("Unknown record kind")
         if kind not in KINDS or not re.fullmatch(r'[A-Za-z0-9_-]+', key):
             raise IngestRecordError('Unsafe record destination')
         if kind in {'core-start-ready', 'core-integration-ready', 'core-final-ready', 'terminal', 'scan-state'}:
@@ -513,7 +513,6 @@ class IngestHandoff:
     def publish_poll_status(self, counts, reasons=()):
         with input_lock(self.base_dir):
             return self._write('poll-status', 'poll-status', {'counts': counts, 'reasons': list(reasons)}, mutable=True)
-
 
 
     def validate_phase_inputs(self, record):

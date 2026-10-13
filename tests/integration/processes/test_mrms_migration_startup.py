@@ -15,9 +15,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 @pytest.mark.parametrize('argv', [
     ['src/run_edgewarn.py', '--disable-stormprob', '--disable-ctam'],
-    ['src/run_ewmrs.py', '--disable-nws'],
     ['src/run_nexrad.py'],
-    ['src/run_all.py', '--services', 'ewmrs'],
     ['src/process_historical.py', '--start', '2024-01-01T00:00:00', '--end', '2024-01-01T00:01:00'],
     ['-c', 'from edgewarn_cli.main import main; raise SystemExit(main())', 'run', 'core'],
 ])

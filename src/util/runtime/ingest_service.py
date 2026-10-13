@@ -23,7 +23,7 @@ SETTLED_STATES = ("committed", "abandoned")
 
 #: Acquisition priority tiers, most urgent first. Check products decide whether
 #: a scan can start at all, mandatory-integration products gate Core
-#: integration, and everything else is optional enrichment or rendering.
+#: integration, and everything else is optional enrichment.
 TIER_CHECK = 0
 TIER_MANDATORY = 1
 TIER_OPTIONAL = 2
@@ -85,7 +85,7 @@ class IngestResources:
         """Effective listing lookback, never wider than raw-input retention.
 
         Listing past retention only downloads inputs that maintenance retires
-        as soon as they render. Catalog validation rejects such a lookback; the
+        before they can be processed. Catalog validation rejects such a lookback; the
         clamp also protects resources built with explicit overrides.
         """
         return min(self.lookback_hours * 60, self.retention_minutes)
@@ -765,7 +765,7 @@ class IngestService:
         """Candidate RAP analysis hours and GLM scan times, in that order.
 
         Neither auxiliary source is scheduled from a Core cursor, and neither
-        one can delay a discovery tick or an MRMS render event: they run on a
+        one can delay a discovery tick or Core readiness: they run on a
         separate bounded pool.
         """
         targets = []

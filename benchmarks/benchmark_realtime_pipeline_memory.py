@@ -4,7 +4,7 @@ Modes (decomposition Phase 7):
 
 - ``single`` (default): launch one entrypoint and profile its whole PID tree
   (parent plus every descendant).
-- ``direct``: launch ``run_edgewarn.py``, ``run_ewmrs.py``, and
+- ``direct``: launch ``run_ingest.py``, ``run_edgewarn.py``, and
   ``run_nexrad.py`` independently and report the aggregate across the three
   trees, per tree, and per process name.
 - ``launcher``: launch the same three through ``run_all.py`` and profile the
@@ -36,8 +36,8 @@ import psutil
 SAMPLE_INTERVAL_S = 0.1
 
 SERVICE_ENTRYPOINTS = {
-    "edgewarn": ("run_edgewarn.py", _PRIMARY_FLAGS),
-    "ewmrs": ("run_ewmrs.py", []),
+    "edgewarn": ("run_edgewarn.py", []),
+    "ingest": ("run_ingest.py", []),
     "nexrad": ("run_nexrad.py", []),
 }
 

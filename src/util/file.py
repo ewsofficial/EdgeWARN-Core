@@ -107,12 +107,16 @@ def _define_paths(base_path, config_dir=None):
     global STORMCELL_JSON
     global NEXRAD_LEVEL2_DIR, NEXRAD_LEVEL2_LOW_DIR, NEXRAD_LEVEL2_HIGH_DIR, NEXRAD_LEVEL2_MANIFEST_DIR
 
+    global MRMS_NWS_DIR
+
     base_path = Path(base_path)
     data_dir = base_path / "data"
     gui_dir = base_path / "gui"
     alerts_dir = data_dir / "Alerts"
     edgewarn_alerts_dir = alerts_dir / "EdgeWARN"
     official_alerts_dir = alerts_dir / "official"
+    # Core still matches published official alerts; acquisition has a separate owner.
+    MRMS_NWS_DIR = official_alerts_dir
 
     BASE_DIR = base_path
     DATA_DIR = data_dir

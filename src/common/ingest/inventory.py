@@ -58,7 +58,7 @@ class InputInventory:
             'validation': {'payload_validated': True, 'sha256': completed.sha256}})
 
     def commit_input(self, completed):
-        """Persist acquisition separately from notification publication."""
+        """Persist validated acquisition before Core readiness publication."""
         with input_lock(self.base_dir):
             return self._commit_input(completed)
 
@@ -128,8 +128,7 @@ class InputInventory:
         Candidate enumeration belongs to the source registry/service. The
         callback must return the phase-2 CommittedInput after payload decoding;
         a filename or digest alone never establishes validation on adoption.
-        Existing inventory needs no network retry when outbox publication fails.
-        Unacknowledged notifications are returned for retryable delivery.
+        Existing inventory needs no network retry when readiness publication fails.
         """
         with input_lock(self.base_dir):
             # Finish interrupted deletions before checking committed-file integrity.
@@ -157,7 +156,7 @@ class InputInventory:
             return {'adopted': tuple(adopted)}
 
     def referenced_inputs(self):
-        """Every input identity a live Core phase or render job still needs.
+        """Every input identity a live Core phase or worker still needs.
 
         Exposed for retention maintenance outside this class (the ingest
         service's RAP analysis cap) so no other module has to reach into the
@@ -190,8 +189,8 @@ class InputInventory:
 
         Keep each requested product's latest observation for previous history.
         Family-specific cutoffs preserve slower analyses across radar scans.
-        Compact inventory/outbox alongside deletion only after both consumer
-        dispositions have released their references. No operational directory
+        Compact inventory alongside deletion only after Core and worker
+        pins have released their references. No operational directory
         enumeration or arbitrary-path deletion is permitted.
         """
         with input_lock(self.base_dir):

@@ -1,7 +1,7 @@
 """Import-isolation contracts between decomposed services (decomposition Phase 1).
 
 "Verify imports of each service do not load the other scientific stacks":
-importing primary runtime code must not pull the EWMRS render stack or the
+importing primary runtime code must not pull the
 NEXRAD ingest pipeline, and shared utility modules must stay free of every
 scientific stack. The probes run in subprocesses so ``sys.modules`` starts
 clean.
@@ -18,7 +18,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def probe(statement):
     result = subprocess.run(
         [sys.executable, "-c", f"import sys\nsys.path.insert(0, 'src')\n{statement}\n"
-         "print('EWMRS:', 'EWMRS' in sys.modules)\n"
          "print('NEXRAD:', 'common.ingest.nexrad' in sys.modules)\n"
          "print('EDGEWARN:', 'EdgeWARN' in sys.modules)"],
         capture_output=True,
@@ -37,7 +36,6 @@ def probe(statement):
 
 def test_util_io_imports_no_scientific_stack():
     flags = probe("import util.io")
-    assert not flags["EWMRS"]
     assert not flags["NEXRAD"]
     assert not flags["EDGEWARN"]
 
@@ -45,37 +43,32 @@ def test_util_io_imports_no_scientific_stack():
 def test_bare_runtime_package_imports_no_scientific_stack():
     """Lazy re-exports mean importing the package loads nothing heavy."""
     flags = probe("import util.runtime")
-    assert not flags["EWMRS"]
     assert not flags["NEXRAD"]
     assert not flags["EDGEWARN"]
 
 
-def test_cycle_module_no_longer_imports_ewmrs_or_nexrad():
-    """The primary path keeps its own stack only; EWMRS/NEXRAD stay out."""
+def test_cycle_module_no_longer_imports_nexrad():
+    """The primary path keeps its own stack only; NEXRAD stay out."""
     flags = probe("import util.runtime.cycle")
-    assert not flags["EWMRS"]
     assert not flags["NEXRAD"]
     # The detection worker is genuinely part of the primary cycle today.
     assert flags["EDGEWARN"]
 
 
-def test_primary_service_module_avoids_ewmrs_and_nexrad():
+def test_primary_service_module_avoids_nexrad():
     flags = probe("import util.runtime.primary_service")
-    assert not flags["EWMRS"]
     assert not flags["NEXRAD"]
     assert flags["EDGEWARN"]
 
 
-def test_primary_cycle_module_avoids_ewmrs_and_nexrad_after_phase_4_cut():
-    """Phase 5: the primary cycle imports neither EWMRS nor NEXRAD at all."""
+def test_primary_cycle_module_avoids_nexrad_after_phase_4_cut():
+    """Phase 5: the primary cycle imports neither NEXRAD at all."""
     flags = probe("import util.runtime.cycle")
-    assert not flags["EWMRS"]
     assert not flags["NEXRAD"]
 
 
-def test_run_edgewarn_entrypoint_loads_no_ewmrs_or_nexrad_stack():
+def test_run_edgewarn_entrypoint_loads_no_nexrad_stack():
     flags = probe("import run_edgewarn")
-    assert not flags["EWMRS"]
     assert not flags["NEXRAD"]
     assert flags["EDGEWARN"]
 
