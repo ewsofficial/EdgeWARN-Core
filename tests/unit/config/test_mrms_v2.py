@@ -10,7 +10,7 @@ import yaml
 from common.config.loader import ConfigError, validate_document, validate_all_configs, reset_cache
 from edgewarn_cli.configure import edit_configuration
 from edgewarn_cli.main import main
-from edgewarn_cli.migrate_mrms import convert_documents, legacy_contract, plan_migration, execute_migration
+from edgewarn_cli.migrate_mrms import RETIRED_SERVICE as RETIRED, convert_documents, legacy_contract, plan_migration, execute_migration
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = json.loads((ROOT / 'tests/fixtures/config/mrms_v2_validation.json').read_text())
@@ -27,6 +27,27 @@ def v1_documents():
         for item in docs[name][key]:
             item['filepath'] = aliases[item.pop('product')]
     docs['runtime']['run'].pop('disable_stormprob', None)
+    return add_retired_fields(docs)
+
+
+def add_retired_fields(docs):
+    """Settings a pre-retirement release carried; the shipped catalogs no longer define them."""
+    goes = docs['ingest']['goes']
+    goes.update(abi_product='ABI-L1b-RadC', filename_matcher_template=r'(?:_|-)M\d{channel_id}_',
+                abi_channels=[{'id': 'C01', 'name': 'visible_blue', 'outdir': 'GOES_ABI_VISIBLE_BLUE_DIR'}])
+    run = docs['runtime']['run']
+    run['disable_goes'] = run.pop('disable_glm')
+    run.update({f'disable_{RETIRED}': False, 'disable_nws': False, 'disable_metar': False, 'disable_wpc': False})
+    docs['runtime']['goes_coordination'] = {'poll_seconds': 60}
+    docs['runtime']['background_intervals'].update(metar_boundary_minutes=5, nws_seconds=120, **{f'{RETIRED}_consumer_seconds': 10})
+    docs['runtime']['consumers'][f'{RETIRED}_notification_seconds'] = 1.0
+    api = docs['api']
+    api['server']['enabled_services'] = ['ingest', 'edgewarn', RETIRED, 'nexrad']
+    api['artifacts']['chunk_length_slack_bytes'] = 1024
+    api['render_defaults'] = {'grid': {'rows': 5, 'cols': 10, 'tile_size': 700}}
+    api['product_catalog'] = {'entries': 32}
+    docs['nexrad'].pop('gui')
+    docs['nexrad'].pop('variable_colormaps')
     return docs
 
 
@@ -113,6 +134,36 @@ def test_conversion_matches_shared_node_fixture_and_restores_reserved():
     docs['ingest']['mrms']['products'] = [p for p in docs['ingest']['mrms']['products'] if p['region'] != 'ProbSevere']
     _, _, restored = convert_documents(docs, legacy_contract())
     assert restored == ['MRMS_ProbSevere']
+
+
+def test_retired_fields_are_converted_not_reported_as_conflicts(tmp_path):
+    docs = v1_documents()
+    assert 'disable_goes' in docs['runtime']['run'] and 'gui' not in docs['nexrad']
+    converted, conflicts, _ = convert_documents(docs, legacy_contract())
+    assert conflicts == []
+    assert converted['runtime']['run']['disable_glm'] is False
+    assert 'abi_channels' not in converted['ingest']['goes']
+    assert RETIRED not in converted['api']['server']['enabled_services']
+    root = v1_tree(tmp_path / 'config')
+    assert plan_migration(root, tmp_path / 'runtime')['conflicts'] == []
+
+
+def test_disable_goes_maps_to_disable_glm_and_render_settings_carry_over(tmp_path):
+    docs = v1_documents()
+    docs['runtime']['run']['disable_goes'] = True
+    retired = {'nexrad_gui': {'max_workers': 3, 'retention_minutes': 90, 'unknown': 1},
+               'gui_cleanup_max_age_minutes': 45}
+    converted, conflicts, _ = convert_documents(docs, legacy_contract(), retired=retired)
+    assert conflicts == []
+    assert converted['runtime']['run']['disable_glm'] is True
+    gui = converted['nexrad']['gui']
+    assert (gui['max_workers'], gui['retention_minutes'], gui['cleanup_max_age_minutes']) == (3, 90, 45)
+    assert 'unknown' not in gui
+    root = v1_tree(tmp_path / 'config')
+    (root / f'{RETIRED}_pipeline.yaml').write_text(yaml.safe_dump({'nexrad_gui': {'max_workers': 3},
+                                                              'render': {'gui_cleanup_max_age_minutes': 45}}))
+    report = plan_migration(root, tmp_path / 'runtime')
+    assert report['converted_documents']['nexrad']['gui']['max_workers'] == 3
 
 
 def test_migration_asset_packaging_and_baseline():

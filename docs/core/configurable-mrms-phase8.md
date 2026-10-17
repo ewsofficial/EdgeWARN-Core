@@ -11,6 +11,12 @@ edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime --r
 edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime --rollback
 ```
 
+Settings owned by retired products (GOES ABI channels, GOES/NWS/METAR/WPC
+switches and coordination, retired API render/product-catalog sections and the
+retired renderer's service entry) are discarded during conversion, and
+`disable_goes` becomes `disable_glm`. NEXRAD render cadence is carried over from
+the retired rendering catalog when present, otherwise release defaults apply.
+
 The dry run performs no writes. Apply stores the original configuration bytes
 and per-step progress in `<config-root>/.mrms-migration/journal.json`, writes config
 atomically, and records each raw directory rename for resume and inverse rollback.

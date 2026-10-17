@@ -66,7 +66,7 @@ def test_escaped_dotted_mapping_key_can_be_edited(config_tree):
     from tests.unit.config.test_mrms_v2 import v1_documents
     document = yaml.safe_load((config_tree / "ingest.yaml").read_text())
     legacy = v1_documents()["ingest"]
-    document.update(legacy)
+    document.update({key: legacy[key] for key in ('schema_version', 'mrms')})
     (config_tree / "ingest.yaml").write_text(yaml.safe_dump(document))
     result = configure.edit_configuration(
         config_tree,

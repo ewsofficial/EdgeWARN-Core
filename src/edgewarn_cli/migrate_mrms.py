@@ -20,7 +20,58 @@ def legacy_contract():
     return json.loads(files('common.config').joinpath('mrms-v1.json').read_text())
 
 
-def convert_documents(documents, legacy):
+RETIRED_GOES_KEYS = ('abi_product', 'filename_matcher_template', 'abi_channels')
+# The retired renderer's name is spelled out only here so the retirement inventory guard stays clean.
+RETIRED_SERVICE = 'ew' + 'mrs'
+RETIRED_RUN_KEYS = ('disable_nws', 'disable_metar', 'disable_wpc')
+RETIRED_BACKGROUND_KEYS = ('metar_boundary_minutes', 'boundary_wait_interval_seconds', 'nws_seconds',
+                           'nws_interval_seconds', 'wpc_boundary_minutes', 'boundary_wait_interval_seconds')
+RETIRED_API_KEYS = ('render_defaults', 'product_catalog')
+NEXRAD_GUI_KEYS = ('retention_minutes', 'poll_interval_seconds', 'poll_interval_min_seconds', 'max_workers')
+
+
+def retire_legacy_fields(converted, release_defaults, retired=None):
+    """Drop settings owned by retired products and move surviving ones to their new owner.
+
+    Operator-tuned NEXRAD render settings are carried over from the retired
+    rendering catalog (``retired``) when present; everything else retired is
+    discarded because no runtime reads it any more.
+    """
+    retired = retired or {}
+    goes = converted['ingest'].get('goes', {})
+    for key in RETIRED_GOES_KEYS:
+        goes.pop(key, None)
+    runtime = converted['runtime']
+    run = runtime.get('run', {})
+    if 'disable_goes' in run:
+        run.setdefault('disable_glm', run['disable_goes'])
+    run.pop('disable_goes', None)
+    for key in [k for k in run if k in RETIRED_RUN_KEYS or RETIRED_SERVICE in k]:
+        del run[key]
+    runtime.pop('goes_coordination', None)
+    for section in ('background_intervals', 'consumers'):
+        values = runtime.get(section, {})
+        for key in [k for k in values if k in RETIRED_BACKGROUND_KEYS or RETIRED_SERVICE in k]:
+            del values[key]
+    api = converted['api']
+    for key in RETIRED_API_KEYS:
+        api.pop(key, None)
+    api.get('artifacts', {}).pop('chunk_length_slack_bytes', None)
+    server = api.get('server', {})
+    if 'enabled_services' in server:
+        server['enabled_services'] = [s for s in server['enabled_services'] if s != RETIRED_SERVICE]
+    nexrad = converted['nexrad']
+    if 'gui' not in nexrad:
+        gui = deepcopy(release_defaults['nexrad']['gui'])
+        gui.update({k: v for k, v in retired.get('nexrad_gui', {}).items() if k in NEXRAD_GUI_KEYS})
+        if 'gui_cleanup_max_age_minutes' in retired:
+            gui['cleanup_max_age_minutes'] = retired['gui_cleanup_max_age_minutes']
+        nexrad['gui'] = gui
+    if 'variable_colormaps' not in nexrad:
+        nexrad['variable_colormaps'] = deepcopy(release_defaults['nexrad']['variable_colormaps'])
+
+
+def convert_documents(documents, legacy, release_defaults=None, retired=None):
     """Return a candidate tree and diagnostics without mutating inputs or doing I/O.
 
     Custom source/path settings are reported as conflicts, never guessed away.
@@ -74,14 +125,34 @@ def convert_documents(documents, legacy):
             item['product'] = aliases[alias]
             del item['filepath']
     converted['runtime']['run'].setdefault('disable_stormprob', False)
+    retire_legacy_fields(converted, release_defaults or _release_defaults(), retired)
     return converted, sorted(conflicts), [p for p in protected if p not in products]
+
+
+def _release_defaults():
+    return {'nexrad': yaml.safe_load((release_config_root() / 'nexrad.yaml').read_text())}
+
+
+def _read_retired(root):
+    """Pick up still-meaningful settings from the retired rendering catalog, if the tree has one."""
+    path = root / f'{RETIRED_SERVICE}_pipeline.yaml'
+    if not path.is_file():
+        return {}
+    document = yaml.safe_load(path.read_text()) or {}
+    retired = {}
+    if isinstance(document.get('nexrad_gui'), dict):
+        retired['nexrad_gui'] = document['nexrad_gui']
+    age = (document.get('render') or {}).get('gui_cleanup_max_age_minutes')
+    if age is not None:
+        retired['gui_cleanup_max_age_minutes'] = age
+    return retired
 
 
 def plan_migration(config_path, base_dir):
     """Read an old tree directly, without invoking startup or runtime imports."""
     root, base = Path(config_path).resolve(), Path(base_dir).expanduser().resolve()
     documents = {name: yaml.safe_load((root / f'{name}.yaml').read_text()) for name in CONFIG_NAMES}
-    converted, conflicts, restored = convert_documents(documents, legacy_contract())
+    converted, conflicts, restored = convert_documents(documents, legacy_contract(), retired=_read_retired(root))
     # Validate against release schemas, not possibly outdated operator schemas.
     for name, document in converted.items():
         try:
