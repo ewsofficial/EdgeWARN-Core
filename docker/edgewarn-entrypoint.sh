@@ -6,6 +6,7 @@ log_dir="${EDGEWARN_LOG_DIR:-/var/log/edgewarn}"
 pipe_dir="$(mktemp -d /tmp/edgewarn-log.XXXXXX)"
 log_pipe="${pipe_dir}/stream"
 supervisor_pid=""
+api_pid=""
 logger_pid=""
 shutdown_requested=0
 
@@ -19,6 +20,9 @@ forward_signal() {
     shutdown_requested=1
     if [[ -n "${supervisor_pid}" ]] && kill -0 "${supervisor_pid}" 2>/dev/null; then
         kill "-${signum}" "${supervisor_pid}" 2>/dev/null || true
+    fi
+    if [[ -n "${api_pid}" ]] && kill -0 "${api_pid}" 2>/dev/null; then
+        kill "-${signum}" "${api_pid}" 2>/dev/null || true
     fi
 }
 
@@ -71,8 +75,31 @@ if (( shutdown_requested )); then
     forward_signal TERM
 fi
 
+# The Node API runs beside the supervisor in the same container.  Either one
+# exiting ends the container so the restart policy can recover both.
+if [[ "${EDGEWARN_WITH_API:-0}" == "1" ]]; then
+    node /opt/edgewarn/api/src/api/server.js >"${log_pipe}" 2>&1 &
+    api_pid=$!
+    if (( shutdown_requested )); then
+        forward_signal TERM
+    fi
+fi
+
 supervisor_status=0
-wait_for_pid "${supervisor_pid}" || supervisor_status=$?
+if [[ -n "${api_pid}" ]]; then
+    while kill -0 "${supervisor_pid}" 2>/dev/null && kill -0 "${api_pid}" 2>/dev/null; do
+        wait -n "${supervisor_pid}" "${api_pid}" 2>/dev/null || true
+    done
+    # Stop whichever service is still running, then reap both.
+    forward_signal TERM
+    wait_for_pid "${api_pid}" || true
+    wait_for_pid "${supervisor_pid}" || supervisor_status=$?
+    if (( supervisor_status == 0 && shutdown_requested == 0 )); then
+        supervisor_status=1
+    fi
+else
+    wait_for_pid "${supervisor_pid}" || supervisor_status=$?
+fi
 
 # The supervisor has closed the final writer after reaping its service groups,
 # so rotatelogs receives EOF and can flush before the container exits.

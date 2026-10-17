@@ -84,7 +84,10 @@ Compose starts ingest, Core, and NEXRAD. Mount configuration read-only for the
 processing service; the administrative configure profile mounts it writable.
 Persist the runtime root and circular logs. Operator CTAM modules are mounted
 read-only at `/opt/edgewarn/ctam_modules`. The image bundles dependencies,
-configuration, and models; it does not start the Node API.
+configuration, models, and the Node API. The container entrypoint starts the
+API (port 5000; `EDGEWARN_API_PORT` changes the host port) beside `edgewarn run`
+when `EDGEWARN_WITH_API=1`, which the image and compose set by default. If either
+process exits the container stops. Set `EDGEWARN_WITH_API=0` for processing only.
 
 ## API deployment
 

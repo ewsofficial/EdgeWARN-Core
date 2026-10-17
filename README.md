@@ -4,7 +4,27 @@ EdgeWARN powers the weather platform with storm-cell analysis and NEXRAD radar
 products. Independent Python services acquire weather inputs, analyze cells,
 and serialize radar data. A separate Node.js API serves published artifacts.
 
-## Quick start
+## Quick start (Docker)
+
+The processing image runs the Python services and includes configuration and
+models. Persist `/var/lib/edgewarn` and `/var/log/edgewarn`. This one command
+starts ingest, Core, NEXRAD, and the Node API, and publishes the API on host
+port 5000:
+
+```bash
+docker run -d --name edgewarn --restart unless-stopped \
+  -p 5000:5000 \
+  -v edgewarn-runtime:/var/lib/edgewarn \
+  -v edgewarn-logs:/var/log/edgewarn \
+  ewsofficial/edgewarn:latest
+```
+
+The image runs the Node API beside the Python services by default; add
+`-e EDGEWARN_WITH_API=0` for processing only. The API serves `/api/v3`,
+`/api/v3/openapi.json`, `/health/live`, and `/health/ready`.
+See [API v3](docs/api/unified_v3.md) and [installation](INSTALLATION.md).
+
+## Running from source
 
 ```bash
 conda env create -f environment.yml
@@ -36,22 +56,7 @@ Workers are `ingest`, `core`, and `nexrad`. Core provides detection,
 tracking/lineage, enrichment, CTAM, StormProb, alerts, and API publication.
 The ingest producer publishes durable pinned readiness records independently.
 
-## Containers and API
-
-The processing image runs the Python services and includes configuration and
-models. Persist `/var/lib/edgewarn` and `/var/log/edgewarn`:
-
-```bash
-docker run -d --name edgewarn --restart unless-stopped \
-  -v edgewarn-runtime:/var/lib/edgewarn \
-  -v edgewarn-logs:/var/log/edgewarn \
-  ewsofficial/edgewarn:latest
-npm run api
-```
-
-The Node API is deployed separately. It defaults to port 5000 and serves
-`/api/v3`, `/api/v3/openapi.json`, `/health/live`, and `/health/ready`.
-See [API v3](docs/api/unified_v3.md) and [installation](INSTALLATION.md).
+Outside Docker, start the API with `npm run api`. It defaults to port 5000.
 
 ## Configuration and storage
 

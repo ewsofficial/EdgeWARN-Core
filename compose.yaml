@@ -10,6 +10,8 @@ services:
       timeout: 10s
       start_period: 5m
       retries: 3
+    ports:
+      - "${EDGEWARN_API_PORT:-5000}:5000"
     # Start ingest before Core and NEXRAD using the package topology.
     command: ["edgewarn", "run", "--config-path", "/etc/edgewarn/config"]
     environment:
@@ -18,6 +20,8 @@ services:
       # contract, so every supervised worker uses the same runtime root.
       EDGEWARN_BASE_DIR: /var/lib/edgewarn
       EDGEWARN_CONFIG_DIR: /etc/edgewarn/config
+      # Also run the Node API (port 5000) in this container; set to 0 to disable.
+      EDGEWARN_WITH_API: "1"
       # Operator-owned CTAM modules.  Resolution precedence is CLI flag >
       # this variable > runtime.yaml run.ctam_module_dir; the absolute path
       # here skips the relative-path repo-root guessing entirely.
