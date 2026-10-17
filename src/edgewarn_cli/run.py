@@ -15,34 +15,39 @@ from types import MappingProxyType
 
 
 # Public mode names map to the existing internal service names. Tuples preserve
-# startup order, which is significant for the EWMRS producer dependency.
+# startup order, which is significant for the ingest producer dependency.
 TOPOLOGIES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
-        "all": ("ingest", "edgewarn", "ewmrs", "nexrad"),
+        "all": ("ingest", "edgewarn", "nexrad"),
         "core": ("ingest", "edgewarn"),
-        "ewmrs": ("ingest", "edgewarn", "ewmrs"),
         "ingest": ("ingest",),
         "nexrad": ("nexrad",),
     }
 )
 
-WORKERS: tuple[str, ...] = ("ingest", "core", "ewmrs", "nexrad")
+WORKERS: tuple[str, ...] = ("ingest", "core", "nexrad")
 _WORKER_TO_SERVICE: Mapping[str, str] = MappingProxyType(
-    {"ingest": "ingest", "core": "edgewarn", "ewmrs": "ewmrs", "nexrad": "nexrad"}
+    {"ingest": "ingest", "core": "edgewarn", "nexrad": "nexrad"}
 )
 _WRAPPER_OWNED_OPTIONS = frozenset(
     {
         "--config-dir",
         "--config-path",
         "--services",
-        "--disable-ewmrs",
-        "--no-disable-ewmrs",
         "--disable-nexrad",
         "--no-disable-nexrad",
         "--mrms-core-only",
         "--no-mrms-core-only",
     }
 )
+
+
+def _parse_mode(value):
+    if value not in TOPOLOGIES:
+        raise argparse.ArgumentTypeError(
+            f"unknown or retired topology {value!r}; use all, core, ingest, or nexrad; "
+            "see CHANGELOG.md for service retirement and migration instructions")
+    return value
 
 
 def add_run_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -58,7 +63,7 @@ def add_run_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "mode",
         nargs="?",
-        choices=tuple(TOPOLOGIES),
+        type=_parse_mode,
         default="all",
         help="service topology to run (default: all)",
     )
@@ -75,7 +80,7 @@ def add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar=("WORKER", "JSON_ARGV"),
         default=[],
         help=(
-            "worker-scoped JSON array of arguments; repeat for ingest, core, ewmrs, or "
+            "worker-scoped JSON array of arguments; repeat for ingest, core, or "
             "nexrad"
         ),
     )
@@ -97,7 +102,7 @@ def parse_worker_argv(
     for worker, json_argv in entries:
         if worker not in _WORKER_TO_SERVICE:
             raise ValueError(
-                f"unknown worker {worker!r}; expected one of {', '.join(WORKERS)}"
+                f"unknown worker {worker!r}; expected one of {', '.join(WORKERS)}; see CHANGELOG.md for retired workers"
             )
         service = _WORKER_TO_SERVICE[worker]
         if service not in selected:
@@ -221,14 +226,10 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         disable_stormprob=None,
         disable_tracking=None,
         disable_polygon_expansion=None,
-        disable_goes=None,
-        disable_metar=None,
-        disable_nws=None,
-        disable_wpc=None,
+        disable_glm=None,
         refl_threshold=None,
         min_seed_percentage=None,
         drop_offset=None,
-        disable_ewmrs=None,
         disable_nexrad=None,
         mrms_core_only=None,
     )

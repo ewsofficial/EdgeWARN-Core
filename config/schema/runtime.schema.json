@@ -3,130 +3,384 @@
   "title": "runtime.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "identity", "run", "goes_coordination", "nexrad_coordination", "supervisor", "background_intervals", "cycle", "handoff", "profiling", "ingest", "consumers", "logging"],
+  "required": [
+    "schema_version",
+    "identity",
+    "run",
+    "nexrad_coordination",
+    "supervisor",
+    "background_intervals",
+    "cycle",
+    "handoff",
+    "profiling",
+    "ingest",
+    "consumers",
+    "logging"
+  ],
   "properties": {
     "logging": {
-      "type": "object", "additionalProperties": false,
-      "required": ["retention_files", "max_file_mb"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retention_files",
+        "max_file_mb"
+      ],
       "properties": {
-        "retention_files": { "type": "integer", "minimum": 1, "maximum": 1000 },
-        "max_file_mb": { "type": "integer", "minimum": 1, "maximum": 4096 }
+        "retention_files": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "max_file_mb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        }
       }
     },
     "ingest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["listing_concurrency", "download_concurrency", "decode_concurrency", "auxiliary_concurrency", "listing_timeout_seconds", "download_timeout_seconds", "auxiliary_timeout_seconds", "listing_page_size", "listing_max_pages", "listing_max_objects", "pending_max_jobs", "retry_max_attempts", "retry_initial_seconds", "retry_max_seconds", "scan_deadline_seconds", "reconcile_interval_seconds", "retention_minutes", "disk_budget_mb", "shutdown_timeout_seconds"],
+      "required": [
+        "listing_concurrency",
+        "download_concurrency",
+        "decode_concurrency",
+        "auxiliary_concurrency",
+        "listing_timeout_seconds",
+        "download_timeout_seconds",
+        "auxiliary_timeout_seconds",
+        "listing_page_size",
+        "listing_max_pages",
+        "listing_max_objects",
+        "pending_max_jobs",
+        "retry_max_attempts",
+        "retry_initial_seconds",
+        "retry_max_seconds",
+        "scan_deadline_seconds",
+        "reconcile_interval_seconds",
+        "retention_minutes",
+        "disk_budget_mb",
+        "shutdown_timeout_seconds"
+      ],
       "properties": {
-        "listing_concurrency": {"type": ["integer", "null"], "minimum": 1, "maximum": 64, "description": "Concurrent listing jobs; null inherits ingest.mrms.downloads.max_concurrency."},
-        "download_concurrency": {"type": ["integer", "null"], "minimum": 1, "maximum": 64, "description": "Concurrent MRMS transfers; null inherits ingest.mrms.downloads.max_concurrency."},
-        "decode_concurrency": {"type": "integer", "minimum": 1, "maximum": 16, "description": "Concurrent blocking decode workers, capped by download concurrency."},
-        "auxiliary_concurrency": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Separate RAP/GLM worker slots, one for each source by default."},
-        "listing_timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "maximum": 600, "description": "Listing timeout in seconds; null inherits MRMS HTTPS timeout."},
-        "download_timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "maximum": 3600, "description": "MRMS job timeout in seconds; null inherits four MRMS HTTPS timeouts."},
-        "auxiliary_timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "maximum": 7200, "description": "RAP/GLM job timeout in seconds; null inherits four RAP NOMADS timeouts."},
-        "listing_page_size": {"type": "integer", "minimum": 1, "maximum": 1000, "description": "S3 objects per page; follows every page within explicit limits."},
-        "listing_max_pages": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Maximum pages per product refresh; overflow is an explicit error."},
-        "listing_max_objects": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum eligible objects per product refresh; overflow is an explicit error."},
-        "pending_max_jobs": {"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum queued acquisition jobs; overflow applies backpressure."},
-        "retry_max_attempts": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum acquisition attempts per object, matching cycle retry default."},
-        "retry_initial_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "description": "Initial retry delay in seconds, matching cycle retry default."},
-        "retry_max_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Maximum retry delay in seconds, matching cycle retry default."},
-        "scan_deadline_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Incomplete scan deadline in seconds; covers MRMS alignment window."},
-        "reconcile_interval_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Reconciliation cadence in seconds, matching discovery default."},
-        "retention_minutes": {"type": ["integer", "null"], "minimum": 1, "maximum": 10080, "description": "Unpinned MRMS retention in minutes; null inherits MRMS cleanup age."},
-        "disk_budget_mb": {"type": "integer", "minimum": 64, "maximum": 1048576, "description": "Raw inventory disk budget in MiB; active pins must never be deleted."},
-        "shutdown_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Owned-worker termination bound in seconds."}
+        "listing_concurrency": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Concurrent listing jobs; null inherits ingest.mrms.downloads.max_concurrency."
+        },
+        "download_concurrency": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Concurrent MRMS transfers; null inherits ingest.mrms.downloads.max_concurrency."
+        },
+        "decode_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Concurrent blocking decode workers, capped by download concurrency."
+        },
+        "auxiliary_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Separate RAP/GLM worker slots, one for each source by default."
+        },
+        "listing_timeout_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 600,
+          "description": "Listing timeout in seconds; null inherits MRMS HTTPS timeout."
+        },
+        "download_timeout_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "MRMS job timeout in seconds; null inherits four MRMS HTTPS timeouts."
+        },
+        "auxiliary_timeout_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 7200,
+          "description": "RAP/GLM job timeout in seconds; null inherits four RAP NOMADS timeouts."
+        },
+        "listing_page_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "S3 objects per page; follows every page within explicit limits."
+        },
+        "listing_max_pages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Maximum pages per product refresh; overflow is an explicit error."
+        },
+        "listing_max_objects": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Maximum eligible objects per product refresh; overflow is an explicit error."
+        },
+        "pending_max_jobs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Maximum queued acquisition jobs; overflow applies backpressure."
+        },
+        "retry_max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum acquisition attempts per object, matching cycle retry default."
+        },
+        "retry_initial_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "description": "Initial retry delay in seconds, matching cycle retry default."
+        },
+        "retry_max_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Maximum retry delay in seconds, matching cycle retry default."
+        },
+        "scan_deadline_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Incomplete scan deadline in seconds; covers MRMS alignment window."
+        },
+        "reconcile_interval_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Reconciliation cadence in seconds, matching discovery default."
+        },
+        "retention_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 10080,
+          "description": "Unpinned MRMS retention in minutes; null inherits MRMS cleanup age."
+        },
+        "disk_budget_mb": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 1048576,
+          "description": "Raw inventory disk budget in MiB; active pins must never be deleted."
+        },
+        "shutdown_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "description": "Owned-worker termination bound in seconds."
+        }
       }
     },
     "consumers": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["core_readiness_seconds", "ewmrs_notification_seconds"],
+      "required": [
+        "core_readiness_seconds"
+      ],
       "properties": {
-        "core_readiness_seconds": {"type": "number", "minimum": 0.1, "maximum": 1.0, "description": "Core local readiness check interval in seconds."},
-        "ewmrs_notification_seconds": {"type": "number", "minimum": 0.1, "maximum": 1.0, "description": "EWMRS input notification check interval in seconds."}
+        "core_readiness_seconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 1.0,
+          "description": "Core local readiness check interval in seconds."
+        }
       }
     },
-    "schema_version": { "type": "integer", "const": 1 },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contact", "weather_api_accept"],
+      "required": [
+        "contact",
+        "weather_api_accept"
+      ],
       "properties": {
-        "contact": { "type": "string", "pattern": "^[^\\s{}@]+@[^\\s{}@]+\\.[^\\s{}@]+$" },
-        "weather_api_accept": { "type": "string", "pattern": "^[^\\s{}\\r\\n]+/[^\\s{}\\r\\n]+$" }
+        "contact": {
+          "type": "string",
+          "pattern": "^[^\\s{}@]+@[^\\s{}@]+\\.[^\\s{}@]+$"
+        },
+        "weather_api_accept": {
+          "type": "string",
+          "pattern": "^[^\\s{}\\r\\n]+/[^\\s{}\\r\\n]+$"
+        }
       }
     },
     "run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["lat_limits", "lon_limits", "profile", "disable_ctam", "disable_stormprob", "disable_tracking", "disable_polygon_expansion", "ctam_module_dir", "disable_ewmrs", "disable_nws", "disable_metar", "disable_wpc", "disable_goes", "disable_nexrad", "mrms_core_only"],
+      "required": [
+        "lat_limits",
+        "lon_limits",
+        "profile",
+        "disable_ctam",
+        "disable_stormprob",
+        "disable_tracking",
+        "disable_polygon_expansion",
+        "ctam_module_dir",
+        "disable_glm",
+        "disable_nexrad",
+        "mrms_core_only"
+      ],
       "properties": {
-        "lat_limits": { "type": "array", "items": { "type": "number", "minimum": -90, "maximum": 90 }, "minItems": 2, "maxItems": 2 },
-        "lon_limits": { "type": "array", "items": { "type": "number", "minimum": -180, "maximum": 360 }, "minItems": 2, "maxItems": 2 },
-        "profile": { "type": "boolean" },
-        "disable_stormprob": { "type": "boolean" },
-        "disable_ctam": { "type": "boolean" },
-        "disable_tracking": { "type": "boolean" },
-        "disable_polygon_expansion": { "type": "boolean" },
-        "ctam_module_dir": { "type": "string", "pattern": "^[^\\x00-\\x1f]+$" },
-        "disable_ewmrs": { "type": "boolean" },
-        "disable_nws": { "type": "boolean" },
-        "disable_metar": { "type": "boolean" },
-        "disable_wpc": { "type": "boolean" },
-        "disable_goes": { "type": "boolean" },
-        "disable_nexrad": { "type": "boolean" },
-        "mrms_core_only": { "type": "boolean" }
-      }
-    },
-    "goes_coordination": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["poll_seconds", "render_wait_seconds", "render_wait_interval_seconds", "render_max_offset_minutes", "pause_ingest_during_render", "render_pause_poll_seconds", "render_pause_poll_interval_seconds", "poll_interval_seconds", "render_wait_interval_floor_seconds", "render_wait_poll_granularity_seconds", "render_task_max_entries"],
-      "properties": {
-        "poll_seconds": { "type": "number", "minimum": 0 },
-        "render_wait_seconds": { "type": "number", "minimum": 0 },
-        "render_wait_interval_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "render_max_offset_minutes": { "type": "number", "minimum": 0 },
-        "pause_ingest_during_render": { "type": "boolean" },
-        "render_pause_poll_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "render_pause_poll_interval_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "poll_interval_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "render_wait_interval_floor_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "render_wait_poll_granularity_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "render_task_max_entries": { "type": "integer", "minimum": 1 }
+        "lat_limits": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "lon_limits": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 360
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "profile": {
+          "type": "boolean"
+        },
+        "disable_stormprob": {
+          "type": "boolean"
+        },
+        "disable_ctam": {
+          "type": "boolean"
+        },
+        "disable_tracking": {
+          "type": "boolean"
+        },
+        "disable_polygon_expansion": {
+          "type": "boolean"
+        },
+        "ctam_module_dir": {
+          "type": "string",
+          "pattern": "^[^\\x00-\\x1f]+$"
+        },
+        "disable_glm": {
+          "type": "boolean"
+        },
+        "disable_nexrad": {
+          "type": "boolean"
+        },
+        "mrms_core_only": {
+          "type": "boolean"
+        }
       }
     },
     "supervisor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["check_ticks", "tick_seconds", "max_restarts", "restart_window_seconds", "base_backoff_seconds", "max_backoff_seconds", "stop_join_timeout_seconds", "stop_kill_join_timeout_seconds", "health_file", "nexrad_heartbeat_file"],
+      "required": [
+        "check_ticks",
+        "tick_seconds",
+        "max_restarts",
+        "restart_window_seconds",
+        "base_backoff_seconds",
+        "max_backoff_seconds",
+        "stop_join_timeout_seconds",
+        "stop_kill_join_timeout_seconds",
+        "health_file",
+        "nexrad_heartbeat_file"
+      ],
       "properties": {
-        "check_ticks": { "type": "integer", "minimum": 1 },
-        "tick_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "max_restarts": { "type": "integer", "minimum": 0 },
-        "restart_window_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "base_backoff_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "max_backoff_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "stop_join_timeout_seconds": { "type": "number", "minimum": 0 },
-        "stop_kill_join_timeout_seconds": { "type": "number", "minimum": 0 },
+        "check_ticks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tick_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_restarts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "restart_window_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "base_backoff_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_backoff_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "stop_join_timeout_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stop_kill_join_timeout_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
         "health_file": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["dir", "name"],
+          "required": [
+            "dir",
+            "name"
+          ],
           "properties": {
-            "dir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
-            "name": { "type": "string" }
+            "dir": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "name": {
+              "type": "string"
+            }
           }
         },
         "nexrad_heartbeat_file": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["dir", "name"],
+          "required": [
+            "dir",
+            "name"
+          ],
           "properties": {
-            "dir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
-            "name": { "type": "string" }
+            "dir": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "name": {
+              "type": "string"
+            }
           }
         }
       }
@@ -134,47 +388,90 @@
     "background_intervals": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["metar_boundary_minutes", "boundary_wait_interval_seconds", "nws_seconds", "nws_interval_seconds", "wpc_boundary_minutes", "nexrad_seconds", "nexrad_interval_seconds"],
+      "required": [
+        "nexrad_seconds",
+        "nexrad_interval_seconds"
+      ],
       "properties": {
-        "metar_boundary_minutes": { "type": "number", "exclusiveMinimum": 0 },
-        "boundary_wait_interval_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "nws_seconds": { "type": "number", "minimum": 0 },
-        "nws_interval_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "wpc_boundary_minutes": { "type": "number", "exclusiveMinimum": 0 },
-        "nexrad_seconds": { "type": "number", "minimum": 0 },
-        "nexrad_interval_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "ewmrs_consumer_seconds": { "type": "number", "minimum": 1 },
-        "ewmrs_consumer_interval_seconds": { "type": "number", "exclusiveMinimum": 0 }
+        "nexrad_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "nexrad_interval_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "cycle": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_cycle_seconds", "state_file", "retry", "ingest_max_entries", "log_drain_poll_seconds", "max_backlog_cycles"],
+      "required": [
+        "max_cycle_seconds",
+        "state_file",
+        "retry",
+        "ingest_max_entries",
+        "log_drain_poll_seconds",
+        "max_backlog_cycles"
+      ],
       "properties": {
         "state_file": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["dir", "name"],
+          "required": [
+            "dir",
+            "name"
+          ],
           "properties": {
-            "dir": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
-            "name": { "type": "string" }
+            "dir": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "name": {
+              "type": "string"
+            }
           }
         },
         "retry": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["max_attempts", "initial_backoff_seconds", "max_backoff_seconds"],
+          "required": [
+            "max_attempts",
+            "initial_backoff_seconds",
+            "max_backoff_seconds"
+          ],
           "properties": {
-            "max_attempts": { "type": "integer", "minimum": 1 },
-            "initial_backoff_seconds": { "type": "number", "minimum": 0 },
-            "max_backoff_seconds": { "type": "number", "minimum": 0 }
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "initial_backoff_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_backoff_seconds": {
+              "type": "number",
+              "minimum": 0
+            }
           }
         },
-        "max_cycle_seconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 7200 },
-        "ingest_max_entries": { "type": "integer", "minimum": 1 },
-        "log_drain_poll_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "max_backlog_cycles": { "type": "integer", "minimum": 1 }
+        "max_cycle_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 7200
+        },
+        "ingest_max_entries": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "log_drain_poll_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_backlog_cycles": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "nexrad_coordination": {
@@ -187,28 +484,62 @@
         "pause_poll_interval_seconds"
       ],
       "properties": {
-        "pause_ingest_during_primary_activity": { "type": "boolean" },
-        "primary_lease_ttl_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "pause_max_wait_seconds": { "type": "number", "minimum": 0 },
-        "pause_poll_interval_seconds": { "type": "number", "exclusiveMinimum": 0 }
+        "pause_ingest_during_primary_activity": {
+          "type": "boolean"
+        },
+        "primary_lease_ttl_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "pause_max_wait_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pause_poll_interval_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "handoff": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "input_lock_timeout_seconds", "input_lock_hold_warning_seconds"],
+      "required": [
+        "enabled",
+        "input_lock_timeout_seconds",
+        "input_lock_hold_warning_seconds"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "input_lock_timeout_seconds": {"type": "number", "minimum": 1, "maximum": 600, "description": "Bounded wait for the shared raw-input lock in seconds; past it the operation fails and retries."},
-        "input_lock_hold_warning_seconds": {"type": "number", "minimum": 0.1, "maximum": 600, "description": "Warn when one holder keeps the shared raw-input lock longer than this, in seconds."}
+        "enabled": {
+          "type": "boolean"
+        },
+        "input_lock_timeout_seconds": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 600,
+          "description": "Bounded wait for the shared raw-input lock in seconds; past it the operation fails and retries."
+        },
+        "input_lock_hold_warning_seconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 600,
+          "description": "Warn when one holder keeps the shared raw-input lock longer than this, in seconds."
+        }
       }
     },
     "profiling": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["perf_tracker"],
+      "required": [
+        "perf_tracker"
+      ],
       "properties": {
-        "perf_tracker": { "type": ["boolean", "null"] }
+        "perf_tracker": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
       }
     }
   }

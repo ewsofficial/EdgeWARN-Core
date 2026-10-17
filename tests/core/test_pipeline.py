@@ -106,7 +106,6 @@ def test_historical_pipeline_preserves_cell_and_stormcell_dirs(tmp_path):
 
     assert generated_file == generated_path
     assert mock_ingest.call_args.kwargs["include_goes"] is False
-    assert mock_ingest.call_args.kwargs["include_ewmrs"] is False
     assert mock_integrate.call_args.kwargs["remove_old_cells"] is False
 
 

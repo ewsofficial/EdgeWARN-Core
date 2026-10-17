@@ -139,7 +139,7 @@ class IngestDependencies:
 def resolve_dependencies(registry, *, check=None, detection=None,
                          mandatory_integration=None, enrichment=(),
                          include_rap=True, include_glm=True, mrms_core_only=False,
-                         disable_goes=False, auxiliary_settings=None,
+                         disable_glm=False, auxiliary_settings=None,
                          require_stormprob_inputs=False):
     """Pure preflight, also usable with explicit future dependency selections.
 
@@ -168,7 +168,7 @@ def resolve_dependencies(registry, *, check=None, detection=None,
     return IngestDependencies(check, detection, mandatory, optional, enrichment,
                               detection, optional,
                               bool(include_rap and not mrms_core_only),
-                              bool(include_glm and not mrms_core_only and not disable_goes),
+                              bool(include_glm and not mrms_core_only and not disable_glm),
                               settings['downloads']['optional_timeout_seconds'],
                               registry.fingerprint,
                               json.dumps(auxiliary_settings or {}, sort_keys=True,

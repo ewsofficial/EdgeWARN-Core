@@ -1,21 +1,6 @@
 # MRMS coordinated release: migration and qualification
 
-The shipped `ingest.yaml` now uses schema version 2. Its 18 additions plus the
-three immutable protected products preserve all 21 upstream identities. Only
-protected products participate in discovery and mandatory MRMS readiness.
-Integration and EWMRS references use full upstream identities; GUI paths and
-binary payloads and API v3 product identities do not change.
-
 ## Upgrade and rollback
-
-Use the complete release checkout with `npm install` and the EdgeWARN Conda
-environment. For a wheel deployment, Node validator assets and package manifests
-are installed beneath `<python-prefix>/share/edgewarn`; install their dependencies
-with `npm ci --omit=dev --prefix <python-prefix>/share/edgewarn`. Copy/deploy the entire configuration tree. Stop Core, EWMRS,
-NEXRAD, and the API; drain the EWMRS consumer backlog. Migration refuses live
-service locks, pending cycles, active pins, source/target conflicts, unsafe
-symlinks, cross-device moves, and custom mappings it cannot prove safe. A phase
-that was never published does not create a consumer backlog.
 
 ```bash
 edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime
@@ -25,6 +10,12 @@ edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime --r
 # Restore original configuration and directory names:
 edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime --rollback
 ```
+
+Settings owned by retired products (GOES ABI channels, GOES/NWS/METAR/WPC
+switches and coordination, retired API render/product-catalog sections and the
+retired renderer's service entry) are discarded during conversion, and
+`disable_goes` becomes `disable_glm`. NEXRAD render cadence is carried over from
+the retired rendering catalog when present, otherwise release defaults apply.
 
 The dry run performs no writes. Apply stores the original configuration bytes
 and per-step progress in `<config-root>/.mrms-migration/journal.json`, writes config
@@ -75,7 +66,7 @@ Representative run on 2026-09-29, seconds (wall time varies):
 | 120ms deadline, first cycle | 0.036 | 0.093 | 0.129 | 8 / 3 | 3 |
 | 120ms deadline, fresh process replay | 0.007 | 0.122 | 0.129 | 7 / 2 | 3 |
 
-Both catalog validators passed all 18 documents. The focused architecture
+Both catalog validators passed all configured documents. The focused architecture
 catalog/invariant/contract and packaged Core contract asset checks passed 88 tests.
 The shipped defaults satisfy the fixture resource and callback separation checks.
 These measurements do not establish production throughput, network latency, RSS,
@@ -90,12 +81,12 @@ Final offline checks on 2026-09-29:
 - Full Python suite in the `EdgeWARN` environment: 2,418 passed, 7 skipped.
 - `npm test -- --runInBand`: 134 passed across 12 suites. Jest confines discovery
   to the repository's `tests/api` directory, excluding nested worktrees.
-- Python and Node configuration validators: all 18 documents passed in each.
+- Python and Node configuration validators: all configured documents passed in each.
 - Migration fixtures cover all ten renames, unchanged documents and unrelated
-  data, preserved drained records, installed-wheel apply/rollback, interruptions
+  data, preserved unrelated records, installed-wheel apply/rollback, interruptions
   during configuration commits and both rename directions, and completed-step
   conflict detection on resume.
 
 Deployment acceptance still requires the operator to verify stopped services,
-drained deployment backlog, reviewed custom mappings, filesystem permissions,
+inactive input pins, reviewed custom mappings, filesystem permissions,
 and representative NOAA throughput and recovery before restarting production.

@@ -77,20 +77,8 @@ def get_other_modifiers():
     return [p for p in get_integration_modifiers() if p not in enrichment]
 
 
-def get_ewmrs_modifiers():
-    from EWMRS.render.config import get_file_list
-
-    render_dirs = {item["filepath"] for item in get_file_list()}
-    return [
-        modifier
-        for _, modifier, outdir in get_mrms_modifiers()
-        if outdir in render_dirs
-    ]
 
 
-def get_ewmrs_support_modifiers():
-    detection_mods = set(get_detection_modifiers())
-    return [mod for mod in get_ewmrs_modifiers() if mod not in detection_mods]
 
 async def download_all_files_async(dt, max_entries=None, remove_old_files=None):
     max_entries, remove_old_files = _resolve_ingest_args(max_entries, remove_old_files)
@@ -159,26 +147,6 @@ async def download_integration_files_async(dt, max_entries=None, remove_old_file
     return results[0]
 
 
-async def download_ewmrs_files_async(dt, max_entries=None, remove_old_files=None):
-    """Downloads the MRMS products required by the EWMRS render pipeline."""
-    max_entries, remove_old_files = _resolve_ingest_args(max_entries, remove_old_files)
-    mrms_modifiers = get_mrms_modifiers()
-    render_mods = get_ewmrs_support_modifiers()
-    cleanup_dirs = get_output_dirs(
-        mrms_modifiers,
-        include_modifiers=render_mods,
-        include_goes=False,
-    )
-
-    await run_ingestion_pipeline(
-        io_manager=io_manager,
-        async_downloads=[
-            download_all_files_async_internal(dt, max_entries, target_modifiers=render_mods),
-        ],
-        cleanup_dirs=cleanup_dirs if remove_old_files else (),
-        cleanup_async=fs.async_clean_old_files,
-        cleanup_kwargs=_cleanup_kwargs(),
-    )
 
 def download_all_files(dt, max_entries=None, remove_old_files=None):
     max_entries, remove_old_files = _resolve_ingest_args(max_entries, remove_old_files)

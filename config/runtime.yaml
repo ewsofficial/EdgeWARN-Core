@@ -27,33 +27,10 @@ run:
 
   ctam_module_dir: ctam_modules
 
-  disable_ewmrs: false
-  disable_nws: false
-  disable_metar: false
-  disable_wpc: false
-  disable_goes: false
+  disable_glm: false
   disable_nexrad: false
   mrms_core_only: false
 
-# GOES handoff timing. Values are coupled; avoid shortening waits without observing missed renders.
-goes_coordination:
-  poll_seconds: 60
-  render_wait_seconds: 30
-  render_wait_interval_seconds: 1.0
-  render_max_offset_minutes: 20.0
-  # Leave false unless diagnosing resource contention; it can delay ingest.
-  pause_ingest_during_render: false
-
-  render_pause_poll_seconds: 1.0
-  render_pause_poll_interval_seconds: 0.2
-  poll_interval_seconds: 1.0
-
-  render_wait_interval_floor_seconds: 0.1
-  render_wait_poll_granularity_seconds: 0.2
-
-  render_task_max_entries: 10
-
-# Accessory process supervision. Backoff values prevent restart storms.
 supervisor:
   check_ticks: 30
   tick_seconds: 0.5
@@ -71,17 +48,8 @@ supervisor:
 
 # Background-loop cadence; shorter intervals increase CPU and upstream request load.
 background_intervals:
-  metar_boundary_minutes: 5
-  boundary_wait_interval_seconds: 1.0
-  nws_seconds: 120
-  nws_interval_seconds: 1.0
-  wpc_boundary_minutes: 15
   nexrad_seconds: 5
   nexrad_interval_seconds: 0.2
-  ewmrs_consumer_seconds: 10
-  ewmrs_consumer_interval_seconds: 1.0
-
-# Durable primary-cycle state. Retry settings control recovery from transient ingest failures.
 cycle:
   # Bound worker I/O and integration waits; timeout is a retryable scan failure.
   max_cycle_seconds: 300
@@ -163,5 +131,3 @@ ingest:
 consumers:
   # Core local readiness check interval in seconds. Bound: 0.1..1.0.
   core_readiness_seconds: 1.0
-  # EWMRS input notification check interval in seconds. Bound: 0.1..1.0.
-  ewmrs_notification_seconds: 1.0

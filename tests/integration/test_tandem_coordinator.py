@@ -117,43 +117,21 @@ def test_run_staged_ingest_cycle_preserves_staged_readiness(monkeypatch, tmp_pat
             on_detection_ready=lambda current_state: callbacks.append((
                 "detection",
                 current_state.detection_inputs_ready,
-                current_state.ewmrs_mrms_inputs_ready,
-                current_state.ewmrs_goes_inputs_ready,
-                current_state.edgewarn_integration_inputs_ready,
-            )),
-            on_ewmrs_mrms_ready=lambda current_state: callbacks.append((
-                "ewmrs_mrms",
-                current_state.detection_inputs_ready,
-                current_state.ewmrs_mrms_inputs_ready,
-                current_state.ewmrs_goes_inputs_ready,
-                current_state.edgewarn_integration_inputs_ready,
-            )),
-            on_ewmrs_goes_ready=lambda current_state: callbacks.append((
-                "ewmrs_goes",
-                current_state.detection_inputs_ready,
-                current_state.ewmrs_mrms_inputs_ready,
-                current_state.ewmrs_goes_inputs_ready,
                 current_state.edgewarn_integration_inputs_ready,
             )),
             on_edgewarn_integration_ready=lambda current_state: callbacks.append((
                 "integration",
                 current_state.detection_inputs_ready,
-                current_state.ewmrs_mrms_inputs_ready,
-                current_state.ewmrs_goes_inputs_ready,
                 current_state.edgewarn_integration_inputs_ready,
             )),
         )
     )
 
     assert call_order == ["detection", "mrms_integration", "goes", "rap"]
-    assert [name for name, *_ in callbacks] == ["detection", "ewmrs_mrms", "ewmrs_goes", "integration"]
-    assert callbacks[0] == ("detection", True, False, False, False)
-    assert callbacks[1] == ("ewmrs_mrms", True, True, False, False)
-    assert callbacks[2] == ("ewmrs_goes", True, True, True, True)
-    assert callbacks[3] == ("integration", True, True, True, True)
+    assert [name for name, *_ in callbacks] == ["detection", "integration"]
+    assert callbacks[0] == ("detection", True, False)
+    assert callbacks[1] == ("integration", True, True)
     assert state.detection_inputs_ready is True
-    assert state.ewmrs_mrms_inputs_ready is True
-    assert state.ewmrs_goes_inputs_ready is True
     assert state.edgewarn_integration_inputs_ready is True
 
 
@@ -196,59 +174,6 @@ def test_run_staged_ingest_cycle_can_skip_goes_readiness(monkeypatch, tmp_path):
 
     assert call_order == ["detection", "mrms_integration", "rap"]
     assert state.detection_inputs_ready is True
-    assert state.ewmrs_mrms_inputs_ready is True
-    assert state.ewmrs_goes_inputs_ready is False
-    assert state.edgewarn_integration_inputs_ready is True
-
-
-def test_ewmrs_cycle_trigger_does_not_wait_for_complete_integration_batch(
-    monkeypatch, tmp_path
-):
-    async def fake_detection(*_args, **_kwargs):
-        return _batch(tmp_path, dt, "Detection")
-
-    async def missing_integration(*_args, **_kwargs):
-        return DownloadBatchResult(
-            attempted=("NLDN",),
-            downloaded=(),
-            failed=("NLDN",),
-        )
-
-    def missing_integration_sync(*_args, **_kwargs):
-        return DownloadBatchResult(
-            attempted=("NLDN",),
-            downloaded=(),
-            failed=("NLDN",),
-        )
-
-    async def fake_rap(*_args, **_kwargs):
-        rap_path = tmp_path / "RAP.20260317-20z.awp130pgrbf00.grib2"
-        rap_path.write_bytes(b"grib")
-        return rap_path
-
-    monkeypatch.setattr(
-        coordinator.mrms_ingest, "download_detection_files_async", fake_detection
-    )
-    monkeypatch.setattr(
-        coordinator.mrms_ingest,
-        "download_integration_files_async",
-        missing_integration,
-    )
-    monkeypatch.setattr(
-        coordinator.mrms_ingest,
-        "download_integration_files",
-        missing_integration_sync,
-    )
-    monkeypatch.setattr(coordinator, "download_rap_async", fake_rap)
-
-    dt = datetime(2026, 3, 17, 20, 0, tzinfo=timezone.utc)
-    state = asyncio.run(
-        run_staged_ingest_cycle(dt, lambda _message: None, include_goes=False)
-    )
-
-    assert state.detection_inputs_ready is True
-    assert state.ewmrs_mrms_inputs_ready is True
-    assert state.mrms_integration_inputs_ready is True
     assert state.edgewarn_integration_inputs_ready is True
 
 
@@ -299,7 +224,6 @@ def test_second_prior_rap_analysis_releases_integration(monkeypatch, tmp_path):
         run_staged_ingest_cycle(
             dt,
             lambda _message: None,
-            include_ewmrs=False,
         )
     )
 
@@ -340,7 +264,7 @@ def test_nomads_rap_analysis_releases_integration(monkeypatch, tmp_path):
 
     state = asyncio.run(
         run_staged_ingest_cycle(
-            dt, lambda _message: None, include_goes=False, include_ewmrs=False
+            dt, lambda _message: None, include_goes=False
         )
     )
 
@@ -375,7 +299,6 @@ def test_callbacks_release_before_optional_terminal_result(
     def capture(name):
         def callback(state):
             callbacks.append((name, state.detection_inputs_ready,
-                              state.ewmrs_mrms_inputs_ready,
                               state.edgewarn_integration_inputs_ready))
             snapshots.append(state.input_manifest)
             if name == "integration":
@@ -402,9 +325,7 @@ def test_callbacks_release_before_optional_terminal_result(
         task = asyncio.create_task(run_staged_ingest_cycle(
             dt, lambda _msg: None, include_goes=False, include_rap=False,
             on_detection_ready=capture("detection"),
-            on_ewmrs_mrms_ready=capture("ewmrs"),
             on_base_integration_ready=capture("base"),
-            on_ewmrs_goes_ready=capture("goes"),
             on_edgewarn_integration_ready=capture("integration"),
         ))
         try:
@@ -412,7 +333,7 @@ def test_callbacks_release_before_optional_terminal_result(
             await asyncio.wait_for(optional_started.wait(), timeout=2)
             await asyncio.wait_for(mandatory_released.wait(), timeout=2)
             assert not task.done()
-            assert [item[0] for item in callbacks] == ["detection", "ewmrs", "base", "goes", "integration"]
+            assert [item[0] for item in callbacks] == ["detection", "base", "integration"]
             release_optional.set()
             return await asyncio.wait_for(task, timeout=2)
         finally:
@@ -422,13 +343,10 @@ def test_callbacks_release_before_optional_terminal_result(
 
     state = asyncio.run(exercise())
     assert callbacks == [
-        ("detection", True, False, False),
-        ("ewmrs", True, True, False),
-        ("base", True, True, True),
-        ("goes", True, True, True),
-        ("integration", True, True, True),
+        ("detection", True, False),
+        ("base", True, True),
+        ("integration", True, True),
     ]
     assert all(snapshot is not state.input_manifest for snapshot in snapshots)
     assert all(not snapshot.records_for_product("MESH_00.50") for snapshot in snapshots)
-    assert state.ewmrs_mrms_inputs_ready is True
     assert state.edgewarn_integration_inputs_ready is True

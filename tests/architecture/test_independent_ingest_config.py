@@ -42,7 +42,7 @@ def test_invalid_dependency_sets(overrides, reason):
 def test_disable_semantics_and_fingerprint():
     effective = registry()
     normal = resolve_dependencies(effective)
-    no_glm = resolve_dependencies(effective, disable_goes=True)
+    no_glm = resolve_dependencies(effective, disable_glm=True)
     only = resolve_dependencies(effective, mrms_core_only=True)
     assert no_glm.rap_enabled and not no_glm.glm_enabled
     assert not only.rap_enabled and not only.glm_enabled
@@ -54,23 +54,10 @@ def test_disable_semantics_and_fingerprint():
         resolve_dependencies(invalid)
 
 
-def test_resource_baseline():
-    runtime = load_config('runtime')
-    assert_baseline('independent_ingest_settings', {
-        'scheduler': dict(load_config('scheduler')['scheduler']),
-        'ingest': get_ingest_settings(),
-        'consumers': dict(runtime['consumers']),
-        'input_jobs': dict(load_config('ewmrs_pipeline')['input_jobs']),
-    })
-    settings = get_ingest_settings()
-    assert settings['download_concurrency'] == load_config('ingest')['mrms']['downloads']['max_concurrency']
-    assert settings['auxiliary_timeout_seconds'] == 4 * load_config('synoptic_rap')['rap']['nomads_timeout_seconds']
-
-
 def test_source_arrival_fixture():
     import json
     fixture = json.loads((Path(__file__).parents[1] / 'fixtures/ingest/source_arrivals.json').read_text())
-    deps = resolve_dependencies(registry(), disable_goes=fixture['disable_goes'])
+    deps = resolve_dependencies(registry(), disable_glm=fixture['disable_glm'])
     observed = {}
     rap_events = set()
     for arrival in fixture['arrivals']:
@@ -102,7 +89,6 @@ def test_source_arrival_fixture():
     ('runtime', 'ingest', 'listing_page_size', 1001),
     ('runtime', 'ingest', 'download_concurrency', 65),
     ('runtime', 'consumers', 'core_readiness_seconds', 2),
-    ('ewmrs_pipeline', 'input_jobs', 'retry_max_attempts', 0),
 ])
 def test_invalid_resource_bounds(catalog, group, key, value):
     from common.config.loader import validate_document, ConfigError
@@ -118,3 +104,15 @@ def test_auxiliary_freshness_participates_in_fingerprint():
     first = resolve_dependencies(registry(), auxiliary_settings=settings)
     settings['rap']['max_age_minutes'] += 1
     assert first.fingerprint != resolve_dependencies(registry(), auxiliary_settings=settings).fingerprint
+
+
+def test_resource_baseline():
+    runtime = load_config('runtime')
+    assert_baseline('independent_ingest_settings', {
+        'scheduler': dict(load_config('scheduler')['scheduler']),
+        'ingest': get_ingest_settings(),
+        'consumers': dict(runtime['consumers']),
+    })
+    settings = get_ingest_settings()
+    assert settings['download_concurrency'] == load_config('ingest')['mrms']['downloads']['max_concurrency']
+    assert settings['auxiliary_timeout_seconds'] == 4 * load_config('synoptic_rap')['rap']['nomads_timeout_seconds']

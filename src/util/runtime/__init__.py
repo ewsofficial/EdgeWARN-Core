@@ -1,25 +1,9 @@
-"""Runtime support for the realtime entry points.
-
-Exports are resolved lazily (PEP 562 ``__getattr__``): importing
-``util.runtime`` — or any single submodule such as ``util.runtime.cli`` or
-``util.runtime.services`` — no longer eagerly loads every loop and worker.
-``.background`` pulls the GOES/METAR/NWS/WPC/NEXRAD ingest stacks and
-``.cycle`` pulls the EdgeWARN detection stack, so an eager re-export of both
-forced the full scientific import graph on every consumer, which defeats
-import isolation between the decomposed services.
-
-The public names are unchanged; ``from util.runtime import X`` keeps working.
-"""
+"""Lazy exports for Core orchestration, NEXRAD loops, and shared runtime helpers."""
 
 _LAZY_EXPORTS = {
     # .background — accessory and NEXRAD loops
-    "goes_loop": ".background",
-    "goes_render_loop": ".background",
-    "metar_loop": ".background",
     "nexrad_ingest_loop": ".background",
     "nexrad_render_loop": ".background",
-    "nws_loop": ".background",
-    "wpc_loop": ".background",
     # .cycle — primary cycle state and orchestration
     "CycleOutcome": ".cycle",
     "CycleRetryPolicy": ".cycle",
@@ -50,16 +34,11 @@ __all__ = [
     "PrimaryCycleConfig",
     "StartedProcessRegistry",
     "drain_log_queue",
-    "goes_loop",
-    "goes_render_loop",
     "load_last_processed_from_stormcells",
-    "metar_loop",
     "nexrad_ingest_loop",
     "nexrad_render_loop",
-    "nws_loop",
     "run_primary_cycle_once",
     "stop_process",
-    "wpc_loop",
 ]
 
 

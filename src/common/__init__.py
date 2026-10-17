@@ -1,1 +1,1 @@
-"""Shared Python utilities used by EdgeWARN and EWMRS."""
+"""Shared configuration, acquisition, and readiness helpers."""

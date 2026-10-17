@@ -27,15 +27,6 @@
     "shutdown_timeout_seconds": 30
   },
   "consumers": {
-    "core_readiness_seconds": 1.0,
-    "ewmrs_notification_seconds": 1.0
-  },
-  "input_jobs": {
-    "render_timeout_seconds": 300,
-    "pending_max_jobs": 4096,
-    "max_age_minutes": 120,
-    "retry_max_attempts": 3,
-    "retry_initial_seconds": 5,
-    "retry_max_seconds": 30
+    "core_readiness_seconds": 1.0
   }
 }

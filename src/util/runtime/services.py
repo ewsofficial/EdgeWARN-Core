@@ -1,18 +1,4 @@
-"""Canonical realtime service-name registry and heartbeat contract.
-
-Phase 0 of the realtime runner decomposition
-(plans/realtime-runner-decomposition-plan.md): the three decomposed services are
-published under exactly one canonical name each, and every service publishes an
-atomic heartbeat beneath ``<BASE_DIR>/state/realtime/services/<name>.json``.
-
-The filenames under that directory are the registry. Accessory loops (METAR,
-NWS, WPC, GOES ABI) are deliberately absent: they surface as child entries
-inside their owning service's heartbeat, never as top-level names.
-
-This module is schema only. Producers write heartbeats; the unified Node API is
-the consumer that classifies them. EWMRS also consults the Core heartbeat before MRMS scanning to reject stale
-producer registry descriptors; cycle correctness uses phase records/checkpoints.
-"""
+"""Canonical service heartbeats, locks, and route requirements."""
 
 from __future__ import annotations
 
@@ -34,7 +20,7 @@ from util.atomic import atomic_write_json
 #: new inputs, so it never becomes evidence that an input is ready, and it is
 #: absent from :data:`ROUTE_SERVICE_REQUIREMENTS` so an ingest outage stays
 #: visible without gating already-rendered artifacts.
-CANONICAL_SERVICE_NAMES: tuple[str, ...] = ("ingest", "edgewarn", "ewmrs", "nexrad")
+CANONICAL_SERVICE_NAMES: tuple[str, ...] = ("ingest", "edgewarn", "nexrad")
 
 HEARTBEAT_SCHEMA_VERSION = 1
 
@@ -46,9 +32,6 @@ ROUTE_SERVICE_REQUIREMENTS: dict[str, str] = {
     "/api/v3/storm-snapshots": "edgewarn",
     "/api/v3/alert-snapshots": "edgewarn",
     "/api/v3/alerts": "edgewarn",
-    "/api/v3/render-products": "ewmrs",
-    "/api/v3/models/rap": "ewmrs",
-    "/api/v3/analyses/wpc": "ewmrs",
     "/api/v3/radar-sites": "nexrad",
 }
 

@@ -60,8 +60,8 @@ def file_digest(path):
     return result.hexdigest()
 
 
-KINDS = {'input', 'render-ready', 'core-start-ready', 'core-integration-ready',
-         'core-final-ready', 'terminal', 'core-state', 'scan-state', 'render-ack', 'render-plan', 'retired-input', 'poll-status', 'pin'}
+KINDS = {'input', 'core-start-ready', 'core-integration-ready',
+         'core-final-ready', 'terminal', 'core-state', 'scan-state', 'retired-input', 'poll-status', 'pin'}
 STATUSES = {'pending', 'active', 'retry', 'success', 'abandoned', 'expired', 'skipped', 'no-mapping'}
 TERMINAL_STATUSES = {'success', 'abandoned', 'expired', 'skipped', 'no-mapping'}
 
@@ -114,7 +114,7 @@ class IngestRecord:
         d = self.data
         if not isinstance(d, dict):
             raise IngestRecordError('Record data must be an object')
-        if self.kind in {'input', 'render-ready', 'retired-input'}:
+        if self.kind in {'input', 'retired-input'}:
             if set(d) != {'input_id', 'input', 'sha256', 'source_locator', 'remote_version', 'validation'}:
                 raise IngestRecordError('Malformed committed input')
             digest_id(d['input_id']); digest_id(d['sha256'])
@@ -184,10 +184,8 @@ class IngestRecord:
                 isinstance(k, str) and v in {'available', 'failed', 'expired'}
                 for k, v in d['optional_dispositions'].items()):
                 raise IngestRecordError('Invalid optional disposition')
-        elif self.kind in {'terminal', 'core-state', 'render-ack'}:
+        elif self.kind in {'terminal', 'core-state'}:
             expected = {'status', 'attempts', 'retry_at', 'reason', 'input_ids'}
-            if self.kind == 'render-ack':
-                expected |= {'input_id', 'layer_id', 'render_fingerprint'}
             if set(d) != expected or d['status'] not in STATUSES:
                 raise IngestRecordError('Invalid consumer disposition')
             if type(d['attempts']) is not int or d['attempts'] < 0 or not isinstance(d['reason'], str):
@@ -202,31 +200,14 @@ class IngestRecord:
                 raise IngestRecordError('Invalid references')
             for identity in d['input_ids']:
                 digest_id(identity)
-            if self.kind == 'render-ack':
-                digest_id(d['input_id']); digest_id(d['render_fingerprint'])
-                if not isinstance(d['layer_id'], str) or not d['layer_id']:
-                    raise IngestRecordError('Missing layer ID')
-                if self.key != render_job_id(d['input_id'], d['layer_id'], d['render_fingerprint']):
-                    raise IngestRecordError('Render job identity mismatch')
-            else:
-                parse_cycle_id(self.key)
-                if self.kind == 'terminal' and d['status'] not in {'expired', 'abandoned', 'skipped'}:
-                    raise IngestRecordError('Invalid scan terminal status')
+            parse_cycle_id(self.key)
+            if self.kind == 'terminal' and d['status'] not in {'expired', 'abandoned', 'skipped'}:
+                raise IngestRecordError('Invalid scan terminal status')
         elif self.kind == 'scan-state':
             if set(d) != {'first_seen_at', 'optional_started_at'}:
                 raise IngestRecordError('Invalid scan timing state')
             parse_cycle_id(self.key)
             utc(d['first_seen_at']); utc(d['optional_started_at'])
-        elif self.kind == 'render-plan':
-            if set(d) != {'input_id', 'layers', 'render_fingerprint'}:
-                raise IngestRecordError('Invalid render plan')
-            digest_id(d['input_id']); digest_id(d['render_fingerprint'])
-            if not isinstance(d['layers'], list) or not all(isinstance(v, str) and v and v != '__input__' for v in d['layers']):
-                raise IngestRecordError('Invalid layer mapping')
-            if len(set(d['layers'])) != len(d['layers']):
-                raise IngestRecordError('Duplicate mapped layer')
-            if self.key != render_job_id(d['input_id'], '__plan__', d['render_fingerprint']):
-                raise IngestRecordError('Render plan identity mismatch')
         elif self.kind == 'pin':
             if set(d) != {'input_ids'} or not isinstance(d['input_ids'], list):
                 raise IngestRecordError('Invalid pin')
@@ -247,11 +228,6 @@ class IngestRecord:
             self.data['retry_at'] is None or utc(self.data['retry_at']) <= utc(at))
 
 
-def render_job_id(input_id, layer_id, fingerprint):
-    digest_id(input_id); digest_id(fingerprint)
-    return hashlib.sha256(json.dumps([input_id, layer_id, fingerprint], separators=(',', ':')).encode()).hexdigest()
-
-
 class IngestHandoff:
     def __init__(self, base_dir, *, fingerprint, run_id):
         self.base_dir = Path(base_dir).resolve()
@@ -268,6 +244,8 @@ class IngestHandoff:
         self._cache_lock = threading.RLock()
 
     def path(self, kind, key):
+        if kind not in KINDS:
+            raise IngestRecordError("Unknown record kind")
         if kind not in KINDS or not re.fullmatch(r'[A-Za-z0-9_-]+', key):
             raise IngestRecordError('Unsafe record destination')
         if kind in {'core-start-ready', 'core-integration-ready', 'core-final-ready', 'terminal', 'scan-state'}:
@@ -276,13 +254,11 @@ class IngestHandoff:
         elif kind == 'core-state':
             parse_cycle_id(key)
             path = self.base_dir / 'state/realtime/consumers/core-ingest-v1' / f'{key}.json'
-        elif kind == 'render-ack':
-            path = self.base_dir / 'state/realtime/consumers/ewmrs-inputs-v1' / f'{key}.json'
         elif kind == 'poll-status':
             path = self.root / 'poll-status.json'
         else:
             path = self.root / {'input': 'inputs', 'pin': 'pins'}.get(kind, kind) / f'{key}.json'
-        if kind in {'input', 'render-ready', 'retired-input', 'pin', 'render-plan', 'render-ack'}:
+        if kind in {'input', 'retired-input', 'pin'}:
             digest_id(key)
         if kind == 'poll-status' and key != 'poll-status':
             raise IngestRecordError('Invalid poll status key')
@@ -367,7 +343,7 @@ class IngestHandoff:
         consumers = self.base_dir / 'state/realtime/consumers'
         stamp = f'{now():%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex}'
         moved = []
-        for tree in (self.root, consumers / 'core-ingest-v1', consumers / 'ewmrs-inputs-v1'):
+        for tree in (self.root, consumers / 'core-ingest-v1'):
             contained(self.base_dir, tree)
             if not tree.is_dir():
                 continue
@@ -413,12 +389,6 @@ class IngestHandoff:
         atomic_write_json(self.path(kind, key), record.as_dict())
         return record
 
-    def publish_render_ready(self, input_id):
-        with input_lock(self.base_dir):
-            source = self.read('input', input_id)
-            if source is None:
-                raise IngestRecordError('Cannot notify an uncommitted input')
-            return self._write('render-ready', input_id, source.data)
 
     def publish_phase(self, kind, manifest, input_ids, *, optional_dispositions=None):
         if kind not in {'core-start-ready', 'core-integration-ready', 'core-final-ready'}:
@@ -459,14 +429,11 @@ class IngestHandoff:
                                       'input_ids': list(input_ids), 'optional_dispositions': dispositions})
 
     def disposition(self, kind, key, *, status, reason='', attempts=0, retry_at=None,
-                    input_ids=(), input_id=None, layer_id=None, render_fingerprint=None):
+                    input_ids=()):
         data = {'status': status, 'reason': reason, 'attempts': attempts,
                 'retry_at': utc(retry_at).isoformat() if retry_at is not None else None,
                 'input_ids': list(input_ids)}
-        if kind == 'render-ack':
-            key = render_job_id(input_id, layer_id, render_fingerprint)
-            data.update(input_id=input_id, layer_id=layer_id, render_fingerprint=render_fingerprint)
-        if kind not in {'terminal', 'core-state', 'render-ack'}:
+        if kind not in {'terminal', 'core-state'}:
             raise IngestRecordError('Unknown disposition kind')
         with input_lock(self.base_dir):
             if kind == 'core-state' and status in {'pending', 'active', 'retry'} and not input_ids:
@@ -483,23 +450,6 @@ class IngestHandoff:
                 if existing.data != data:
                     raise IngestRecordError('Cannot change terminal consumer state')
                 return existing
-            if kind == 'render-ack':
-                if self.read('input', input_id) is None:
-                    raise IngestRecordError('Cannot acknowledge an unknown input')
-                plan = self.read('render-plan', render_job_id(input_id, '__plan__', render_fingerprint))
-                if plan is None or layer_id not in [*plan.data['layers'], '__input__']:
-                    raise IngestRecordError('Layer is absent from committed render plan')
-                if layer_id == '__input__':
-                    if plan.data['layers']:
-                        states = [self.read('render-ack', render_job_id(input_id, layer, render_fingerprint))
-                                  for layer in plan.data['layers']]
-                        if not all(state and state.data['status'] in TERMINAL_STATUSES for state in states):
-                            raise IngestRecordError('Mapped layers still have pending work')
-                        expected = 'success' if all(state.data['status'] == 'success' for state in states) else 'expired'
-                        if status != expected:
-                            raise IngestRecordError('Input disposition disagrees with mapped layers')
-                    elif status != 'no-mapping':
-                        raise IngestRecordError('Unmapped input requires an explicit no-mapping acknowledgment')
             for identity in data['input_ids']:
                 if self.read('input', identity) is None:
                     raise IngestRecordError('Consumer reference is not committed')
@@ -564,32 +514,6 @@ class IngestHandoff:
         with input_lock(self.base_dir):
             return self._write('poll-status', 'poll-status', {'counts': counts, 'reasons': list(reasons)}, mutable=True)
 
-    def plan_render(self, input_id, layers, render_fingerprint):
-        """Freeze enabled mappings before accepting per-layer acknowledgments."""
-        key = render_job_id(input_id, '__plan__', render_fingerprint)
-        with input_lock(self.base_dir):
-            if self.read('render-ready', input_id) is None:
-                raise IngestRecordError('Cannot map an input without a notification')
-            return self._write('render-plan', key, {'input_id': input_id,
-                'layers': sorted(layers), 'render_fingerprint': render_fingerprint})
-
-    def acknowledge_input(self, input_id, render_fingerprint):
-        # disposition() validates the plan and all constituent jobs again under
-        # the shared lock. A concurrent layer update cannot bypass validation.
-        plan = self.read('render-plan', render_job_id(input_id, '__plan__', render_fingerprint))
-        if plan is None:
-            raise IngestRecordError('Missing render plan')
-        states = [self.read('render-ack', render_job_id(input_id, layer, render_fingerprint))
-                  for layer in plan.data['layers']]
-        if not plan.data['layers']:
-            status, reason = 'no-mapping', 'No configured layer mapping'
-        elif all(state and state.data['status'] == 'success' for state in states):
-            status, reason = 'success', ''
-        else:
-            status, reason = 'expired', 'One or more mapped layers have a terminal failure'
-        return self.disposition('render-ack', '', status=status, reason=reason,
-                                input_id=input_id, layer_id='__input__',
-                                render_fingerprint=render_fingerprint)
 
     def validate_phase_inputs(self, record):
         """Recheck exact selections before a consumer uses a committed phase.

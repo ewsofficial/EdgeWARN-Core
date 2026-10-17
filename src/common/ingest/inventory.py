@@ -13,10 +13,9 @@ from util.runtime.ingest_handoff import (
 
 
 class InputInventory:
-    def __init__(self, base_dir, *, fingerprint, run_id, render_consumer=True):
+    def __init__(self, base_dir, *, fingerprint, run_id):
         self.handoff = IngestHandoff(base_dir, fingerprint=fingerprint, run_id=run_id)
         self.base_dir = self.handoff.base_dir
-        self.render_consumer = render_consumer
 
     def _validate_completion(self, completed):
         record = completed.record
@@ -59,7 +58,7 @@ class InputInventory:
             'validation': {'payload_validated': True, 'sha256': completed.sha256}})
 
     def commit_input(self, completed):
-        """Persist acquisition separately from notification publication."""
+        """Persist validated acquisition before Core readiness publication."""
         with input_lock(self.base_dir):
             return self._commit_input(completed)
 
@@ -75,7 +74,6 @@ class InputInventory:
                 logging.getLogger(__name__).warning('Invalidating input %s: %s', record.key, exc)
                 path = self.handoff.path('input', record.key)
                 path.rename(path.with_suffix(f'.invalid-{uuid.uuid4().hex}'))
-                self.handoff.path('render-ready', record.key).unlink(missing_ok=True)
             else:
                 valid.append(record)
         return tuple(valid)
@@ -130,8 +128,7 @@ class InputInventory:
         Candidate enumeration belongs to the source registry/service. The
         callback must return the phase-2 CommittedInput after payload decoding;
         a filename or digest alone never establishes validation on adoption.
-        Existing inventory needs no network retry when outbox publication fails.
-        Unacknowledged notifications are returned for retryable delivery.
+        Existing inventory needs no network retry when readiness publication fails.
         """
         with input_lock(self.base_dir):
             # Finish interrupted deletions before checking committed-file integrity.
@@ -141,7 +138,6 @@ class InputInventory:
                     raise IngestRecordError('Retired path was replaced with conflicting bytes')
                 path.unlink(missing_ok=True)
                 self.handoff.path('input', retired.key).unlink(missing_ok=True)
-                self.handoff.path('render-ready', retired.key).unlink(missing_ok=True)
             known = {r.data['input']['path'] for r in (
                 *self.handoff.records('input'), *self.handoff.records('retired-input'))}
             adopted = []
@@ -156,42 +152,11 @@ class InputInventory:
                     raise IngestRecordError('Validator returned a different file')
                 adopted.append(self._commit_input(completed).key)
                 known.add(str(path))
-            published = []
-            for record in self.valid_inputs():
-                if self.handoff.read('render-ready', record.key) is None:
-                    self.handoff._write('render-ready', record.key, record.data)
-                    published.append(record.key)
-            for notification in self.handoff.records('render-ready'):
-                source = self.handoff.read('input', notification.key)
-                if source is None or source.data != notification.data:
-                    raise IngestRecordError('Notification does not match inventory')
-            acks = self.handoff.records('render-ack')
-            plans = self.handoff.records('render-plan')
-            complete = self._render_completion_index(plans, acks)
-            pending = tuple(record.key for record in self.handoff.records('render-ready')
-                            if record.key not in complete)
-            return {'adopted': tuple(adopted), 'published': tuple(published), 'pending': pending}
-
-    @staticmethod
-    def _render_completion_index(plans, acks):
-        acknowledged = {(a.data['input_id'], a.data['render_fingerprint']) for a in acks
-                        if a.data['layer_id'] == '__input__' and a.data['status'] in TERMINAL_STATUSES}
-        mappings = {}
-        for plan in plans:
-            mappings.setdefault(plan.data['input_id'], set()).add(plan.data['render_fingerprint'])
-        return {identity for identity, fingerprints in mappings.items()
-                if all((identity, fingerprint) in acknowledged for fingerprint in fingerprints)}
-
-    @staticmethod
-    def _render_complete(identity, plans, acks):
-        mappings = [p for p in plans if p.data['input_id'] == identity]
-        return bool(mappings) and all(any(
-            a.data['input_id'] == identity and a.data['layer_id'] == '__input__' and
-            a.data['render_fingerprint'] == p.data['render_fingerprint'] and
-            a.data['status'] in TERMINAL_STATUSES for a in acks) for p in mappings)
+            self.valid_inputs()
+            return {'adopted': tuple(adopted)}
 
     def referenced_inputs(self):
-        """Every input identity a live Core phase or render job still needs.
+        """Every input identity a live Core phase or worker still needs.
 
         Exposed for retention maintenance outside this class (the ingest
         service's RAP analysis cap) so no other module has to reach into the
@@ -217,15 +182,6 @@ class InputInventory:
         for state in self.handoff.records('core-state'):
             if state.data['status'] not in TERMINAL_STATUSES:
                 references.update(state.data['input_ids'])
-        if not self.render_consumer:
-            return references
-        acks = self.handoff.records('render-ack')
-        plans = self.handoff.records('render-plan')
-        complete = self._render_completion_index(plans, acks)
-        # Inventory without outbox is also pending work: protect the crash window.
-        for record in self.handoff.records('input'):
-            if record.key not in complete:
-                references.add(record.key)
         return references
 
     def cleanup(self, *, before, protected_products=(), family_before=None):
@@ -233,8 +189,8 @@ class InputInventory:
 
         Keep each requested product's latest observation for previous history.
         Family-specific cutoffs preserve slower analyses across radar scans.
-        Compact inventory/outbox alongside deletion only after both consumer
-        dispositions have released their references. No operational directory
+        Compact inventory alongside deletion only after Core and worker
+        pins have released their references. No operational directory
         enumeration or arbitrary-path deletion is permitted.
         """
         with input_lock(self.base_dir):
@@ -259,7 +215,6 @@ class InputInventory:
             raise IngestRecordError('Cannot retire changed committed bytes')
         self.handoff._write('retired-input', record.key, record.data)
         path.unlink(missing_ok=True)
-        self.handoff.path('render-ready', record.key).unlink(missing_ok=True)
         self.handoff.path('input', record.key).unlink(missing_ok=True)
 
     def retire_inputs(self, identities):
@@ -316,10 +271,6 @@ class InputInventory:
                         and not set(state.data['input_ids']) & pinned):
                     handoff.path('core-state', state.key).unlink(missing_ok=True)
             live = {record.key for record in handoff.records('input')}
-            for kind in ('render-plan', 'render-ack'):
-                for record in handoff.records(kind):
-                    if record.data['input_id'] not in live and record.data['input_id'] not in pinned:
-                        handoff.path(kind, record.key).unlink(missing_ok=True)
             for record in handoff.records('retired-input'):
                 if (record.published_at < utc(tombstones_before or before)
                         and record.key not in live and record.key not in pinned):

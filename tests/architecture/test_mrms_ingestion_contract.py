@@ -36,25 +36,6 @@ def test_fourteen_optional_statistic_products_and_twenty_five_statistics():
     }
 
 
-def test_render_api_identities_and_wire_format_are_independent_of_raw_renames():
-    layers = load_config("ewmrs_render")["mrms_layers"]
-    expected = [layer for item in BASELINE["products"] for layer in item["render_layers"]]
-    assert len(layers) == len(expected) == 16
-    by_name = {layer["name"]: dict(layer) for layer in layers}
-    api_products = json.loads((ROOT / "src/api/config/product-catalog.json").read_text())
-    api_mrms = {item["id"]: item for item in api_products if item["id"].startswith("MRMS_")}
-    assert set(api_mrms) == set(by_name)
-    for layer in expected:
-        from common.ingest.mrms.core_contract import LEGACY_ALIASES
-        candidate = {key: value for key, value in layer.items() if key not in {"gui_basename", "filepath"}}
-        candidate["product"] = LEGACY_ALIASES[layer["filepath"]]
-        assert by_name[layer["name"]] == candidate
-        assert getattr(fs, layer["outdir"]) == fs.BASE_DIR / "gui" / layer["gui_basename"]
-        assert api_mrms[layer["name"]]["storageDirectory"] == layer["gui_basename"]
-        assert api_mrms[layer["name"]]["legacyFilePrefix"] == layer["name"]
-    assert dict(load_config("ewmrs_render")["chunk_format"]) == BASELINE["chunk_format"]
-
-
 def test_stormprob_mesh_is_probsevere_derived_and_not_the_raw_mesh_product():
     from EdgeWARN.stormprob.features import IMPORTANT_SCALAR_PROPERTY_FEATURES
     integration = load_config("integration")

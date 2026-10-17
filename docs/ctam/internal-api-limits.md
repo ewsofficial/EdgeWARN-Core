@@ -105,13 +105,6 @@ tests rather than treat them as a passing baseline.
 
 ### Maximum module count
 
-**Proposed, by analogy.** The repository caps independently scheduled work units
-at 3 (`config/detection.yaml:21`), 4 (`config/nexrad.yaml:41`), 8
-(`config/ewmrs_pipeline.yaml:22`), 16 (`config/nws.yaml:70`), and 24
-(`config/nexrad.yaml:39`). None of these is a plugin count, so none of them
-derives a module count. 8 is taken from `config/ewmrs_pipeline.yaml:22` as the
-nearest analogy: a bounded set of independent jobs inside one scheduled phase.
-
 The stage deadline, not the count, is the binding constraint. At the 1-second
 minimum timeout, 8 modules consume 8 seconds of the 28-second external budget,
 so a full module set can always at least start and be individually timed out
@@ -128,7 +121,7 @@ which constrains `worker_timeout_seconds` with `"minimum": 1`. That is the only
 existing schema-level lower bound on a worker timeout in the repository.
 
 The maximum of 30 seconds is the repository's standing outbound timeout: 30
-seconds at `config/nws.yaml:68`, 30 seconds at `config/wpc.yaml:17`, and
+seconds for bounded upstream acquisition, and
 `request_timeout_ms: 30000` at `config/api.yaml:10`. It also matches the plan's
 own manifest example (`plans/modular-ctam-internal-api-plan.md:273`).
 

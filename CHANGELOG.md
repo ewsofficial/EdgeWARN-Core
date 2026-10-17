@@ -1,5 +1,78 @@
 # Changelog
 
+## [Unreleased] — Retire EWMRS (breaking)
+
+- Removed the EWMRS service/package, raster chunk and RAP Uint16 production,
+  render consumers/outbox/checkpoints, and GOES ABI/METAR/NWS/WPC accessories.
+  NWS zone synchronization and accessory configuration are removed.
+- Removed `edgewarn run ewmrs`, `--args ewmrs`, `run_ewmrs.py`,
+  `--disable-ewmrs`, `EDGEWARN_DISABLE_EWMRS`, `--render-consumer`, and
+  `--disable-metar/nws/wpc/goes`. Unknown/retired topology errors point here.
+  Core's existing scan-time GLM control is now `--disable-glm` with
+  `runtime.run.disable_glm`; GLM enrichment remains supported.
+- `all` now starts ingest, Core, and NEXRAD; `core` starts ingest and Core.
+  MRMS-core-only mode disables RAP/GLM/NEXRAD. Core detection, tracking, CTAM,
+  StormProb, alerts, and NEXRAD serialization remain supported. Published
+  official alerts can still be matched/read, but there is no built-in writer.
+- Removed `/api/v3/render-products`, `/api/v3/models/rap`,
+  `/api/v3/analyses/wpc`, and `/api/v3/observations/metar` families and their
+  binary/JSON readers. GET/HEAD and unsupported methods return 404 problems.
+  OpenAPI/API contract version advances to 3.1.0. Legacy files cannot restore
+  these routes. Health/service discovery lists ingest, edgewarn, nexrad only.
+- Deleted `ewmrs_pipeline`, `ewmrs_render`, `metar`, `nws`, and `wpc` YAML
+  catalogs/schemas, ABI channel settings, accessory flags/cadences, and API
+  render settings. The complete catalog now contains 13 YAML files.
+  NEXRAD render cadence/retention/worker limits moved to `nexrad.gui` and its
+  display mapping to `nexrad.variable_colormaps` without changing values.
+- Deleted product-specific tests, fixtures, benchmarks, and plotting scripts;
+  retained Core/GLM/NEXRAD contracts and added retirement regressions.
+
+### Upgrade and rollback
+
+Stop all Python services and the API. Deploy code and the complete 13-file
+configuration tree together; restart only after both validators pass:
+`npm run validate-config` and `PYTHONPATH=src python -m common.config.validate`.
+Remove retired CLI flags from service units and rename the GLM control.
+Set `api.server.enabled_services` to your deployed topology. Retired configuration
+names fail validation; do not carry their catalogs or schemas into the new tree.
+
+For rollback, stop new workers first and restore previous code and the complete
+previous configuration tree together. Resume from Core/NEXRAD state. Never
+translate render acknowledgments into Core success or invent legacy outputs.
+
+### Optional operator cleanup
+
+Existing operational artifacts and gitignored zone assets are left untouched.
+No startup migration automatically purges retired data. With services stopped,
+inspect the following paths beneath your resolved runtime root before removing
+any of them: `gui/<layer>` (list below), `wpc/surface_analysis`,
+`state/realtime/consumers/ewmrs-inputs-v1`, legacy `consumers/ewmrs-*.json`,
+`state/realtime/services/ewmrs.json`, and `state/realtime/ingest/v1/render-ready`
+and `render-plan`. Keep `gui/NEXRAD`, Core consumer state, and input pins.
+
+Retired GUI folders:
+
+`GOES_ABI_C01_Reflectance`, `GOES_ABI_C02_Reflectance`, `GOES_ABI_C03_Reflectance`, `GOES_ABI_C04_Reflectance`, `GOES_ABI_C05_Reflectance`, `GOES_ABI_C06_Reflectance`, `GOES_ABI_C07_BrightnessTemp`, `GOES_ABI_C08_BrightnessTemp`, `GOES_ABI_C09_BrightnessTemp`, `GOES_ABI_C10_BrightnessTemp`, `GOES_ABI_C11_BrightnessTemp`, `GOES_ABI_C12_BrightnessTemp`, `GOES_ABI_C13_BrightnessTemp`, `GOES_ABI_C14_BrightnessTemp`, `GOES_ABI_C15_BrightnessTemp`, `GOES_ABI_C16_BrightnessTemp`, `MRMS_EchoTop18`, `MRMS_EchoTop30`, `MRMS_FLASH`, `MRMS_MESH`, `MRMS_MergedAzShear_0-2kmAGL`, `MRMS_MergedAzShear_3-6kmAGL`, `MRMS_MergedReflectivityQC`, `MRMS_MergedRhoHV`, `MRMS_NLDN_CG_001min_AvgDensity`, `MRMS_PrecipFlag`, `MRMS_PrecipRate`, `MRMS_ProbSevere`, `MRMS_QPE`, `MRMS_ReflectivityAt0C`, `MRMS_ReflectivityAtLowestAltitude`, `MRMS_ReflectivityAtM15C`, `MRMS_ReflectivityAtM5C`, `MRMS_RotationTrack30min`, `MRMS_VII`, `MRMS_VIL`, `MRMS_VILDensity`, `RAP`, `maps`, `overlay_manifest.json`.
+
+After inspecting those folders, an explicit cleanup example is:
+
+```bash
+runtime_root=/absolute/path/to/your/runtime
+# Populate this list only with the inspected retired GUI folders listed above.
+retired_layers=(RAP MRMS_QPE GOES_ABI_C13_BrightnessTemp)
+for layer in "${retired_layers[@]}"; do
+  rm -rf -- "$runtime_root/gui/$layer"
+done
+rm -rf -- "$runtime_root/wpc/surface_analysis" \
+  "$runtime_root/state/realtime/consumers/ewmrs-inputs-v1" \
+  "$runtime_root/state/realtime/services/ewmrs.json" \
+  "$runtime_root/state/realtime/ingest/v1/render-ready" \
+  "$runtime_root/state/realtime/ingest/v1/render-plan"
+```
+
+Historical plans and release notes retain retired names; live code, guides,
+configuration, tests, and packaging contain no references to the retired name.
+
 ## [3.1.0] 2026-10-05
 
 ### Added

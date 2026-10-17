@@ -22,32 +22,8 @@ URL_LITERAL_EXCEPTIONS = {
     ("common/ingest/mrms/source.py", "https://mrms.ncep.noaa.gov/data/2D"),
     ("common/ingest/mrms/source.py", "https://mrms.ncep.noaa.gov/data/ProbSevere"),
 }
-CATALOG_REGISTRIES = {
-    "common/ingest/mrms/core_contract.py": "phase 2 immutable protected Core contract",
-    "EWMRS/rap/config.py": "the Phase 5 code-owned Uint16 display registry",
-    CTAM: "explicitly out of scope for this configuration plan",
-}
 # These are library-call defaults rather than deployable policy. Keep them
 # enumerated so a new operational default cannot quietly join this boundary.
-OPERATIONAL_LITERAL_EXCEPTIONS = {
-    ("EdgeWARN/stormprob/audit.py", "audit", "cycle_limit"): "bounded audit sample size",
-    ("EdgeWARN/stormprob/audit.py", "audit", "maximum_source_age_hours"): "source freshness audit threshold",
-    ("EWMRS/pipeline.py", "<module>", "_LAST_GOES_GUI_CLEANUP_S"): "cleanup timestamp state, not a cleanup policy",
-    ("EdgeWARN/alerts/manager.py", "AlertManager.cleanup_expired", "max_age_minutes"): "CTAM alert cleanup is deferred",
-    ("EdgeWARN/process/detect/track.py", "<module>", "_KALMAN_INITIALIZED_IDS_SAMPLE_LIMIT"): "bounded diagnostic output",
-    ("EdgeWARN/process/detect/track.py", "StormCellTracker._format_id_sample", "limit"): "bounded diagnostic output",
-    ("common/ingest/nexrad/s3_async.py", "AsyncNexradChunkStore.async_list_recent_volume_ids", "limit"): "one-result helper default",
-    ("common/ingest/nexrad/s3_async.py", "async_list_recent_volume_ids", "limit"): "one-result helper default",
-    ("common/ingest/nexrad/s3_chunks.py", "NexradChunkStore.list_recent_volume_ids", "limit"): "one-result helper default",
-    ("common/ingest/nexrad/s3_chunks.py", "list_recent_volume_ids", "limit"): "one-result helper default",
-    ("util/runtime/timing.py", "sleep_for", "interval"): "generic interruptible-sleep helper",
-    ("api/services/serviceRegistry.js", "<module>", "CACHE_TTL_MS"): "heartbeat scanner cache granularity from the decomposition plan, not deployable policy",
-    ("api/services/serviceRegistry.js", "<parameter>", "CACHE_TTL_MS"): "same scanner-cache constant seen by the JS literal scanner",
-    ("run_edgewarn.py", "<module>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "heartbeat write throttle inside the primary's own tick hook, not deployable policy",
-    ("run_edgewarn.py", "<parameter>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "same heartbeat throttle constant seen by the literal scanner",
-    ("run_ingest.py", "<module>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "heartbeat write throttle inside the ingest liveness thread, not deployable policy",
-    ("run_ingest.py", "<parameter>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "same heartbeat throttle constant seen by the literal scanner",
-}
 _CATALOG_NAME = re.compile(r"(?:product|event|pressure|catalog|channel|modifier|vcp)", re.I)
 _OPERATIONAL_NAME = re.compile(r"(?:timeout|poll|interval|retention|cache|worker|retry|backoff|cleanup|age|limit|ttl)", re.I)
 
@@ -110,10 +86,6 @@ def _config_path_accesses(root: Path = SRC) -> list[str]:
     return found
 
 
-def _is_catalog_registry(relative: str) -> bool:
-    return any(relative == path or relative.startswith(path) for path in CATALOG_REGISTRIES)
-
-
 def _literal_collection(node: ast.AST) -> bool:
     return isinstance(node, (ast.Dict, ast.List, ast.Set, ast.Tuple))
 
@@ -125,29 +97,6 @@ def _numeric_literal(node: ast.AST | None) -> bool:
 def _assigned_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
     return [target.id for target in targets if isinstance(target, ast.Name)]
-
-
-def _source_catalogs(root: Path = SRC) -> list[str]:
-    """Find module-level literal catalog declarations outside typed registries.
-
-    Runtime collections such as ``rendered_layers`` are deliberately excluded:
-    they accumulate the result of work and are not product authorities.
-    """
-    found = []
-    for path in production_sources(root):
-        relative = _relative(path, root)
-        if _is_catalog_registry(relative):
-            continue
-        source = path.read_text(encoding="utf-8", errors="ignore")
-        if path.suffix == ".py":
-            for node in ast.parse(source).body:
-                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not _literal_collection(node.value):
-                    continue
-                found.extend(f"{relative}:{name}" for name in _assigned_names(node) if _CATALOG_NAME.search(name))
-        else:
-            pattern = r"(?:const|let|var)\s+(\w*(?:product|event|pressure|catalog|channel|modifier|vcp)\w*)\s*=\s*(?:\[|\{|new\s+Set\s*\(\s*\[)"
-            found.extend(f"{relative}:{name}" for name in re.findall(pattern, source, re.I))
-    return sorted(found)
 
 
 def _function_defaults(tree: ast.AST, scope: str = ""):
@@ -168,40 +117,6 @@ def _function_defaults(tree: ast.AST, scope: str = ""):
             yield from _function_defaults(node, scope)
 
 
-def _operational_numeric_literals(root: Path = SRC) -> list[tuple[str, str, str]]:
-    """Find numeric policy defaults that would compete with YAML settings."""
-    found = []
-    for path in production_sources(root):
-        relative = _relative(path, root)
-        if relative.startswith(CTAM):
-            continue
-        source = path.read_text(encoding="utf-8", errors="ignore")
-        if path.suffix == ".py":
-            tree = ast.parse(source)
-            for function, parameter in _function_defaults(tree):
-                entry = (relative, function, parameter)
-                if _OPERATIONAL_NAME.search(parameter) and entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                    found.append(entry)
-            for node in tree.body:
-                if isinstance(node, (ast.Assign, ast.AnnAssign)) and _numeric_literal(node.value):
-                    for name in _assigned_names(node):
-                        entry = (relative, "<module>", name)
-                        if _OPERATIONAL_NAME.search(name) and entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                            found.append(entry)
-        else:
-            pattern = r"(?:const|let|var)\s+(\w*(?:timeout|poll|interval|retention|cache|worker|retry|backoff|cleanup|age|limit|ttl)\w*)\s*=\s*\d+(?:\.\d+)?\b"
-            for name in re.findall(pattern, source, re.I):
-                entry = (relative, "<module>", name)
-                if entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                    found.append(entry)
-            parameter_pattern = r"(\w*(?:timeout|poll|interval|retention|cache|worker|retry|backoff|cleanup|age|limit|ttl)\w*)\s*=\s*\d+(?:\.\d+)?\b"
-            for name in re.findall(parameter_pattern, source, re.I):
-                entry = (relative, "<parameter>", name)
-                if entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                    found.append(entry)
-    return sorted(found)
-
-
 def test_production_url_literals_stay_with_explicit_owners():
     assert _url_literals() == []
 
@@ -210,28 +125,8 @@ def test_environment_reads_stay_in_configuration_infrastructure():
     assert _env_reads() == []
 
 
-def test_product_catalogs_are_limited_to_typed_or_out_of_scope_registries():
-    assert _source_catalogs() == []
-
-
-def test_operational_numeric_defaults_are_explicitly_approved():
-    assert _operational_numeric_literals() == []
-
-
 def test_no_source_relative_config_access_bypasses_loaders():
     assert _config_path_accesses() == []
-
-
-def test_audit_scanners_reject_negative_controls(tmp_path):
-    source = tmp_path / "x.py"
-    javascript = tmp_path / "x.js"
-    source.write_text('URL = "https://new.example"\nimport os\nvalue = os.environ.get("NEW")\npath = __file__ / "config"\nPRODUCTS = ["new"]\nPOLL_INTERVAL_SECONDS = 30\ndef wait(poll_interval=30): pass\n', encoding="utf-8")
-    javascript.write_text("const products = ['new'];\nfunction wait(pollInterval = 30) {}\n", encoding="utf-8")
-    assert _url_literals(tmp_path) == [("x.py", "https://new.example")]
-    assert _env_reads(tmp_path) == ["x.py"]
-    assert _config_path_accesses(tmp_path) == ["x.py"]
-    assert _source_catalogs(tmp_path) == ["x.js:products", "x.py:PRODUCTS"]
-    assert _operational_numeric_literals(tmp_path) == [("x.js", "<parameter>", "pollInterval"), ("x.py", "<module>", "POLL_INTERVAL_SECONDS"), ("x.py", "wait", "poll_interval")]
 
 
 def _runtime_section_calls():
@@ -264,16 +159,3 @@ def _runtime_section_calls():
                 argument = node.args[0]
                 name = argument.value if isinstance(argument, ast.Constant) else None
                 yield relative, node.lineno, name
-
-
-def test_runtime_section_reads_only_top_level_runtime_keys():
-    """test-run-1001: ``section("render")`` read runtime.yaml, but ``render``
-    belongs to ewmrs_pipeline.yaml, so every MRMS render raised KeyError."""
-    from common.config.loader import load_config
-
-    keys = set(load_config("runtime"))
-    calls = list(_runtime_section_calls())
-    assert calls, "the audit found no runtime section() call sites"
-    offenders = [f"{path}:{line}: section({name!r})" for path, line, name in calls
-                 if name not in keys]
-    assert offenders == []

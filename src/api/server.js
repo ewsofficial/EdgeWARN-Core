@@ -10,9 +10,9 @@ import { createApp } from './app.js';
 function reportEffectiveConfig(config, port) {
   const { source, overrides, effective } = config.diagnostics;
   console.log(`[API] Config root: ${source.root}`);
-  console.log(`[API] Catalogs loaded: api@${source.schemaVersion} (${source.file}), wpc@${source.wpc.schemaVersion} (${source.wpc.file})`);
+  console.log(`[API] Catalogs loaded: api@${source.schemaVersion} (${source.file})`);
   console.log(`[API] Active overrides: ${overrides.length ? overrides.join(', ') : 'none; every resolved value came from YAML'}`);
-  console.log(`[API] Enabled products: render=${effective.renderProductCount}, radar=${effective.radarProductCount}, allowed origins=${effective.allowedOriginCount}`);
+  console.log(`[API] Enabled products: radar=${effective.radarProductCount}, allowed origins=${effective.allowedOriginCount}`);
   console.log(`[API] Listening on port ${port}, base dir ${effective.baseDir}. Configuration changes require a restart to take effect.`);
 }
 
@@ -25,6 +25,6 @@ export async function startServer(options = {}) {
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  if (process.argv.includes('--compat=edgewarn') || process.argv.includes('--compat=ewmrs')) console.warn('[Deprecation] Use npm run api; compatibility start commands now launch the unified service.');
+  if (process.argv.includes('--compat=edgewarn')) console.warn('[Deprecation] Use npm run api; compatibility start commands now launch the unified service.');
   startServer().catch((error) => { console.error(error); process.exitCode = 1; });
 }

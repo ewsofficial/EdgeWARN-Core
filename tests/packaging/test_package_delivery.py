@@ -31,18 +31,13 @@ def test_container_uses_installed_exec_form_package_command():
     assert "pip install" in dockerfile
     assert f'/opt/conda/envs/{environment}/bin' in dockerfile
     assert "/opt/conda/envs/EdgeWARN-dev/bin" not in dockerfile
-    assert "FROM nws-zones-${EDGEWARN_SYNC_NWS_ZONES} AS nws-zones" in dockerfile
     assert "COPY --from=runtime-build" in dockerfile
-    assert "COPY --from=nws-zones" in dockerfile
 
 
 def test_compose_separates_runtime_and_configuration_mounts():
     compose = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
     services = compose["services"]
 
-    assert services["edgewarn"]["build"]["args"] == {
-        "EDGEWARN_SYNC_NWS_ZONES": "${EDGEWARN_SYNC_NWS_ZONES:-true}"
-    }
 
     assert services["edgewarn"]["command"] == [
         "edgewarn", "run", "--config-path", "/etc/edgewarn/config"
@@ -51,7 +46,6 @@ def test_compose_separates_runtime_and_configuration_mounts():
     assert "${EDGEWARN_HOST_BASE_DIR:-./EdgeWARN_input}:/var/lib/edgewarn" in production_mounts
     assert services["edgewarn"]["environment"]["EDGEWARN_BASE_DIR"] == "/var/lib/edgewarn"
     assert "./config:/etc/edgewarn/config:ro" in production_mounts
-    assert "${EDGEWARN_NWS_ASSETS_DIR:-./assets/nws_zones}:/etc/edgewarn/assets/nws_zones:ro" in production_mounts
 
     admin = services["edgewarn-configure"]
     assert admin["profiles"] == ["admin"]
@@ -61,13 +55,6 @@ def test_compose_separates_runtime_and_configuration_mounts():
         "/etc/edgewarn/config",
     ]
     assert "./config:/etc/edgewarn/config:rw" in admin["volumes"]
-
-    zone_sync = services["edgewarn-sync-nws-zones"]
-    assert zone_sync["profiles"] == ["admin"]
-    assert zone_sync["command"] == [
-        "sync-nws-zones", "--apply", "--config-path", "/etc/edgewarn/config"
-    ]
-    assert "${EDGEWARN_NWS_ASSETS_DIR:-./assets/nws_zones}:/etc/edgewarn/assets/nws_zones:rw" in zone_sync["volumes"]
 
 
 def test_ci_builds_and_smoke_tests_the_installed_wheel():

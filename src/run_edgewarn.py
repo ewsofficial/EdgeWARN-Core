@@ -1,24 +1,4 @@
-"""Supported primary EdgeWARN command (decomposition Phase 5).
-
-The latency-sensitive primary service. Owns detection, tracking/lineage,
-integration, CTAM, alert generation, and API index updates, plus the truthful
-primary cycle outcome/retry state.
-
-Since the independent-ingest cutover this command performs **no source
-acquisition at all**: realtime MRMS, raw RAP, and scan-time GLM downloads are
-owned by ``run_ingest.py``. Core reads the immutable readiness records the
-ingest service commits beneath ``state/realtime/ingest/v1/``, starts detection
-only once every configured check modifier is locally valid, and waits locally
-for the later integration prerequisites. Launching Core without a separately
-running ingest service leaves it waiting, with an explicit diagnostic, until
-scan readiness appears.
-
-It does not import or start EWMRS, NEXRAD, METAR, NWS, WPC, or GOES ABI loops.
-Behavior mirrors the other direct services: a single-instance lock beneath
-``state/realtime/services/``, an atomic canonical heartbeat refreshed by an
-independent liveness thread, and clean SIGINT/SIGTERM shutdown of its own worker.
-No import side effects: parsing and runtime initialization happen in ``main()``.
-"""
+"""Core analysis service consuming durable local ingest readiness."""
 
 import os
 import signal
@@ -82,7 +62,7 @@ def main():
         fs.ensure_mrms_directories(registry)
 
     print(f"Primary EdgeWARN service started (v{get_release_version()}). Press CTRL+C to exit.")
-    print("[EdgeWARN] EWMRS and its accessories are owned by run_ewmrs.py; NEXRAD by run_nexrad.py.")
+    print("[EdgeWARN] NEXRAD is owned by run_nexrad.py.")
     print("[EdgeWARN] Realtime MRMS/RAP/GLM acquisition is owned by run_ingest.py; this "
           "process consumes its durable readiness records and waits when they are absent.")
     log_effective_flags(args)

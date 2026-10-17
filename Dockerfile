@@ -1,7 +1,5 @@
 # syntax=docker/dockerfile:1
 
-ARG EDGEWARN_SYNC_NWS_ZONES=true
-
 FROM continuumio/miniconda3:25.3.1-1 AS runtime-build
 
 WORKDIR /tmp/edgewarn-build
@@ -24,38 +22,11 @@ RUN conda env create --file environment.yml \
     && conda clean --all --yes \
     && rm -rf /tmp/edgewarn-build /tmp/edgewarn-wheel
 
-# These two stages are selected by EDGEWARN_SYNC_NWS_ZONES. The enabled stage
-# is independent of runtime-build, allowing BuildKit to download zone assets
-# while the full runtime Conda environment is being solved.
-FROM python:3.13-slim AS nws-zones-false
-RUN mkdir -p /opt/edgewarn/nws-zones
-
-FROM python:3.13-slim AS nws-zones-true
-WORKDIR /tmp/edgewarn-zone-sync
-RUN python -m pip install --no-cache-dir requests pyyaml shapely
-COPY package.json ./
-COPY src/common/config ./src/common/config
-COPY src/common/ingest/nws/config.py src/common/ingest/nws/zone_sync.py ./src/common/ingest/nws/
-COPY src/util/__init__.py src/util/release.py ./src/util/
-COPY config/nws.yaml config/runtime.yaml ./config/
-COPY config/schema/nws.schema.json config/schema/runtime.schema.json ./config/schema/
-RUN PYTHONPATH=/tmp/edgewarn-zone-sync/src \
-    python -m common.ingest.nws.zone_sync \
-        --apply \
-        --no-progress \
-        --config-dir /tmp/edgewarn-zone-sync/config \
-        --assets-dir /opt/edgewarn/nws-zones \
-    && test -n "$(find /opt/edgewarn/nws-zones -name zones.json -print -quit)"
-
-FROM nws-zones-${EDGEWARN_SYNC_NWS_ZONES} AS nws-zones
-
 FROM continuumio/miniconda3:25.3.1-1
 
-ARG EDGEWARN_SYNC_NWS_ZONES
 
 COPY --from=runtime-build /opt/conda/envs/EdgeWARN /opt/conda/envs/EdgeWARN
 COPY --from=runtime-build /etc/edgewarn/config /etc/edgewarn/config
-COPY --from=nws-zones /opt/edgewarn/nws-zones /opt/edgewarn/nws-zones
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends apache2-utils tini \
@@ -67,17 +38,11 @@ COPY --chmod=0755 docker/edgewarn-entrypoint.sh /usr/local/bin/edgewarn-entrypoi
 ENV PATH="/opt/conda/envs/EdgeWARN/bin:${PATH}" \
     EDGEWARN_BASE_DIR="/var/lib/edgewarn" \
     EDGEWARN_CONFIG_DIR="/etc/edgewarn/config" \
-    EDGEWARN_BUNDLED_NWS_ZONES_DIR="/opt/edgewarn/nws-zones" \
-    EDGEWARN_SYNC_NWS_ZONES="${EDGEWARN_SYNC_NWS_ZONES}" \
     PYTHONUNBUFFERED=1 \
     EDGEWARN_LOG_DIR="/var/log/edgewarn"
 
-# Verify bundled configuration and asset lookup without any host mounts.
-RUN python -c "from common.config.loader import validate_all_configs; validate_all_configs()" \
-    && if [ "$EDGEWARN_SYNC_NWS_ZONES" = "true" ]; then \
-        python -c \
-            "from common.ingest.nws.geomapper import ensure_zone_assets; ensure_zone_assets()"; \
-    fi
+# Verify bundled configuration without host mounts.
+RUN python -c "from common.config.loader import validate_all_configs; validate_all_configs()"
 
 WORKDIR /opt/edgewarn
 VOLUME ["/var/lib/edgewarn", "/var/log/edgewarn"]

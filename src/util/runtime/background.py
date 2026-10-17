@@ -7,13 +7,7 @@ import sys
 import time
 import traceback
 
-import common.ingest.metar as metar_ingest
-import common.ingest.nws.main as nws_ingest
-from common.ingest.mrms.config import get_abi_radc_channel_specs
-from common.ingest.mrms.downloader import download_goes_specs, download_goes_specs_async
 from common.ingest.nexrad.pipeline import run_realtime_ingestion_pipeline
-from common.ingest.wpc.main import run_wpc_ingest
-from EWMRS.pipeline import ewmrs_goes_worker
 from util.io import QueueWriter
 
 from .config import section
@@ -47,102 +41,8 @@ def _configure_process_runtime(name: str) -> None:
     _install_exit_signal_handlers()
 
 
-def goes_loop(activity_event, render_active_event, pause_during_render=None, poll_seconds=None):
-    _configure_process_runtime("GOES-Ingest")
-    try:
-        coordination = section("goes_coordination")
-        if pause_during_render is None:
-            pause_during_render = coordination["pause_ingest_during_render"]
-        if poll_seconds is None:
-            poll_seconds = coordination["poll_seconds"]
-        abi_specs = get_abi_radc_channel_specs()
-        while True:
-            while pause_during_render and render_active_event.is_set():
-                sleep_for(
-                    coordination["render_pause_poll_seconds"],
-                    interval=coordination["render_pause_poll_interval_seconds"],
-                )
-
-            target_dt = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-            try:
-                activity_event.set()
-                asyncio.run(download_goes_specs_async(abi_specs, target_dt))
-            except Exception as exc:
-                print(f"[GOES Loop] Async ingest failed ({target_dt}): {exc}. Falling back to sync.")
-                try:
-                    download_goes_specs(abi_specs, target_dt)
-                except Exception as fallback_exc:
-                    print(f"[GOES Loop] Sync fallback failed ({target_dt}): {fallback_exc}")
-            finally:
-                activity_event.clear()
-
-            sleep_for(poll_seconds, interval=coordination["poll_interval_seconds"])
-    except KeyboardInterrupt:
-        return
 
 
-def goes_render_loop(base_dir, log_queue, render_active_event):
-    """EWMRS-owned GOES ABI render loop (decomposition Phase 4).
-
-    Poll-based: each cycle it pins the freshest complete local ABI input set
-    into a manifest and renders it. The primary no longer enqueues GOES
-    render tasks; GOES ingest and render share this service's process tree,
-    so the in-process ``pause_ingest_during_render`` events keep working.
-    """
-    from util.runtime.goes import collect_local_goes_inputs, get_ewmrs_goes_render_specs
-    from common.ingest.manifest import CycleInputManifest
-
-    _configure_process_runtime("GOES-Render")
-    coordination = section("goes_coordination")
-    specs = get_ewmrs_goes_render_specs()
-    completed_input_timestamps: set[tuple[tuple[str, str], ...]] = set()
-    try:
-        while not _SHUTDOWN_REQUESTED:
-            target_dt = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-            try:
-                inputs = collect_local_goes_inputs(target_dt, specs=specs)
-                if len(inputs) == len(specs):
-                    manifest = CycleInputManifest(cycle_time=target_dt, inputs=inputs)
-                    if not manifest.validate_alignment():
-                        # A source's temporary filename changes when it is
-                        # atomically promoted. Deduplicate by the selected
-                        # products' encoded analysis timestamps, which remain
-                        # stable across that rename and across later polls.
-                        render_key = tuple(
-                            (record.product, record.analysis_time.isoformat())
-                            for record in sorted(inputs, key=lambda record: record.product)
-                        )
-                        if render_key not in completed_input_timestamps:
-                            queue_log(
-                                log_queue,
-                                f"INFO: Rendering pinned local GOES ABI input set for {target_dt.isoformat()}",
-                            )
-                            render_active_event.set()
-                            try:
-                                ewmrs_goes_worker(
-                                    log_queue,
-                                    target_dt,
-                                    input_manifest=manifest.as_dict(),
-                                )
-                            finally:
-                                render_active_event.clear()
-                            completed_input_timestamps.add(render_key)
-                            # Keep a small rolling window for long-lived workers.
-                            if len(completed_input_timestamps) > 120:
-                                completed_input_timestamps = set(
-                                    sorted(completed_input_timestamps)[-60:]
-                                )
-            except KeyboardInterrupt:
-                return
-            except Exception as exc:
-                queue_log(log_queue, f"ERROR: EWMRS GOES render poll cycle failed: {exc}")
-            sleep_for(
-                coordination["poll_seconds"],
-                interval=coordination["poll_interval_seconds"],
-            )
-    except (KeyboardInterrupt, SystemExit):
-        render_active_event.clear()
-        return
 
 
 def _write_nexrad_heartbeat(heartbeat_path, payload, *, latest_output):
@@ -283,50 +183,7 @@ def nexrad_render_loop(base_dir):
         return
 
 
-def metar_loop():
-    _configure_process_runtime("METAR-Ingest")
-    try:
-        intervals = section("background_intervals")
-        boundary_minutes = intervals["metar_boundary_minutes"]
-        while True:
-            sleep_until_boundary(boundary_minutes, intervals["boundary_wait_interval_seconds"])
-
-            try:
-                asyncio.run(metar_ingest.ingest_metars_async())
-            except Exception as exc:
-                print(f"[METAR Loop] Error: {exc}")
-    except KeyboardInterrupt:
-        return
 
 
-def nws_loop():
-    _configure_process_runtime("NWS-Ingest")
-    try:
-        intervals = section("background_intervals")
-        while True:
-            try:
-                asyncio.run(nws_ingest.download_alerts_async(datetime.now(timezone.utc)))
-            except Exception as exc:
-                print(f"[NWS Loop] Error: {exc}")
-
-            sleep_for(intervals["nws_seconds"], interval=intervals["nws_interval_seconds"])
-    except KeyboardInterrupt:
-        return
 
 
-def wpc_loop():
-    _configure_process_runtime("WPC-Ingest")
-    import util.file as fs
-
-    fs.WPC_SFC_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        intervals = section("background_intervals")
-        boundary_minutes = intervals["wpc_boundary_minutes"]
-        while True:
-            try:
-                run_wpc_ingest()
-            except Exception as exc:
-                print(f"[WPC Loop] Error: {exc}")
-            sleep_until_boundary(boundary_minutes, intervals["boundary_wait_interval_seconds"])
-    except KeyboardInterrupt:
-        return

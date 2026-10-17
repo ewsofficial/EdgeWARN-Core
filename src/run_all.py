@@ -1,6 +1,6 @@
 """Optional all-services launcher (decomposition Phase 6).
 
-A thin subprocess supervisor only. It starts the four direct services with
+A thin subprocess supervisor only. It starts the three direct services with
 ``subprocess.Popen`` using explicit argument lists and the current Python
 executable, forwards SIGINT/SIGTERM, and exits nonzero if a started child
 exits. One child exiting does not stop its siblings.
@@ -14,7 +14,7 @@ started directly.
 
 Usage:
 
-    python src/run_all.py [--services ingest,edgewarn,ewmrs,nexrad] [flags...]
+    python src/run_all.py [--services ingest,edgewarn,nexrad] [flags...]
 
 Every flag the launcher accepts is routed only to the services that own it;
 unset flags are simply not forwarded, so each child keeps resolving its own
@@ -36,7 +36,6 @@ from util.runtime.process_identity import set_parent_death_signal
 SERVICE_SCRIPTS = {
     "ingest": "run_ingest.py",
     "edgewarn": "run_edgewarn.py",
-    "ewmrs": "run_ewmrs.py",
     "nexrad": "run_nexrad.py",
 }
 
@@ -50,17 +49,14 @@ STOP_GRACE_SECONDS = 20.0
 _ROUTING = {
     "--lat_limits": ("edgewarn",),
     "--lon_limits": ("edgewarn",),
-    "--profile": ("ingest", "edgewarn", "ewmrs", "nexrad"),
+    "--profile": ("ingest", "edgewarn", "nexrad"),
     # Dependency-shared: they decide whether StormProb sources gate integration.
-    "--disable-ctam": ("ingest", "edgewarn", "ewmrs"),
-    "--disable-stormprob": ("ingest", "edgewarn", "ewmrs"),
+    "--disable-ctam": ("ingest", "edgewarn"),
+    "--disable-stormprob": ("ingest", "edgewarn"),
     "--disable-ctam-modules": ("edgewarn",),
     "--disable-tracking": ("edgewarn",),
     "--disable-polygon-expansion": ("edgewarn",),
-    "--disable-goes": ("ingest", "edgewarn", "ewmrs"),
-    "--disable-metar": ("ewmrs",),
-    "--disable-nws": ("ewmrs",),
-    "--disable-wpc": ("ewmrs",),
+    "--disable-glm": ("ingest", "edgewarn"),
     "--refl-threshold": ("edgewarn",),
     "--min-seed-percentage": ("edgewarn",),
     "--drop-offset": ("edgewarn",),
@@ -73,10 +69,6 @@ _LIST_FLAGS = {"--lat_limits", "--lon_limits"}
 def resolve_services(args, requested):
     """Apply environment/YAML topology settings to requested services."""
     run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
-    omit_ewmrs = bool(overlay.resolve(
-        args.disable_ewmrs, env_names=["EDGEWARN_DISABLE_EWMRS"],
-        yaml_value=run_cfg["disable_ewmrs"], key="run.disable_ewmrs",
-    ))
     omit_nexrad = bool(overlay.resolve(
         args.disable_nexrad, env_names=["EDGEWARN_DISABLE_NEXRAD"],
         yaml_value=run_cfg["disable_nexrad"], key="run.disable_nexrad",
@@ -84,8 +76,6 @@ def resolve_services(args, requested):
     services = list(requested)
     if len(services) != len(set(services)):
         raise ValueError("duplicate services are not allowed")
-    if omit_ewmrs:
-        services = [name for name in services if name != "ewmrs"]
     if omit_nexrad:
         services = [name for name in services if name != "nexrad"]
     args.mrms_core_only = bool(overlay.resolve(
@@ -111,8 +101,8 @@ def preflight_topology(args, services, service_argv=None):
 
     if len(services) != len(set(services)):
         raise ValueError("duplicate services are not allowed")
-    if {"edgewarn", "ewmrs"}.intersection(services) and "ingest" not in services:
-        raise ValueError("supervised Core/EWMRS requires ingest in --services; "
+    if {"edgewarn"}.intersection(services) and "ingest" not in services:
+        raise ValueError("supervised Core requires ingest in --services; "
                          "use direct consumer commands for an external producer")
     runtime = config_loader.load_config("runtime", config_dir=args.config_dir)
     if "ingest" in services and not overlay.resolve(
@@ -128,8 +118,8 @@ def preflight_topology(args, services, service_argv=None):
         raise ValueError("conflicting worker base directories; all workers must share one root")
     if roots:
         args.base_dir = roots.pop()
-    participants = {"ingest", "edgewarn", "ewmrs"}.intersection(services)
-    for attribute in ("disable_goes", "disable_ctam", "disable_stormprob"):
+    participants = {"ingest", "edgewarn"}.intersection(services)
+    for attribute in ("disable_glm", "disable_ctam", "disable_stormprob"):
         choices = {getattr(value, attribute) for name, value in parsed.items()
                    if name in participants and getattr(value, attribute, None) is not None}
         if getattr(args, attribute, None) is not None:
@@ -143,13 +133,13 @@ def preflight_topology(args, services, service_argv=None):
 
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Optional supervisor starting the four EdgeWARN services"
+        description="Optional supervisor starting the three EdgeWARN services"
     )
     parser.add_argument(
         "--services",
         type=str,
         default=",".join(SERVICE_SCRIPTS),
-        help="Comma-separated subset of services to start (default: all four)",
+        help="Comma-separated subset of services to start (default: all three)",
     )
     parser.add_argument("--base_dir", "--base-dir", dest="base_dir", type=str, default=None)
     parser.add_argument("--config-dir", type=str, default=None)
@@ -158,8 +148,8 @@ def _parse_args(argv=None):
     parser.add_argument("--lon_limits", nargs=2, type=float, default=None)
     for flag in (
         "disable-ctam", "disable-stormprob", "disable-ctam-modules", "disable-tracking", "disable-polygon-expansion",
-        "disable-goes", "disable-metar", "disable-nws", "disable-wpc",
-        "disable-ewmrs", "disable-nexrad",
+        "disable-glm",
+        "disable-nexrad",
     ):
         parser.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--refl-threshold", type=float, default=None)
@@ -238,8 +228,6 @@ def build_service_commands(args, services, src_root, *, service_argv=None):
             # child behavior stable if its inherited config root differs.
             cmd.append("--mrms-core-only")
         cmd.extend(service_argv.get(service, ()))
-        if service == "ingest":
-            cmd.append("--render-consumer" if "ewmrs" in services else "--no-render-consumer")
         if args.config_dir is not None:
             cmd += ["--config-dir", str(args.config_dir)]
         commands[service] = cmd
@@ -364,7 +352,7 @@ def supervise(commands, *, src_root, stop_event=None, restart_policy=None):
 
         # A service that exits is reported and its orphaned descendants are
         # reaped, but its siblings keep running: the services coordinate only
-        # through durable records, so EWMRS and NEXRAD stay useful without
+        # through durable records, so NEXRAD stay useful without
         # Core. The launcher stops once every service has exited.
         exited: set[str] = set()
         orphan_deadlines: dict[str, float] = {}

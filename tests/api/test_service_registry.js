@@ -101,58 +101,14 @@ describe('service registry scanner', () => {
     expect(requiredServiceForRoute('/api/v3/radar-sites/KTLX/scans/20240101-120000/elevations/0.5/products/DBZH')).toBe('nexrad');
     expect(requiredServiceForRoute('/nexrad/KTLX')).toBeNull();
     expect(requiredServiceForRoute('/api/v3/cells')).toBe('edgewarn');
-    expect(requiredServiceForRoute('/api/v3/render-products')).toBe('ewmrs');
-    expect(requiredServiceForRoute('/api/v3/models/rap/layers')).toBe('ewmrs');
-    expect(requiredServiceForRoute('/api/v3/analyses/wpc/surface')).toBe('ewmrs');
     expect(requiredServiceForRoute('/renders/get-items')).toBeNull();
     expect(requiredServiceForRoute('/health/ready')).toBeNull();
   });
 });
 
-describe('OpenAPI chunk endpoint failures', () => {
-  it('documents both service gating and invalid render artifacts as 503 causes', async () => {
-    const spec = await fs.readFile(OPENAPI_PATH, 'utf8');
-    const openApi = JSON.parse(spec);
-    for (const route of [
-      '/api/v3/render-products/{productId}/snapshots/{timestamp}/chunks',
-      '/api/v3/render-products/{productId}/snapshots/{timestamp}/chunks/{x}/{y}',
-    ]) {
-      const response = openApi.paths[route].get.responses['503'];
-      expect(response.description).toContain('SERVICE_NOT_ENABLED');
-      expect(response.description).toContain('INVALID_ARTIFACT');
-    }
-  });
-});
 
-describe('SERVICE_NOT_ENABLED gating for the ewmrs route family', () => {
-  let baseDir;
-  afterEach(async () => {
-    resetServiceStateCache();
-    if (baseDir) await fs.rm(baseDir, { recursive: true, force: true });
-  });
 
-  async function createAppWithBaseDir() {
-    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'svc-gate-ewmrs-'));
-    for (const dir of ['data', 'gui', 'wpc']) {
-      await fs.mkdir(path.join(baseDir, dir), { recursive: true });
-    }
-    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
-    return app;
-  }
 
-  it('returns problem+json on v3 render routes when ewmrs is disabled', async () => {
-    const app = await createAppWithBaseDir();
-    const v3 = await request(app).get('/api/v3/render-products').expect(503).expect('Content-Type', /application\/problem\+json/);
-    expect(v3.body).toMatchObject({ code: 'SERVICE_NOT_ENABLED', service: 'ewmrs', state: 'disabled' });
-
-  });
-
-  it('serves render routes normally when ewmrs heartbeats as active', async () => {
-    const app = await createAppWithBaseDir();
-    await writeHeartbeat(baseDir, 'ewmrs', freshHeartbeat({ service: 'ewmrs' }));
-    await request(app).get('/api/v3/render-products').expect(200);
-  });
-});
 
 describe('SERVICE_NOT_ENABLED gating for the edgewarn route family', () => {
   let baseDir;
@@ -267,18 +223,15 @@ describe('SERVICE_NOT_ENABLED gating for the nexrad route family', () => {
   it('reports every canonical service in the health services block', async () => {
     const app = await createAppWithBaseDir();
     const ready = await request(app).get('/health/ready').expect(503);
-    expect(Object.keys(ready.body.services).sort()).toEqual(['edgewarn', 'ewmrs', 'ingest', 'nexrad']);
     expect(ready.body.services.edgewarn).toEqual({ state: 'disabled', phase: null, lastSeen: null, degradedChildren: [] });
   });
 });
 
 
 describe('OpenAPI service diagnostics', () => {
-  it('documents all four services on readiness without an ingest route gate', async () => {
+  it('documents all three services on readiness without an ingest route gate', async () => {
     const spec = JSON.parse(await fs.readFile(OPENAPI_PATH, 'utf8'));
-    expect(spec.components.schemas.Services.required.sort()).toEqual(['edgewarn', 'ewmrs', 'ingest', 'nexrad']);
     expect(spec.paths['/health/ready'].get.responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/Readiness');
-    expect(requiredServiceForRoute('/api/v3/render-products')).toBe('ewmrs');
   });
 });
 

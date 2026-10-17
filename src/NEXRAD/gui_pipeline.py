@@ -1,9 +1,4 @@
-"""NEXRAD GUI render loop, discovery, and retention (NEXRAD service owned).
-
-Moved out of ``EWMRS.pipeline`` in decomposition Phase 3 so the EWMRS package
-no longer launches, renders, or cleans NEXRAD work. Only this service may
-create or delete files beneath ``gui/NEXRAD``.
-"""
+"""NEXRAD-owned GUI rendering, discovery, and retention."""
 
 from __future__ import annotations
 
@@ -331,9 +326,7 @@ def run_nexrad_render_loop(
         except Exception as exc:
             io_manager.write_warning(f"NEXRAD render poll cycle failed: {exc}")
         try:
-            # NEXRAD-owned retention (decomposition Phase 3): this service,
-            # not EWMRS, prunes gui/NEXRAD. Swept every poll cycle to match
-            # the cadence EWMRS previously applied on the render path.
+            # NEXRAD owns retention beneath gui/NEXRAD; sweep each poll cycle.
             removed = cleanup_old_nexrad_gui_files()
             if removed > 0:
                 io_manager.write_debug(f"NEXRAD retention removed {removed} stale file(s)/dir(s)")

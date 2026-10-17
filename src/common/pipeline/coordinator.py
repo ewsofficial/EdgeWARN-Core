@@ -1,4 +1,4 @@
-"""Shared staged-ingest coordination for tandem EdgeWARN and EWMRS execution."""
+"""Staged ingest coordination for Core historical processing."""
 
 from __future__ import annotations
 
@@ -38,8 +38,6 @@ class CycleState:
 
     timestamp: datetime
     detection_inputs_ready: bool = False
-    ewmrs_mrms_inputs_ready: bool = False
-    ewmrs_goes_inputs_ready: bool = False
     mrms_integration_inputs_ready: bool = False
     rap_inputs_ready: bool = False
     edgewarn_integration_inputs_ready: bool = False
@@ -111,10 +109,7 @@ async def run_staged_ingest_cycle(
     max_entries: int | None = None,
     include_goes: bool = True,
     include_rap: bool = True,
-    include_ewmrs: bool = True,
     on_detection_ready: Optional[StateCallback] = None,
-    on_ewmrs_mrms_ready: Optional[StateCallback] = None,
-    on_ewmrs_goes_ready: Optional[StateCallback] = None,
     on_edgewarn_integration_ready: Optional[StateCallback] = None,
     on_base_integration_ready: Optional[StateCallback] = None,
     on_optional_complete: Optional[StateCallback] = None,
@@ -185,8 +180,6 @@ async def run_staged_ingest_cycle(
         records = (*records, *_previous_detection_records(records))
         state.input_manifest = state.detection_manifest = CycleInputManifest(cycle_time=dt, inputs=records)
         emit(on_detection_ready)
-        state.ewmrs_mrms_inputs_ready = include_ewmrs
-        emit(on_ewmrs_mrms_ready)
 
         rap_path, rap_error = await rap_task if rap_task else (None, None)
         rap_records = ()
@@ -211,8 +204,6 @@ async def run_staged_ingest_cycle(
             state.errors["goes_ingest"] = "GOES inputs unavailable"
         records = (*records, *goes_records)
         state.input_manifest = state.integration_manifest = CycleInputManifest(cycle_time=dt, inputs=records)
-        state.ewmrs_goes_inputs_ready = include_ewmrs and include_goes and goes_ok
-        emit(on_ewmrs_goes_ready)
         state.edgewarn_integration_inputs_ready &= goes_ok
         if not state.edgewarn_integration_inputs_ready:
             state.errors["edgewarn_integration_ingest"] = "EdgeWARN integration inputs unavailable"

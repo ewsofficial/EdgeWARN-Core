@@ -3,180 +3,384 @@
   "title": "api.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "server", "security", "logging", "rate_limits", "artifacts", "pagination", "cache_control_max_age", "query", "render_defaults", "validation", "product_catalog"],
+  "required": [
+    "schema_version",
+    "server",
+    "security",
+    "logging",
+    "rate_limits",
+    "artifacts",
+    "pagination",
+    "cache_control_max_age",
+    "query",
+    "validation"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": {
+      "const": 1
+    },
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["host", "port", "debug_port", "request_timeout_ms", "service_stale_after_seconds", "service_progress_stale_after_seconds", "enabled_services", "openapi_spec", "production_version_label", "v3_api_version"],
+      "required": [
+        "host",
+        "port",
+        "debug_port",
+        "request_timeout_ms",
+        "service_stale_after_seconds",
+        "service_progress_stale_after_seconds",
+        "enabled_services",
+        "openapi_spec",
+        "production_version_label",
+        "v3_api_version"
+      ],
       "properties": {
-        "host": { "type": "string" },
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "debug_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "request_timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
-        "service_stale_after_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "service_progress_stale_after_seconds": { "type": "number", "exclusiveMinimum": 0 },
-        "enabled_services": { "type": "array", "uniqueItems": true, "items": { "enum": ["ingest", "edgewarn", "ewmrs", "nexrad"] } },
-        "openapi_spec": { "type": "string", "pattern": "^<(base_dir|gui_dir|src_dir)>/[^/]" },
-        "production_version_label": { "type": "string" },
-        "v3_api_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "debug_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "request_timeout_ms": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "service_stale_after_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "service_progress_stale_after_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "enabled_services": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "ingest",
+              "edgewarn",
+              "nexrad"
+            ]
+          }
+        },
+        "openapi_spec": {
+          "type": "string",
+          "pattern": "^<(base_dir|gui_dir|src_dir)>/[^/]"
+        },
+        "production_version_label": {
+          "type": "string"
+        },
+        "v3_api_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
       }
     },
     "security": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hsts_max_age_seconds", "allowed_origins", "trust_proxy", "cors", "csp_default_src", "compression_skip_media"],
+      "required": [
+        "hsts_max_age_seconds",
+        "allowed_origins",
+        "trust_proxy",
+        "cors",
+        "csp_default_src",
+        "compression_skip_media"
+      ],
       "properties": {
-        "hsts_max_age_seconds": { "type": "integer", "minimum": 0 },
-        "allowed_origins": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^(?:\\*|https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?)$" } },
-        "trust_proxy": { "type": ["boolean", "integer", "array"], "minimum": 0, "maximum": 8, "minItems": 1, "items": { "type": "string", "pattern": "^(?:loopback|linklocal|uniquelocal|[0-9A-Fa-f.:]+(?:/[0-9]{1,3})?)$" } },
+        "hsts_max_age_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "allowed_origins": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(?:\\*|https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?)$"
+          }
+        },
+        "trust_proxy": {
+          "type": [
+            "boolean",
+            "integer",
+            "array"
+          ],
+          "minimum": 0,
+          "maximum": 8,
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^(?:loopback|linklocal|uniquelocal|[0-9A-Fa-f.:]+(?:/[0-9]{1,3})?)$"
+          }
+        },
         "cors": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["methods", "allowed_headers", "max_age", "credentials"],
+          "required": [
+            "methods",
+            "allowed_headers",
+            "max_age",
+            "credentials"
+          ],
           "properties": {
-            "methods": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["GET", "HEAD", "OPTIONS"] } },
-            "allowed_headers": { "type": "array", "uniqueItems": true, "items": { "type": "string", "enum": ["Content-Type", "X-Request-Id"] } },
-            "max_age": { "type": "integer", "minimum": 0, "maximum": 86400 },
-            "credentials": { "type": "boolean", "const": false }
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "OPTIONS"
+                ]
+              }
+            },
+            "allowed_headers": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Content-Type",
+                  "X-Request-Id"
+                ]
+              }
+            },
+            "max_age": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "credentials": {
+              "type": "boolean",
+              "const": false
+            }
           }
         },
-        "csp_default_src": { "type": "string", "const": "'self'" },
-        "compression_skip_media": { "type": "string" }
+        "csp_default_src": {
+          "type": "string",
+          "const": "'self'"
+        },
+        "compression_skip_media": {
+          "type": "string"
+        }
       }
     },
     "logging": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["access_log_enabled"],
-      "properties": { "access_log_enabled": { "type": "boolean" } }
+      "required": [
+        "access_log_enabled"
+      ],
+      "properties": {
+        "access_log_enabled": {
+          "type": "boolean"
+        }
+      }
     },
     "rate_limits": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["per_second", "per_minute", "standard_headers", "legacy_headers"],
+      "required": [
+        "per_second",
+        "per_minute",
+        "standard_headers",
+        "legacy_headers"
+      ],
       "properties": {
         "per_second": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["max", "window_ms"],
+          "required": [
+            "max",
+            "window_ms"
+          ],
           "properties": {
-            "max": { "type": "integer", "minimum": 0 },
-            "window_ms": { "type": "integer", "exclusiveMinimum": 0 }
+            "max": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "window_ms": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
           }
         },
         "per_minute": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["max", "window_ms"],
+          "required": [
+            "max",
+            "window_ms"
+          ],
           "properties": {
-            "max": { "type": "integer", "minimum": 0 },
-            "window_ms": { "type": "integer", "exclusiveMinimum": 0 }
+            "max": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "window_ms": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
           }
         },
-        "standard_headers": { "type": "boolean" },
-        "legacy_headers": { "type": "boolean" }
+        "standard_headers": {
+          "type": "boolean"
+        },
+        "legacy_headers": {
+          "type": "boolean"
+        }
       }
     },
     "artifacts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["size_limits_bytes", "json_cache", "list_limit", "chunk_length_slack_bytes"],
+      "required": [
+        "size_limits_bytes",
+        "json_cache",
+        "list_limit"
+      ],
       "properties": {
         "size_limits_bytes": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["json", "binary", "image"],
+          "required": [
+            "json",
+            "binary",
+            "image"
+          ],
           "properties": {
-            "json": { "type": "integer", "exclusiveMinimum": 0 },
-            "binary": { "type": "integer", "exclusiveMinimum": 0 },
-            "image": { "type": "integer", "exclusiveMinimum": 0 }
+            "json": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "binary": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "image": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
           }
         },
         "json_cache": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["max_entries", "max_size_bytes"],
+          "required": [
+            "max_entries",
+            "max_size_bytes"
+          ],
           "properties": {
-            "max_entries": { "type": "integer", "minimum": 0 },
-            "max_size_bytes": { "type": "integer", "exclusiveMinimum": 0 }
+            "max_entries": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_size_bytes": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
           }
         },
-        "list_limit": { "type": "integer", "minimum": 0 },
-        "chunk_length_slack_bytes": { "type": "integer", "minimum": 0 }
+        "list_limit": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "pagination": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["default_limit", "max_limit"],
+      "required": [
+        "default_limit",
+        "max_limit"
+      ],
       "properties": {
-        "default_limit": { "type": "integer", "minimum": 1 },
-        "max_limit": { "type": "integer", "minimum": 1 }
+        "default_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_limit": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "cache_control_max_age": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["collection", "resource", "asset"],
+      "required": [
+        "collection",
+        "resource",
+        "asset"
+      ],
       "properties": {
-        "collection": { "type": "integer", "minimum": 0 },
-        "resource": { "type": "integer", "minimum": 0 },
-        "asset": { "type": "integer", "minimum": 0 }
+        "collection": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resource": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "asset": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "query": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowed_params", "max_value_length", "limit_pattern"],
+      "required": [
+        "allowed_params",
+        "max_value_length",
+        "limit_pattern"
+      ],
       "properties": {
-        "allowed_params": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
-        "max_value_length": { "type": "integer", "minimum": 1 },
-        "limit_pattern": { "type": "string" }
-      }
-    },
-    "render_defaults": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["grid", "grid_maxima"],
-      "properties": {
-        "grid": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["rows", "cols", "tile_size"],
-          "properties": {
-            "rows": { "type": "integer", "exclusiveMinimum": 0 },
-            "cols": { "type": "integer", "exclusiveMinimum": 0 },
-            "tile_size": { "type": "integer", "exclusiveMinimum": 0 }
+        "allowed_params": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
           }
         },
-        "grid_maxima": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["rows", "cols", "tile_size"],
-          "properties": {
-            "rows": { "type": "integer", "exclusiveMinimum": 0 },
-            "cols": { "type": "integer", "exclusiveMinimum": 0 },
-            "tile_size": { "type": "integer", "exclusiveMinimum": 0 }
-          }
+        "max_value_length": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "limit_pattern": {
+          "type": "string"
         }
       }
     },
     "validation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["radar_products"],
+      "required": [
+        "radar_products"
+      ],
       "properties": {
-        "radar_products": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*$" } }
-      }
-    },
-    "product_catalog": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["entries"],
-      "properties": {
-        "entries": { "type": "integer", "minimum": 0 }
+        "radar_products": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9]*$"
+          }
+        }
       }
     }
   }

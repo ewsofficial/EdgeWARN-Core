@@ -5,7 +5,6 @@ import path from 'path';
 import { PassThrough, Readable } from 'stream';
 import { ArtifactRepository } from '../../src/api/repositories/artifactRepository.js';
 import { createAnalysisService } from '../../src/api/services/analysis.js';
-import { createRenderService } from '../../src/api/services/renders.js';
 import { createAncillaryServices } from '../../src/api/services/ancillary.js';
 import { streamArtifact } from '../../src/api/streamArtifact.js';
 
@@ -43,42 +42,11 @@ describe('unified API services', () => {
     await expect(service.getCell('../7')).rejects.toMatchObject({ code: 'INVALID_PATH' });
   });
 
-  it('uses canonical render IDs and exposes the chunk representation', async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
-    const product = path.join(root, 'gui', 'MRMS_MergedReflectivityQC');
-    await fs.mkdir(product, { recursive: true });
-    const format = { version: 2, encoding: 'float16', file_suffix: '.f16.gz', compression: 'gzip', channels: 1, value_kind: 'scalar', no_data: 'nan', bytes_per_component: 2, pixel_row_order: 'top_to_bottom', grid_origin: 'bottom_left' };
-    await fs.writeFile(path.join(product, 'index.json'), JSON.stringify({ schema_version: 2, timestamps: ['20260317-200000'], representation: 'binary_chunks', chunk_format: format, tile_grid: { rows: 1, cols: 1, tile_size: 2 } }));
-    const service = createRenderService(new ArtifactRepository({ gui: path.join(root, 'gui') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT), RENDER_DEFAULTS, 1024);
-    await expect(service.listSnapshots('MRMS_MergedReflectivityQC')).resolves.toEqual(['20260317-200000']);
-    await expect(service.getProduct('MRMS_MergedReflectivityQC')).resolves.toMatchObject({ representation: 'binary_chunks', grid: { rows: 1, cols: 1, tileSize: 2 } });
-  });
+  
 
-  it('opens only indexed RGBA chunks with their exact expected length', async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
-    const product = path.join(root, 'gui', 'MRMS_MergedReflectivityQC'); const timestamp = '20260317-200000';
-    await fs.mkdir(path.join(product, timestamp, 'chunks'), { recursive: true });
-    const format = { version: 2, encoding: 'float16', file_suffix: '.f16.gz', compression: 'gzip', channels: 1, value_kind: 'scalar', no_data: 'nan', bytes_per_component: 2, pixel_row_order: 'top_to_bottom', grid_origin: 'bottom_left' };
-    await fs.writeFile(path.join(product, 'index.json'), JSON.stringify({ schema_version: 2, timestamps: [timestamp], representation: 'binary_chunks', chunk_format: { ...format, media_type: 'application/octet-stream' }, tile_grid: { rows: 1, cols: 1, tile_size: 2 } }));
-    await fs.writeFile(path.join(product, timestamp, 'index.json'), JSON.stringify({ schema_version: 2, timestamp, representation: 'binary_chunks', chunk_format: format, tile_grid: { rows: 1, cols: 1, tile_size: 2 }, chunks: [[0, 0]] }));
-    await fs.writeFile(path.join(product, timestamp, 'chunks', 'chunk_0_0.f16.gz'), Buffer.from('H4sIAAAAAAAC/2NggAAAad8iZQgAAAA=', 'base64'));
-    const service = createRenderService(new ArtifactRepository({ gui: path.join(root, 'gui') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT), RENDER_DEFAULTS, 1024);
-    await expect(service.chunks('MRMS_MergedReflectivityQC', timestamp)).resolves.toMatchObject({ chunks: [[0, 0]], grid: { tileSize: 2 } });
-    const opened = await service.chunk('MRMS_MergedReflectivityQC', timestamp, 0, 0);
-    expect(opened.size).toBe(23); await opened.handle.close();
-    await expect(service.chunk('MRMS_MergedReflectivityQC', timestamp, 1, 0)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-  });
+  
 
-  it('closes a RAP data handle when its metadata is malformed', async () => {
-    const close = jest.fn().mockResolvedValue();
-    const repository = {
-      open: jest.fn().mockResolvedValue({ handle: { close }, size: 1 }),
-      readJson: jest.fn().mockRejectedValue(Object.assign(new Error('malformed'), { code: 'IN_PROGRESS' }))
-    };
-    const service = createAncillaryServices(repository, ANCILLARY_CONFIG);
-    await expect(service.rapData('CAPE', '20260317-200000')).rejects.toMatchObject({ code: 'IN_PROGRESS' });
-    expect(close).toHaveBeenCalledTimes(1);
-  });
+  
 
   it('closes an artifact handle when a disconnected stream fails', async () => {
     const close = jest.fn().mockResolvedValue();
@@ -114,16 +82,7 @@ describe('unified API services', () => {
     await expect(service.radarField('KTLH', '20260317-200000', '0.5', 'DBZH')).resolves.toBe(opened);
   });
 
-  it('builds the WPC surface names it lists and reads from wpc.yaml', async () => {
-    const repository = {
-      list: jest.fn().mockResolvedValue([{ name: 'wpc_sfc_20260317-200000.geojson' }, { name: 'latest.geojson' }]),
-      readJson: jest.fn().mockResolvedValue({ type: 'FeatureCollection' })
-    };
-    const service = createAncillaryServices(repository, ANCILLARY_CONFIG);
-    await expect(service.listWpcSurface()).resolves.toEqual(['20260317-200000']);
-    await expect(service.wpcSurface('20260317-200000')).resolves.toEqual({ type: 'FeatureCollection' });
-    expect(repository.readJson).toHaveBeenCalledWith('wpc', ['surface_analysis', 'wpc_sfc_20260317-200000.geojson']);
-  });
+  
 });
 
 

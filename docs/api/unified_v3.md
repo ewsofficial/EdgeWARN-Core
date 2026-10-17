@@ -1,115 +1,50 @@
-# Unified EdgeWARN API v3
+# Unified API v3
 
-The public service is started with `npm run api` and serves both EdgeWARN and
-EWMRS products from one configured base directory. Its default port is `5000`.
+Start with `npm run api` (port 5000). The read-only service exposes published
+Core and NEXRAD artifacts. `/api/v3/openapi.json` is the authoritative contract.
 
-`GET /api/v3/openapi.json` is the authoritative machine-readable contract.
-Most v3 JSON collections use `{ "data": [], "meta": { "nextCursor" } }`;
-single JSON resources use `{ "data": {}, "meta": {} }`. Native WPC GeoJSON
-detail and the raw OpenAPI document are exceptions. Per-request correlation
-is available through the `X-Request-Id` response header rather than the body,
-so cacheable JSON responses keep a stable body and support conditional `GET`
-(`ETag`/`If-None-Match` → `304`).
-Standard v3 application errors use `application/problem+json`; rate-limit,
-and timeout responses may use ordinary JSON envelopes.
+## Resources
 
-## Runtime configuration
+- `/api/v3/cells` and `/cells/{cellId}`
+- `/api/v3/storm-snapshots` and `/storm-snapshots/{timestamp}`
+- `/api/v3/alert-snapshots` and `/alert-snapshots/{timestamp}`
+- `/api/v3/alerts/{alertId}`
+- `/api/v3/modules`, `/modules/{moduleId}`, `/modules/{moduleId}/{routeId}`
+- `/api/v3/radar-sites`, `/radar-sites/{siteId}/availability`, and
+  `/radar-sites/{siteId}/scans/{timestamp}/elevations/{elevation}/products/{productId}`
+- `/health/live` and `/health/ready`
 
-- Canonical base directory: `--base-dir <path>` or `EDGEWARN_BASE_DIR`
-- Compatibility aliases: `--base_dir <path>` and `BASE_DIR`. Precedence is CLI,
-  then `EDGEWARN_BASE_DIR`, then `BASE_DIR`, then `filesystem.yaml`.
-- `PORT` sets the service port; `npm run debug:api` uses debug port `3001`
-- `ALLOWED_ORIGINS` is a comma-separated browser-origin allowlist. The default
-  is `*`, and requests without an `Origin` header proceed without CORS headers.
-  Credentials are not enabled for this read-only API.
-- `TRUST_PROXY_IPS` configures trusted reverse proxies. Production rejects the
-  ambiguous `TRUST_PROXY=true` form. Only set this when a stripping reverse
-  proxy removes client-supplied `X-Forwarded-For`/`X-Forwarded-Proto` headers
-  before forwarding; on a directly exposed host, enabling trust lets clients
-  spoof forwarded headers and bypass per-client rate limits.
+Alert routes require a `source` query (`edgewarn` or `official`). The API can
+read published official alert files; their acquisition is outside this runtime.
+There is no alerts collection. Collection envelopes use
+`{data: [], meta: {nextCursor}}`; resources use `{data: {}, meta: {}}`.
+The raw OpenAPI document and radar bytes are exceptions.
 
-## Primary resources
+Requests carry `X-Request-Id`. Application errors use RFC 9457
+`application/problem+json`. JSON resources support ETags and conditional GET.
+Pagination rejects pruned cursors; restart without a cursor to obtain the
+current collection. NEXRAD `.bin.gz` artifacts retain their binary layout,
+stream/range handling, HEAD behavior, and immutable caching.
 
-- Analysis: `/api/v3/cells`, `/storm-snapshots`, `/alert-snapshots`,
-  `/alerts/{alertId}`, `/observations/metar`. `/alerts` is addressable by ID
-  only; there is no `/alerts` collection. `/alert-snapshots` and `/alerts/{id}`
-  additionally accept the `source` query parameter (`official` or `edgewarn`).
-- Renders: `/api/v3/render-products`, and
-  `/api/v3/render-products/{productId}/snapshots/{timestamp}/chunks`
-  lists sparse float16 value chunks; `/chunks/{x}/{y}` returns the binary payload.
-  Render products use the `binary_chunks` representation. V3 does not expose
-  `/image` or `/tiles` resources.
-- Radar: `/api/v3/radar-sites`
-- RAP: `/api/v3/models/rap/layers`
-- WPC: `/api/v3/analyses/wpc/surface`
-- CTAM modules: `/api/v3/modules`, `/api/v3/modules/{moduleId}`, and
-  `/api/v3/modules/{moduleId}/{routeId}`
-- Infrastructure: `/health/live`, `/health/ready`
+## Configuration and health
 
-Canonical render IDs equal the render layer name / file prefix, such as `MRMS_MergedReflectivityQC`, `MRMS_QPE`,
-and `GOES_ABI_C13_BrightnessTemp`. The product catalog maps IDs to runtime
-folders; legacy prefixes are not separate lookup aliases. The id charset (`[A-Za-z0-9_.-]+`) is frozen so 3.1.0
-dynamic ingest/render products only add catalog entries.
+Base-directory precedence is `--base-dir`, `EDGEWARN_BASE_DIR`, legacy
+`--base_dir`/`BASE_DIR`, then `filesystem.yaml`. Set `PORT`, `ALLOWED_ORIGINS`,
+and `TRUST_PROXY_IPS` for deployment. Production rejects blanket
+`TRUST_PROXY=true`. CORS does not enable credentials.
 
-## EWMRS binary chunks
+Readiness reports only `ingest`, `edgewarn`, and `nexrad` with state, phase,
+lastSeen, and degradedChildren. States are active, stale, stalled, disabled,
+degraded, or unsupported-schema. Set `api.server.enabled_services` to the
+selected topology. Readiness returns 503 for missing runtime roots or unhealthy
+enabled services. Published analysis artifacts remain accessible through Core
+outages; radar routes retain their NEXRAD service gate.
 
-MRMS and GOES ABI renders publish one-channel float16 value chunks. They are
-gzip-compressed `chunk_{x}_{y}.f16.gz` files under
-`<BASE_DIR>/gui/<product>/<timestamp>/chunks/`. `NaN` is the no-data value;
-gzip uses deterministic metadata and the API sends `Content-Encoding: gzip`.
-The API publishes source values, not visualization styles. Clients choose and
-version their own color scales for scalar values; there is no public colormap
-catalog. GOES RGB composites are likewise derived client-side from the raw ABI
-channel chunks. Chunks retain top-to-bottom row order and a bottom-left
-chunk-grid origin.
+## Removed resources
 
-Fetch the `/chunks` listing first. It provides the grid, format descriptor,
-and the authoritative sparse coordinate list—missing coordinates are fully
-transparent chunks, not a request to synthesize pixels. The payload endpoint
-sets `X-EWMRS-Format-Version`, `X-Data-Type`, `X-Value-Kind`, `X-Channel-Count`,
-`X-No-Data`, `X-Chunk-Width`, `X-Chunk-Height`, `X-Grid-Origin`, and
-`X-Pixel-Row-Order`. Verify that the decoded byte length equals
-`width * height * channels * 2` before creating a `Uint16Array` or
-`Float16Array`; responses are immutable and support ETag conditional GET and
-HEAD.
-
-```js
-const listing = await (await fetch(chunkListUrl)).json();
-const response = await fetch(chunkUrl);
-const bytes = new Uint16Array(await response.arrayBuffer());
-if (bytes.byteLength !== 700 * 700 * 2) throw new Error('invalid float16 scalar chunk');
-// Interpret as float16 (or upload as half-float); grid y=0 is the bottom row.
-```
-
-One float16 component is two bytes, so a `700 x 700` single-channel chunk is
-`980000` bytes and `bytes.length` is `490000`. Compare `byteLength`, not
-element count, against `width * height * channels * 2`.
-
-These float16 value chunks are distinct from RAP `data.u16` scalar arrays and NEXRAD
-`.bin.gz` products, which have their own metadata and decoders.
-
-## Migration
-
-All legacy endpoints have been removed: `/api/v2`, `/renders/*`, `/nexrad`,
-`/nexrad/*`, `/rap/*`, `/wpc/*`, `/colormaps`, `/health`, and `/healthz`.
-The former `/api/v1`, `/features`, `/data`, and PNG retirement handlers are
-also removed. These paths now return `404 Not Found`, without redirects or
-deprecation headers. Clients must use the v3 resources documented above.
-The operational `/health/live` and `/health/ready` endpoints, root discovery,
-and `/robots.txt` remain available.
-
-## Service diagnostics
-
-`/health/ready` reports `services.ingest`, `services.edgewarn`, `services.ewmrs`,
-and `services.nexrad`, each with `state`, `phase`, `lastSeen`, and
-`degradedChildren`. States are `active`, `stale`, `stalled`, `disabled`, `degraded`, or
-`unsupported-schema`. Readiness returns 503 if a runtime directory is missing or
-any service in `api.server.enabled_services` is missing, stale, stalled, or
-unsupported. Set that list to the deployed Python topology. Core and ingest
-progress is judged against `api.server.service_progress_stale_after_seconds`.
-Cell, storm-snapshot, and alert routes continue serving published artifacts
-through producer outages. EWMRS and NEXRAD retain their route gates.
-`/health/live` describes API liveness and configuration, without a services block.
-
-A pagination cursor whose item has been pruned returns 400. Restart pagination
-without the cursor to obtain the current collection.
+Raster render-products, RAP display arrays, WPC surface analysis, and METAR
+observations have no producer or reader and return 404. All legacy v1/v2,
+`/features`, `/data`, `/renders/*`, `/rap/*`, `/wpc/*`, `/nexrad/*`, `/colormaps`,
+`/health`, and `/healthz` paths also return 404 without redirects. Existing
+retired artifacts on disk cannot restore these routes. See
+[breaking changes and operator migration](../../CHANGELOG.md).

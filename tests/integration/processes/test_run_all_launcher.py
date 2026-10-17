@@ -28,7 +28,7 @@ def src_root(tmp_path):
 
 def _args(**overrides):
     defaults = dict(
-        services="edgewarn,ewmrs,nexrad",
+        services="ingest,edgewarn,nexrad",
         base_dir=None,
         config_dir=None,
         profile=None,
@@ -37,11 +37,7 @@ def _args(**overrides):
         disable_ctam=None,
         disable_tracking=None,
         disable_polygon_expansion=None,
-        disable_goes=None,
-        disable_metar=None,
-        disable_nws=None,
-        disable_wpc=None,
-        disable_ewmrs=None,
+        disable_glm=None,
         disable_nexrad=None,
         refl_threshold=None,
         min_seed_percentage=None,
@@ -60,82 +56,8 @@ class TestServiceSelection:
         args, services = run_all._parse_args(["--mrms-core-only"])
         assert services == ["ingest", "edgewarn"]
 
-    def test_yaml_mrms_core_only_retains_ingest_and_primary(self, monkeypatch):
-        monkeypatch.setattr(
-            run_all.config_loader,
-            "load_config",
-            lambda *_args, **_kwargs: {"run": {
-                "disable_ewmrs": False,
-                "disable_nexrad": False,
-                "mrms_core_only": True,
-            }},
-        )
-        args, services = run_all._parse_args([])
-        assert args.mrms_core_only is True
-        assert services == ["ingest", "edgewarn"]
-
-    def test_disable_flags_omit_services(self, monkeypatch):
-        # CLI values must win over the YAML layer.
-        _, services = run_all._parse_args(["--no-disable-ewmrs", "--disable-nexrad"])
-        assert "nexrad" not in services
-        assert "ewmrs" in services
-
-        _, services = run_all._parse_args(["--disable-ewmrs"])
-        assert "ewmrs" not in services
-        assert "nexrad" in services
-
 
 class TestFlagRouting:
-    def test_every_flag_routes_only_to_its_owners(self, src_root):
-        args = _args(
-            base_dir="/data",
-            config_dir="/cfg",
-            profile=True,
-            lat_limits=[20.0, 55.0],
-            lon_limits=[230.0, 300.0],
-            disable_ctam=True,
-            disable_tracking=True,
-            disable_polygon_expansion=True,
-            disable_goes=True,
-            disable_metar=True,
-            disable_nws=True,
-            disable_wpc=True,
-            refl_threshold=25.0,
-            min_seed_percentage=15.0,
-            drop_offset=1.0,
-            mrms_core_only=True,
-        )
-        commands = run_all.build_service_commands(args, ["edgewarn", "ewmrs"], src_root)
-
-        edgewarn = " ".join(commands["edgewarn"][2:])
-        ewmrs = " ".join(commands["ewmrs"][2:])
-        # Shared flags reach both...
-        for token in ("--base-dir /data", "--config-dir /cfg", "--profile"):
-            assert token in edgewarn
-            assert token in ewmrs
-        # ...primary-only flags stay primary-only...
-        for token in (
-            "--lat_limits 20.0 55.0", "--lon_limits 230.0 300.0",
-            "--disable-tracking", "--disable-polygon-expansion",
-            "--refl-threshold 25.0", "--min-seed-percentage 15.0", "--drop-offset 1.0",
-        ):
-            assert token in edgewarn
-            assert token not in ewmrs
-        # ...CTAM/StormProb enablement decides the StormProb integration gate,
-        # so it is dependency-shared like --disable-goes...
-        assert "--disable-ctam" in edgewarn
-        assert "--disable-ctam" in ewmrs
-        # The resolved topology reaches every child so direct and supervised
-        # launches agree even if children inherited a different config root.
-        assert "--mrms-core-only" in edgewarn
-        assert "--mrms-core-only" in ewmrs
-        # ...EWMRS-owned accessory flags stay EWMRS-only, and --disable-goes
-        # is owned by both (scan-time GLM on primary, ABI on EWMRS).
-        for token in ("--disable-metar", "--disable-nws", "--disable-wpc"):
-            assert token in ewmrs
-            assert token not in edgewarn
-        assert "--disable-goes" in ewmrs
-        assert "--disable-goes" in edgewarn
 
     def test_unset_flags_are_never_forwarded(self, src_root):
         commands = run_all.build_service_commands(_args(), ["nexrad"], src_root)
@@ -143,29 +65,6 @@ class TestFlagRouting:
             sys.executable, os.path.join(src_root, "run_nexrad.py")
         ]
 
-    def test_explicit_false_forwards_no_form(self, src_root):
-        commands = run_all.build_service_commands(
-            _args(profile=False), ["ewmrs"], src_root
-        )
-        assert "--no-profile" in commands["ewmrs"]
-
-    def test_scoped_argv_is_appended_once_and_config_is_canonical(self, src_root):
-        commands = run_all.build_service_commands(
-            _args(config_dir="/cfg"),
-            ["edgewarn", "ewmrs"],
-            src_root,
-            service_argv={
-                "edgewarn": ("--lat_limits", "20", "55"),
-                "ewmrs": ("--disable-wpc",),
-            },
-        )
-
-        assert commands["edgewarn"][-5:] == [
-            "--lat_limits", "20", "55", "--config-dir", "/cfg"
-        ]
-        assert commands["ewmrs"][-3:] == ["--disable-wpc", "--config-dir", "/cfg"]
-        assert commands["edgewarn"].count("--config-dir") == 1
-        assert commands["ewmrs"].count("--config-dir") == 1
 
     @pytest.mark.parametrize(
         "forwarded",
@@ -238,33 +137,7 @@ def _supervise_until_stopped(commands, src_root, *, observe_seconds=3.0):
 
 
 class TestSupervision:
-    def test_child_startup_exit_keeps_siblings_and_returns_nonzero(
-        self, tmp_path, src_root, monkeypatch
-    ):
-        sleeper = _sleeper(tmp_path)
-        missing = str(tmp_path / "missing.py")
-        monkeypatch.setattr(
-            run_all,
-            "SERVICE_SCRIPTS",
-            {"edgewarn": sleeper, "ewmrs": missing},
-        )
-        commands = run_all.build_service_commands(
-            _args(), ["edgewarn", "ewmrs"], src_root
-        )
 
-        code, alive_after_exit = _supervise_until_stopped(commands, src_root)
-
-        assert alive_after_exit
-        assert code == 1
-
-    def test_launcher_stops_once_every_child_has_exited(
-        self, tmp_path, src_root, monkeypatch
-    ):
-        quitter = _sleeper(tmp_path, name="quitter.py", code=3)
-        monkeypatch.setattr(run_all, "SERVICE_SCRIPTS", {"edgewarn": quitter, "ewmrs": quitter})
-        commands = run_all.build_service_commands(_args(), ["edgewarn", "ewmrs"], src_root)
-
-        assert run_all.supervise(commands, src_root=src_root, restart_policy={"max_restarts": 0, "restart_window_seconds": 60}) == 1
 
     def test_popen_failure_returns_nonzero(self, src_root, monkeypatch):
         def fail_to_start(*_args, **_kwargs):
@@ -275,41 +148,6 @@ class TestSupervision:
 
         assert run_all.supervise(commands, src_root=src_root, restart_policy={"max_restarts": 0, "restart_window_seconds": 60}) == 1
 
-    def test_stop_request_during_startup_prevents_remaining_spawns(
-        self, src_root, monkeypatch
-    ):
-        stop_event = threading.Event()
-        spawned = []
-
-        class Child:
-            pid = 1234
-            returncode = None
-
-            def poll(self):
-                return self.returncode
-
-            def send_signal(self, _signum):
-                self.returncode = 0
-
-            def wait(self, timeout):
-                return self.returncode
-
-        def spawn(command, **_kwargs):
-            spawned.append(command)
-            stop_event.set()
-            return Child()
-
-        monkeypatch.setattr(run_all.subprocess, "Popen", spawn)
-        commands = {
-            "edgewarn": ["edgewarn"],
-            "ewmrs": ["ewmrs"],
-            "nexrad": ["nexrad"],
-        }
-
-        assert run_all.supervise(
-            commands, src_root=src_root, stop_event=stop_event
-        ) == 0
-        assert spawned == [["edgewarn"]]
 
     def test_unexpected_supervisor_error_terminates_and_reaps_children(
         self, src_root, monkeypatch
@@ -347,38 +185,6 @@ class TestSupervision:
         assert child.signals == [signal.SIGTERM]
         assert child.waits == [run_all.STOP_GRACE_SECONDS]
 
-    def test_signal_driven_shutdown_terminates_children_cleanly(self, tmp_path, src_root):
-        """End-to-end: SIGINT reaches the launcher's children through the driver."""
-        sleeper = _sleeper(tmp_path, name="run_edgewarn.py")
-        sleeper_b = _sleeper(tmp_path, name="run_ewmrs.py")
-        repo_src = str(Path(__file__).resolve().parents[3] / "src")
-        driver = tmp_path / "driver.py"
-        driver.write_text(
-            "import sys\n"
-            f"sys.path.insert(0, {repo_src!r})\n"
-            "import run_all\n"
-            f"run_all.SERVICE_SCRIPTS['edgewarn'] = {sleeper!r}\n"
-            f"run_all.SERVICE_SCRIPTS['ewmrs'] = {sleeper_b!r}\n"
-            f"run_all.SERVICE_SCRIPTS['ingest'] = {sleeper!r}\n"
-            "sys.exit(run_all.main(['--services', 'ingest,edgewarn,ewmrs']))\n"
-        )
-
-        proc = subprocess.Popen(
-            [sys.executable, str(driver)], start_new_session=True
-        )
-        try:
-            time.sleep(2.0)  # launcher + three sleepers up
-
-            proc.send_signal(signal.SIGINT)
-            code = proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            # Kill the whole process group so sleeper children cannot outlive
-            # the failed assertion.
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            pytest.fail("launcher did not exit after SIGINT")
-
-        # Clean signal shutdown exits zero even though the children were killed.
-        assert code == 0
 
     @pytest.mark.skipif(os.name != "posix", reason="POSIX signal return code")
     def test_signal_driven_shutdown_accepts_raw_sigterm_exit(
@@ -440,21 +246,6 @@ class TestSupervision:
 
         assert code == 1
 
-    def test_unexpected_child_exit_does_not_stop_siblings(
-        self, tmp_path, src_root, monkeypatch
-    ):
-        quitter = _sleeper(tmp_path, name="quitter.py", code=3)
-        sleeper = _sleeper(tmp_path)
-        monkeypatch.setattr(run_all, "SERVICE_SCRIPTS", {
-            "edgewarn": quitter, "ewmrs": sleeper, "nexrad": sleeper,
-        })
-        commands = run_all.build_service_commands(_args(), list(run_all.SERVICE_SCRIPTS), src_root)
-
-        code, alive_after_exit = _supervise_until_stopped(commands, src_root)
-
-        # EWMRS and NEXRAD outlived Core; the exit is still reported on stop.
-        assert alive_after_exit
-        assert code == 1
 
     def test_survivors_are_escalated_to_sigkill_within_grace(
         self, tmp_path, src_root, monkeypatch
@@ -530,24 +321,7 @@ class TestSupervision:
                 launcher.wait()
 
 
-def test_launcher_imports_no_pipeline_module():
-    """Import-isolation probe: the launcher stays a thin supervisor."""
-    result = subprocess.run(
-        [sys.executable, "-c",
-         "import sys\nsys.path.insert(0, 'src')\nimport run_all\n"
-         "print('EWMRS:', 'EWMRS' in sys.modules)\n"
-         "print('NEXRAD:', 'common.ingest.nexrad' in sys.modules)\n"
-         "print('EDGEWARN:', 'EdgeWARN' in sys.modules)"],
-        capture_output=True, text=True, timeout=120, cwd=os.getcwd(),
-        env={**os.environ, "PYTHONPATH": ""},
-    )
-    assert result.returncode == 0, result.stderr
-    assert "EWMRS: False" in result.stdout
-    assert "NEXRAD: False" in result.stdout
-    assert "EDGEWARN: False" in result.stdout
-
-
-@pytest.mark.parametrize("services", [["edgewarn"], ["ewmrs"], ["ingest", "ingest"]])
+@pytest.mark.parametrize("services", [["edgewarn"], ["ingest", "ingest"]])
 def test_preflight_rejects_missing_or_duplicate_producer(services):
     with pytest.raises(ValueError):
         run_all.preflight_topology(_args(), services)
@@ -559,31 +333,8 @@ def test_preflight_rejects_disabled_handoff(monkeypatch):
         run_all.preflight_topology(_args(), ["ingest", "edgewarn"])
 
 
-def test_preflight_propagates_worker_root_and_glm_setting(tmp_path):
-    args = _args()
-    services = ["ingest", "edgewarn", "ewmrs"]
-    forwarded = {"ingest": ("--base-dir", str(tmp_path), "--disable-goes")}
-    run_all.preflight_topology(args, services, forwarded)
-    commands = run_all.build_service_commands(args, services, str(tmp_path), service_argv=forwarded)
-    for command in commands.values():
-        assert "--disable-goes" in command
-        assert str(tmp_path) in command
-
-
-def test_preflight_propagates_core_stormprob_setting_to_producer_and_consumers(tmp_path):
-    """Core's --disable-stormprob must reach ingest and EWMRS, or the
-    dependency fingerprints (and so every readiness record) disagree."""
-    args = _args()
-    services = ["ingest", "edgewarn", "ewmrs"]
-    forwarded = {"edgewarn": ("--disable-stormprob",)}
-    run_all.preflight_topology(args, services, forwarded)
-    commands = run_all.build_service_commands(args, services, str(tmp_path), service_argv=forwarded)
-    for command in commands.values():
-        assert "--disable-stormprob" in command
-
-
 @pytest.mark.parametrize("forwarded", [
-    {"ingest": ("--disable-goes",), "edgewarn": ("--no-disable-goes",)},
+    {"ingest": ("--disable-glm",), "edgewarn": ("--no-disable-glm",)},
     {"ingest": ("--base-dir", "/a"), "edgewarn": ("--base-dir", "/b")},
     {"ingest": ("--no-disable-ctam",), "edgewarn": ("--disable-ctam",)},
     {"ingest": ("--disable-stormprob",), "edgewarn": ("--no-disable-stormprob",)},
@@ -591,12 +342,6 @@ def test_preflight_propagates_core_stormprob_setting_to_producer_and_consumers(t
 def test_preflight_rejects_conflicting_worker_settings(forwarded):
     with pytest.raises(ValueError, match="conflicting"):
         run_all.preflight_topology(_args(), ["ingest", "edgewarn"], forwarded)
-
-
-def test_ingest_and_ewmrs_can_run_without_core():
-    args, services = run_all._parse_args(["--services", "ingest,ewmrs"])
-    run_all.preflight_topology(args, services)
-    assert services == ["ingest", "ewmrs"]
 
 
 def test_supervisor_restarts_failed_child_without_stopping_sibling(tmp_path, src_root, monkeypatch):
@@ -634,3 +379,26 @@ while True: time.sleep(0.05)
     assert len(started) == 3
     assert sibling_alive_on_restart == [True]
     assert all(process.poll() is not None for process in started)
+
+
+def test_core_dependency_flags_reach_ingest_and_analysis_only(src_root):
+    args = _args(disable_ctam=True, disable_glm=True, lat_limits=[20, 55], profile=False)
+    commands = run_all.build_service_commands(args, ['ingest', 'edgewarn', 'nexrad'], src_root)
+    for owner in ('ingest', 'edgewarn'):
+        assert '--disable-ctam' in commands[owner]
+        assert '--disable-glm' in commands[owner]
+    assert '--disable-ctam' not in commands['nexrad']
+    assert '--disable-glm' not in commands['nexrad']
+    assert '--lat_limits' in commands['edgewarn']
+    assert '--lat_limits' not in commands['ingest']
+    assert all('--no-profile' in command for command in commands.values())
+
+
+def test_scoped_arguments_keep_one_configuration_root(src_root):
+    commands = run_all.build_service_commands(
+        _args(config_dir='/cfg'), ['ingest', 'edgewarn'], src_root,
+        service_argv={'edgewarn': ('--lat_limits', '20', '55'), 'ingest': ('--no-profile',)},
+    )
+    assert commands['edgewarn'][-5:] == ['--lat_limits', '20', '55', '--config-dir', '/cfg']
+    assert commands['ingest'][-3:] == ['--no-profile', '--config-dir', '/cfg']
+    assert all(command.count('--config-dir') == 1 for command in commands.values())

@@ -46,7 +46,7 @@ def mrms_goes():
 
 @pytest.fixture(scope="module")
 def render():
-    return loader.load_config("ewmrs_render")
+    return loader.load_config("nexrad")
 
 
 @pytest.fixture(scope="module")
@@ -149,37 +149,8 @@ def test_detection_membership_names_ingested_products(mrms_goes):
 
 # --- GOES ABI channels ----------------------------------------------------
 
-def test_goes_abi_channels_are_unique(mrms_goes):
-    channels = mrms_goes["goes"]["abi_channels"]
-    assert len(channels) == 16
-    assert duplicates([c["id"] for c in channels]) == {}
-    assert duplicates([c["name"] for c in channels]) == {}
-    assert duplicates([c["outdir"] for c in channels]) == {}
-
 
 # --- Render layers --------------------------------------------------------
-
-def test_mrms_render_layers_are_unique(render):
-    layers = render["mrms_layers"]
-    assert len(layers) == 16
-    assert duplicates([layer["name"] for layer in layers]) == {}
-    assert duplicates([layer["product"] for layer in layers]) == {}
-    assert duplicates([layer["outdir"] for layer in layers]) == {}
-
-
-def test_goes_render_layers_are_unique(render):
-    layers = render["goes_layers"]["layers"]
-    assert len(layers) == 16
-    assert duplicates([layer["name"] for layer in layers]) == {}
-    assert duplicates([layer["channel_id"] for layer in layers]) == {}
-    assert duplicates([layer["outdir"] for layer in layers]) == {}
-
-
-def test_goes_render_layers_name_ingested_channels(render, mrms_goes):
-    """A render layer for an un-ingested channel would find no input files."""
-    ingested = {c["id"] for c in mrms_goes["goes"]["abi_channels"]}
-    layers = render["goes_layers"]["layers"]
-    assert [l["channel_id"] for l in layers if l["channel_id"] not in ingested] == []
 
 
 # --- Integration datasets -------------------------------------------------
@@ -235,20 +206,13 @@ def test_rap_isobaric_levels_are_unique_and_descending(integration):
 def _attribute_names():
     """Every catalog value that is meant to name a ``util.file`` attribute."""
     mrms_goes = loader.load_config("ingest")
-    render = loader.load_config("ewmrs_render")
+    render = loader.load_config("nexrad")
     integration = loader.load_config("integration")
     runtime = loader.load_config("runtime")
 
     names: set[str] = set()
     names.update(p.path_name for p in _registry(mrms_goes).products)
-    for channel in mrms_goes["goes"]["abi_channels"]:
-        names.add(channel["outdir"])
     names.add(mrms_goes["goes"]["glm_outdir"])
-
-    for layer in render["mrms_layers"]:
-        names.update(( _registry(mrms_goes).require(layer["product"]).path_name, layer["outdir"]))
-    for layer in render["goes_layers"]["layers"]:
-        names.update((layer["filepath"], layer["outdir"]))
 
     for dataset in integration["stats_datasets"]:
         names.add(_registry(mrms_goes).require(dataset["product"]).path_name)
@@ -266,7 +230,7 @@ def test_every_named_directory_resolves_on_util_file():
     AttributeError deep inside a render worker rather than at load time.
     """
     names = _attribute_names()
-    assert len(names) >= 70
+    assert len(names) >= 23
     assert sorted(name for name in names if not hasattr(fs, name)) == []
 
 
@@ -452,11 +416,6 @@ def test_pagination_and_grid_defaults_do_not_exceed_their_maxima(api):
     pagination = api["pagination"]
     assert pagination["default_limit"] <= pagination["max_limit"]
 
-    defaults = api["render_defaults"]
-    maxima = defaults["grid_maxima"]
-    for axis, ceiling in maxima.items():
-        assert defaults["grid"][axis] <= ceiling, axis
-
 
 # --- The radar-moment allowlist has three owners -------------------------
 #
@@ -544,14 +503,14 @@ def test_ccorh_is_servable_but_deliberately_uncolored(api, render):
     colormap or drop the product; both are real decisions, and this test forces
     them to be made rather than stumbled into.
     """
-    colored = set(render["nexrad_gui"]["variable_colormaps"])
+    colored = set(render["variable_colormaps"])
     served = set(api["validation"]["radar_products"])
     assert served - colored == {"CCORH"}
     assert colored - served == set()
 
 
 def test_the_renderer_reads_the_colormap_mapping_instead_of_restating_it(render):
-    """`ewmrs_render.yaml` is the sole owner of moment-to-colormap.
+    """`nexrad.yaml` is the sole owner of moment-to-colormap.
 
     The renderer used to hold this mapping as a module constant, which meant the
     catalog key was decorative: editing it changed nothing the GUI drew. Asserting
@@ -559,10 +518,10 @@ def test_the_renderer_reads_the_colormap_mapping_instead_of_restating_it(render)
     with a surviving constant still leaves two owners.
     """
     from NEXRAD import render as nexrad
-    from EWMRS.render.config import nexrad_variable_colormaps
+    from NEXRAD.config import nexrad_variable_colormaps
 
     assert not hasattr(nexrad, "NEXRAD_VARIABLE_COLORMAP_KEYS")
-    assert nexrad_variable_colormaps() == render["nexrad_gui"]["variable_colormaps"]
+    assert nexrad_variable_colormaps() == render["variable_colormaps"]
 
 
 def test_the_colormap_accessor_hands_back_a_mutable_copy(render):
@@ -572,11 +531,11 @@ def test_the_colormap_accessor_hands_back_a_mutable_copy(render):
     make any future mutation raise from inside the catalog rather than at the call
     site, and would let one caller's edit leak into every later reader.
     """
-    from EWMRS.render.config import nexrad_variable_colormaps
+    from NEXRAD.config import nexrad_variable_colormaps
 
     mapping = nexrad_variable_colormaps()
     mapping["DBZH"] = "mutated"
-    assert nexrad_variable_colormaps()["DBZH"] == render["nexrad_gui"]["variable_colormaps"]["DBZH"]
+    assert nexrad_variable_colormaps()["DBZH"] == render["variable_colormaps"]["DBZH"]
     assert nexrad_variable_colormaps()["DBZH"] != "mutated"
 
 
@@ -585,57 +544,6 @@ def test_the_colormap_accessor_hands_back_a_mutable_copy(render):
 # v3 render id == render layer name == legacyFilePrefix. Charset frozen for 3.1.0
 # dynamic ingest/render products (same as RAP layerId charset).
 PRODUCT_SLUG = r"[A-Za-z0-9_.-]+"
-
-
-def _node_product_catalog():
-    import json
-
-    return json.loads(
-        (REPO_ROOT / "src/api/config/product-catalog.json").read_text(encoding="utf-8")
-    )
-
-
-def test_api_product_catalog_route_keys_are_unique(api):
-    """Canonical ids and storage directories are both unique route keys.
-
-    The length is compared against `product_catalog.entries` rather than a literal.
-    api.yaml records the count and the JSON holds the entries; nothing derives one
-    from the other, and `createConfig` reports the *recorded* number as
-    `diagnostics.effective.renderProductCount`, so a catalog that gained an entry
-    would keep serving the stale count with no schema able to notice.
-    """
-    entries = _node_product_catalog()
-    assert len(entries) == api["product_catalog"]["entries"]
-
-    assert duplicates([entry["id"] for entry in entries]) == {}
-    assert duplicates([entry["storageDirectory"] for entry in entries]) == {}
-    assert duplicates([entry["legacyFilePrefix"] for entry in entries]) == {}
-
-
-def test_api_product_catalog_entries_carry_every_field_the_loader_dereferences():
-    """A count alone would pass for 31 entries that are missing every field.
-
-    `productCatalog.js:5-19` validates at import, so a malformed entry takes the API
-    down at startup rather than on the request that needs it. It checks the `id` slug
-    and the three uniqueness constraints, but only truthiness for the rest, and it
-    never looks at `representation` -- which `renders.js:48,51` copies straight into
-    an HTTP response.
-
-    Deliberately shape-only, no values: `baselines/node_product_catalog.json` already
-    pins this file byte-for-byte, so asserting particular ids or colormaps here would
-    only duplicate that snapshot and fail twice for one edit. What is *not* in the
-    snapshot is which fields the code dereferences, so that is what this covers.
-    """
-    entries = _node_product_catalog()
-    required = {"id", "storageDirectory", "legacyFilePrefix", "representation"}
-
-    for entry in entries:
-        label = entry.get("id")
-        assert required <= set(entry), label
-        assert re.fullmatch(PRODUCT_SLUG, entry["id"]), label
-        for field in required - {"id"}:
-            assert isinstance(entry[field], str) and entry[field], (label, field)
-        assert "colormapId" not in entry, label
 
 
 def test_ingest_listing_lookback_never_exceeds_raw_input_retention():

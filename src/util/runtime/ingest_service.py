@@ -1,30 +1,4 @@
-"""Independently supervised realtime source acquisition.
-
-This service owns every realtime MRMS, raw RAP, and scan-time GLM acquisition.
-It is deliberately free of scientific analysis and rendering: its durable outbox
-describes *source products*, and EWMRS owns the product-to-layer mapping. No
-EWMRS or Core analysis module is imported here, so a Core crash or a long Core
-cycle can never pause acquisition.
-
-Scheduling contract
--------------------
-Discovery runs on a monotonic deadline grid (``t0 + n * poll``) so a slow
-listing cannot shift later ticks. Listing and download work never runs on the
-timer path: the timer only submits bounded work to owned executors. Missed
-deadlines coalesce into exactly one refresh instead of a burst of catch-up
-ticks, and a per-product active-listing guard stops a slow request from
-overlapping itself. The cadence is a scheduling guarantee, not a promise that a
-stalled network finishes inside one period.
-
-Durability contract
--------------------
-Every acquisition completion -- whenever it finishes, including after the poll
-that discovered it has already ended -- is routed through one publisher thread
-that commits the input to the inventory, publishes its render notification, and
-re-evaluates affected scans. Keeping every durable mutation on a single thread
-means the shared input lease is never re-entered, so publication cannot
-self-deadlock, and a completion is never delayed behind an unrelated tick.
-"""
+"""Independent acquisition service and durable Core readiness publication."""
 
 from __future__ import annotations
 
@@ -49,7 +23,7 @@ SETTLED_STATES = ("committed", "abandoned")
 
 #: Acquisition priority tiers, most urgent first. Check products decide whether
 #: a scan can start at all, mandatory-integration products gate Core
-#: integration, and everything else is optional enrichment or rendering.
+#: integration, and everything else is optional enrichment.
 TIER_CHECK = 0
 TIER_MANDATORY = 1
 TIER_OPTIONAL = 2
@@ -111,7 +85,7 @@ class IngestResources:
         """Effective listing lookback, never wider than raw-input retention.
 
         Listing past retention only downloads inputs that maintenance retires
-        as soon as they render. Catalog validation rejects such a lookback; the
+        before they can be processed. Catalog validation rejects such a lookback; the
         clamp also protects resources built with explicit overrides.
         """
         return min(self.lookback_hours * 60, self.retention_minutes)
@@ -315,7 +289,7 @@ class IngestService:
 
     def __init__(self, *, base_dir, run_id, registry, dependencies, resources=None,
                  io=None, stop_event=None, clock=None, wall_clock=None, wait=None,
-                 lister=None, acquirer=None, auxiliary=None, startup_latest_only=True, render_consumer=True):
+                 lister=None, acquirer=None, auxiliary=None, startup_latest_only=True):
         from common.ingest.inventory import InputInventory
 
         self.base_dir = Path(base_dir).resolve()
@@ -333,7 +307,7 @@ class IngestService:
         self._auxiliary = auxiliary
         self.inventory = InputInventory(
             self.base_dir, fingerprint=dependencies.fingerprint, run_id=run_id,
-            render_consumer=render_consumer)
+            )
 
         self.ledger = AcquisitionLedger(capacity=self.resources.pending_max_jobs,
                                          clock=self._clock,
@@ -354,11 +328,10 @@ class IngestService:
         self._outstanding = 0
         self._outstanding_optional = 0
         self._committed_scans: dict[str, set[datetime]] = {}
-        self._notified: set[str] = set()
         self._reasons: list[str] = []
         self._metrics = {"polls": 0, "discovered": 0, "committed": 0, "duplicates": 0,
                          "listing_overruns": 0, "coalesced_ticks": 0, "expired_scans": 0,
-                         "retired_inputs": 0, "render_notifications": 0}
+                         "retired_inputs": 0}
         self._last_successful_activity = None
         self._last_reconcile: float | None = None
         self._maintenance_pending = False
@@ -792,7 +765,7 @@ class IngestService:
         """Candidate RAP analysis hours and GLM scan times, in that order.
 
         Neither auxiliary source is scheduled from a Core cursor, and neither
-        one can delay a discovery tick or an MRMS render event: they run on a
+        one can delay a discovery tick or Core readiness: they run on a
         separate bounded pool.
         """
         targets = []
@@ -843,7 +816,7 @@ class IngestService:
             from common.ingest.synoptic.main import acquire_rap_input
 
             return (asyncio.run(acquire_rap_input(job.target)),)
-        from util.runtime.goes import acquire_glm_inputs_for_scan
+        from util.runtime.glm import acquire_glm_inputs_for_scan
 
         return acquire_glm_inputs_for_scan(job.target)
 
@@ -943,10 +916,6 @@ class IngestService:
     def _publish_completion(self, item):
         completed = item.completed
         record = self.inventory.commit_input(completed)
-        if record.key not in self._notified:
-            self.inventory.handoff.publish_render_ready(record.key)
-            self._notified.add(record.key)
-            self._metrics["render_notifications"] += 1
         self._metrics["committed"] += 1
         self._index_committed(record.key, completed.record)
         self._info(
@@ -1011,11 +980,8 @@ class IngestService:
         outcome = self.inventory.reconcile()
         if any(outcome.values()):
             self._info(
-                f"reconciled durable state: adopted={len(outcome['adopted'])} "
-                f"republished={len(outcome['published'])} pending={len(outcome['pending'])}")
+                f"reconciled durable state: adopted={len(outcome['adopted'])}")
         with self._index_lock:
-            self._notified = {record.key
-                              for record in self.inventory.handoff.records("render-ready")}
             for record in self.inventory.handoff.records("input"):
                 staged = record._input
                 if staged is not None and staged.family == "mrms":
@@ -1158,7 +1124,6 @@ class IngestService:
             "polls": self._metrics["polls"],
             "discovered_objects": self._metrics["discovered"],
             "committed_inputs": self._metrics["committed"],
-            "render_notifications": self._metrics["render_notifications"],
             "duplicate_discoveries": self._metrics["duplicates"],
             "listing_overruns": self._metrics["listing_overruns"],
             "coalesced_ticks": self._metrics["coalesced_ticks"],
@@ -1205,7 +1170,6 @@ class IngestService:
             "phase": self._phase,
             "polls": self._metrics["polls"],
             "committed": self._metrics["committed"],
-            "notifications": self._metrics["render_notifications"],
             "duplicates": self._metrics["duplicates"],
             "last_poll_at": self._last_poll_at,
             "last_successful_activity": self._last_successful_activity,

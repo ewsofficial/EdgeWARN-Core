@@ -28,13 +28,11 @@ CLI_MODULES = [
     "edgewarn_cli/main.py",
     "edgewarn_cli/run.py",
     "edgewarn_cli/configure.py",
-    "edgewarn_cli/nws_zones.py",
     "edgewarn_cli/migrate_mrms.py",
     "util/cli.py",
     "util/io.py",
     "common/ingest/nexrad/main.py",
     "common/ingest/nexrad/pipeline/__init__.py",
-    "common/ingest/nws/zone_sync.py",
     # Decomposition Phase 6: the optional all-services supervisor owns its
     # routing parser (no scientific imports).
     "run_all.py",
@@ -86,7 +84,7 @@ def test_path_attribute_count_and_uniqueness():
     catalog entries onto one baseline token.
     """
     attributes = _path_attributes()
-    assert len(attributes) == 111
+    assert len(attributes) == 46
 
     values = [str(value) for value in attributes.values()]
     assert len(values) == len(set(values))

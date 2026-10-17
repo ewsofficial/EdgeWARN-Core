@@ -35,7 +35,6 @@ mrms:
 # GOES source defaults. Keep product names and channel catalog matched to NOAA.
 goes:
   bucket: noaa-goes19
-  abi_product: ABI-L1b-RadC
   glm_product: GLM-L2-LCFA
   glm_outdir: GOES_GLM_DIR
   # Retention cap per channel; increase only when history is explicitly required.
@@ -48,22 +47,3 @@ goes:
   cleanup_max_age_minutes: 60
   # NOAA object layout template; do not alter for normal deployments.
   bucket_path_pattern: '{product}/{YYYY}/{DDD}/{HH}/'
-  filename_matcher_template: '(?:_|-)M\d{channel_id}_' # config.py get_abi_radc_channel_specs()
-  # ABI channel catalog; IDs, names, and output directories are downstream contracts.
-  abi_channels:
-    - {id: C01, name: visible_blue,     outdir: GOES_ABI_VISIBLE_BLUE_DIR}
-    - {id: C02, name: visible_red,      outdir: GOES_ABI_VISIBLE_RED_DIR}
-    - {id: C03, name: veggie,           outdir: GOES_ABI_VEGGIE_DIR}
-    - {id: C04, name: cirrus,           outdir: GOES_ABI_CIRRUS_DIR}
-    - {id: C05, name: snow_ice,         outdir: GOES_ABI_SNOW_ICE_DIR}
-    - {id: C06, name: particle_size,    outdir: GOES_ABI_PARTICLE_SIZE_DIR}
-    - {id: C07, name: shortwave_ir,     outdir: GOES_ABI_SHORTWAVE_IR_DIR}
-    - {id: C08, name: upper_level_wv,   outdir: GOES_ABI_UPPER_LEVEL_WV_DIR}
-    - {id: C09, name: mid_level_wv,     outdir: GOES_ABI_MID_LEVEL_WV_DIR}
-    - {id: C10, name: lower_level_wv,   outdir: GOES_ABI_LOWER_LEVEL_WV_DIR}
-    - {id: C11, name: cld_top_phase,    outdir: GOES_ABI_CLD_TOP_PHASE_DIR}
-    - {id: C12, name: ozone,            outdir: GOES_ABI_OZONE_DIR}
-    - {id: C13, name: clean_lwir,       outdir: GOES_ABI_CLEAN_LWIR_DIR}
-    - {id: C14, name: longwave_ir,      outdir: GOES_ABI_LONGWAVE_IR_DIR}
-    - {id: C15, name: dirty_lwir,       outdir: GOES_ABI_DIRTY_LWIR_DIR}
-    - {id: C16, name: co2_lwir,         outdir: GOES_ABI_CO2_LWIR_DIR}
