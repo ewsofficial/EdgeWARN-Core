@@ -84,6 +84,14 @@ class TestDockerfileContract:
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX signal contract")
+def test_dockerfile_bundles_required_nws_zones():
+    text = _dockerfile_text()
+    assert "sync-nws-zones --apply" in text
+    assert "zones.json" in text, "build must fail when no zone assets are produced"
+    assert "COPY --from=nws-zones /opt/edgewarn/nws-zones" in text
+    assert 'EDGEWARN_BUNDLED_NWS_ZONES_DIR="/opt/edgewarn/nws-zones"' in text
+
+
 def test_entrypoint_forwards_term_and_drains_logger(tmp_path):
     """Exercise the PID-tracking wrapper without building the full image."""
     bin_dir = tmp_path / "bin"

@@ -23,9 +23,9 @@ def legacy_contract():
 RETIRED_GOES_KEYS = ('abi_product', 'filename_matcher_template', 'abi_channels')
 # The retired renderer's name is spelled out only here so the retirement inventory guard stays clean.
 RETIRED_SERVICE = 'ew' + 'mrs'
-RETIRED_RUN_KEYS = ('disable_nws', 'disable_metar', 'disable_wpc')
-RETIRED_BACKGROUND_KEYS = ('metar_boundary_minutes', 'boundary_wait_interval_seconds', 'nws_seconds',
-                           'nws_interval_seconds', 'wpc_boundary_minutes', 'boundary_wait_interval_seconds')
+RETIRED_RUN_KEYS = ('disable_metar', 'disable_wpc')
+RETIRED_BACKGROUND_KEYS = ('metar_boundary_minutes', 'boundary_wait_interval_seconds',
+                           'wpc_boundary_minutes')
 RETIRED_API_KEYS = ('render_defaults', 'product_catalog')
 NEXRAD_GUI_KEYS = ('retention_minutes', 'poll_interval_seconds', 'poll_interval_min_seconds', 'max_workers')
 

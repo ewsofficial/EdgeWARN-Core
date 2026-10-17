@@ -57,6 +57,50 @@
       "action": null
     }
   },
+  "edgewarn_cli/nws_zones.py": {
+    "--assets-dir": {
+      "default": null,
+      "action": null
+    },
+    "--zone-types": {
+      "default": null,
+      "action": null
+    },
+    "--timeout-seconds": {
+      "default": null,
+      "action": null
+    },
+    "--max-retries": {
+      "default": null,
+      "action": null
+    },
+    "--max-workers": {
+      "default": null,
+      "action": null
+    },
+    "--pause-seconds": {
+      "default": null,
+      "action": null
+    },
+    "--progress": {
+      "default": null,
+      "action": {
+        "@repr": "<not a literal>"
+      }
+    },
+    "--apply": {
+      "default": false,
+      "action": "store_true"
+    },
+    "--report-path": {
+      "default": null,
+      "action": null
+    },
+    "--config-path": {
+      "default": null,
+      "action": null
+    }
+  },
   "edgewarn_cli/migrate_mrms.py": {
     "--config-path": {
       "default": null,
@@ -177,6 +221,12 @@
       "action": {
         "@repr": "<not a literal>"
       }
+    },
+    "--disable-nws": {
+      "default": null,
+      "action": {
+        "@repr": "<not a literal>"
+      }
     }
   },
   "util/io.py": {
@@ -245,6 +295,50 @@
       "action": null
     },
     "--max-candidate-volumes-per-site": {
+      "default": null,
+      "action": null
+    },
+    "--config-dir": {
+      "default": null,
+      "action": null
+    }
+  },
+  "common/ingest/nws/zone_sync.py": {
+    "--assets-dir": {
+      "default": null,
+      "action": null
+    },
+    "--zone-types": {
+      "default": null,
+      "action": null
+    },
+    "--timeout-seconds": {
+      "default": null,
+      "action": null
+    },
+    "--max-retries": {
+      "default": null,
+      "action": null
+    },
+    "--max-workers": {
+      "default": null,
+      "action": null
+    },
+    "--pause-seconds": {
+      "default": null,
+      "action": null
+    },
+    "--progress": {
+      "default": null,
+      "action": {
+        "@repr": "<not a literal>"
+      }
+    },
+    "--apply": {
+      "default": false,
+      "action": "store_true"
+    },
+    "--report-path": {
       "default": null,
       "action": null
     },

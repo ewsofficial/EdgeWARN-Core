@@ -60,7 +60,7 @@ Outside Docker, start the API with `npm run api`. It defaults to port 5000.
 
 ## Configuration and storage
 
-Deploy all 13 YAML catalogs and their schemas together. Changes require restart.
+Deploy all 14 YAML catalogs and their schemas together. Changes require restart.
 
 ```bash
 edgewarn configure runtime.ingest.disk_budget_mb 8192

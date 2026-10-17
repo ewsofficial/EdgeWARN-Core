@@ -13,6 +13,7 @@ from util.io import IOManager, TimestampedOutput
 from util.release import get_release_version
 from util.runtime.handoff import ServiceLock
 from util.runtime.ingest_service import IngestResources, IngestService
+from util.runtime.nws_loop import NwsAlertLoop
 from util.runtime.services import (
     ServiceHeartbeat,
     run_heartbeat_loop,
@@ -41,6 +42,7 @@ def _parse_args(argv=None):
     )
     run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
     for flag, key in (("disable_glm", "run.disable_glm"),
+                      ("disable_nws", "run.disable_nws"),
                       ("disable_ctam", "run.disable_ctam"),
                       ("disable_stormprob", "run.disable_stormprob"),
                       ("mrms_core_only", "run.mrms_core_only"),
@@ -108,6 +110,18 @@ def main():
         print("[Ingest] MRMS-core-only: RAP and scan-time GLM acquisition disabled.")
     if args.disable_glm:
         print("[Ingest] GOES/GLM acquisition disabled via --disable-glm")
+    if args.mrms_core_only:
+        args.disable_nws = True
+    if args.disable_nws:
+        print("[Ingest] NWS alert fetching disabled.")
+    else:
+        # Zone geometry is a hard startup requirement while alerts are enabled.
+        try:
+            NwsAlertLoop.preflight()
+        except Exception as exc:
+            print(f"[Ingest] {exc} Run `edgewarn sync-nws-zones --apply`, "
+                  "or pass --disable-nws.")
+            sys.exit(1)
 
     run_id = uuid.uuid4().hex
     lock = ServiceLock(args.base_dir, SERVICE_NAME)
@@ -131,6 +145,8 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, _request_stop)
 
+    nws_loop = None if args.disable_nws else NwsAlertLoop(stop_event=stop_event)
+
     heartbeat_destination = str(services_dir(args.base_dir) / f"{SERVICE_NAME}.json")
 
     def refresh_heartbeat():
@@ -142,7 +158,11 @@ def main():
             updated_at=datetime.now(timezone.utc), phase=status["phase"],
             last_successful_activity=status["last_successful_activity"],
             version=get_release_version(),
-            degraded_children=() if status["publisher_alive"] else ("ingest-publisher",),
+            degraded_children=tuple(
+                name for name, alive in (
+                    ("ingest-publisher", status["publisher_alive"]),
+                    ("nws-alerts", nws_loop is None or nws_loop.healthy()),
+                ) if not alive),
         ), heartbeat_destination)
 
     heartbeat_stop = threading.Event()
@@ -153,10 +173,14 @@ def main():
     )
     heartbeat_thread.start()
 
+    if nws_loop is not None:
+        nws_loop.start()
     try:
         service.run()
     finally:
         stop_event.set()
+        if nws_loop is not None:
+            nws_loop.join(timeout=HEARTBEAT_MIN_INTERVAL_SECONDS + 1.0)
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=HEARTBEAT_MIN_INTERVAL_SECONDS + 1.0)
         try:

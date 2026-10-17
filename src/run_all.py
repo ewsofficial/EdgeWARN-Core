@@ -57,6 +57,7 @@ _ROUTING = {
     "--disable-tracking": ("edgewarn",),
     "--disable-polygon-expansion": ("edgewarn",),
     "--disable-glm": ("ingest", "edgewarn"),
+    "--disable-nws": ("ingest",),
     "--refl-threshold": ("edgewarn",),
     "--min-seed-percentage": ("edgewarn",),
     "--drop-offset": ("edgewarn",),
@@ -148,7 +149,7 @@ def _parse_args(argv=None):
     parser.add_argument("--lon_limits", nargs=2, type=float, default=None)
     for flag in (
         "disable-ctam", "disable-stormprob", "disable-ctam-modules", "disable-tracking", "disable-polygon-expansion",
-        "disable-glm",
+        "disable-glm", "disable-nws",
         "disable-nexrad",
     ):
         parser.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None)

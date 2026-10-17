@@ -28,6 +28,7 @@ run:
   ctam_module_dir: ctam_modules
 
   disable_glm: false
+  disable_nws: false
   disable_nexrad: false
   mrms_core_only: false
 
@@ -48,6 +49,8 @@ supervisor:
 
 # Background-loop cadence; shorter intervals increase CPU and upstream request load.
 background_intervals:
+  nws_seconds: 60
+  nws_interval_seconds: 1.0
   nexrad_seconds: 5
   nexrad_interval_seconds: 0.2
 cycle:

@@ -31,6 +31,24 @@ never replaces inventory-owned observations. `--disable-glm` disables lightning;
 `--mrms-core-only` disables RAP and GLM. Both choices must agree in ingest/Core.
 ABI imagery acquisition is removed.
 
+## NWS alerts
+
+Ingest runs a background thread (`util/runtime/nws_loop.py`) that downloads the
+active-alert feed from `nws.active_alerts_url` every
+`background_intervals.nws_seconds` (default 60). It runs beside, never inside,
+the MRMS/RAP/GLM polling path, so a slow or failing weather.gov request cannot
+delay acquisition or readiness. Blocklisted events are dropped, UGC zones are
+mapped to geometry, and a deduplicated registry is reconciled against the active
+ID set. Registry and snapshots are under `<BASE_DIR>/data/Alerts/official/`.
+`nws.registry_ttl_hours` defaults to 6 hours for timestamp snapshots and alerts
+not seen recently. Expired alerts and alerts absent from a successful active-feed
+response are still removed earlier.
+
+Zone assets are an operator prerequisite: run `edgewarn sync-nws-zones --apply`
+first. Without them ingest refuses to start (exit 1) unless NWS fetching is disabled.
+`--disable-nws` (`run.disable_nws`) turns the loop off, and
+`--mrms-core-only` disables it too. Core matching reads the published registry.
+
 ## Durable handoff and retention
 
 `InputInventory.commit_input()` persists validated identity, exact source path,

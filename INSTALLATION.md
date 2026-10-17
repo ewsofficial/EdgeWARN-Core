@@ -12,7 +12,7 @@ edgewarn --version
 ```
 
 `environment.yml` owns Python dependencies; `package.json` and the lockfile own
-Node dependencies. Deploy the entire 13-file `config/` tree with its schemas.
+Node dependencies. Deploy the entire 14-file `config/` tree with its schemas.
 The wheel also includes a configuration snapshot under `share/edgewarn`.
 For operator settings, copy the tree to `/etc/edgewarn/config` and use
 `--config-path` with the package command, or `--config-dir` with direct services.
@@ -58,7 +58,8 @@ python run_all.py --services ingest,edgewarn,nexrad
 These are separate processes. The supervisor forwards shutdown signals and
 reaps complete process groups. Core consumes immutable local readiness;
 NEXRAD runs acquisition and rendering children independently.
-`--disable-glm` disables Core lightning acquisition. `--mrms-core-only` selects
+`--disable-glm` disables Core lightning acquisition. `--disable-nws` disables the
+background NWS alert loop in ingest. `--mrms-core-only` selects
 MRMS detection/integration and CTAM while disabling RAP, GLM, and NEXRAD.
 `--disable-stormprob` leaves external CTAM available; `--disable-ctam` disables
 all CTAM execution. Boolean switches support their `--no-*` forms.
@@ -88,6 +89,14 @@ configuration, models, and the Node API. The container entrypoint starts the
 API (port 5000; `EDGEWARN_API_PORT` changes the host port) beside `edgewarn run`
 when `EDGEWARN_WITH_API=1`, which the image and compose set by default. If either
 process exits the container stops. Set `EDGEWARN_WITH_API=0` for processing only.
+
+NWS zone geometry is a hard requirement of the image. The build runs
+`edgewarn sync-nws-zones --apply` into `/opt/edgewarn/nws-zones`
+(`EDGEWARN_BUNDLED_NWS_ZONES_DIR`) and fails if weather.gov is unreachable or no
+zones are produced, so building needs network access. At start, ingest
+exits 1 unless zone assets are found, either bundled or under the configured
+`nws.zone_sync.assets_dir`; `--disable-nws` and `--mrms-core-only` skip the check. Rebuild the image to
+refresh the snapshot.
 
 ## API deployment
 

@@ -247,6 +247,7 @@
         "disable_polygon_expansion",
         "ctam_module_dir",
         "disable_glm",
+        "disable_nws",
         "disable_nexrad",
         "mrms_core_only"
       ],
@@ -291,6 +292,9 @@
           "pattern": "^[^\\x00-\\x1f]+$"
         },
         "disable_glm": {
+          "type": "boolean"
+        },
+        "disable_nws": {
           "type": "boolean"
         },
         "disable_nexrad": {
@@ -389,10 +393,20 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "nws_seconds",
+        "nws_interval_seconds",
         "nexrad_seconds",
         "nexrad_interval_seconds"
       ],
       "properties": {
+        "nws_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "nws_interval_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "nexrad_seconds": {
           "type": "number",
           "minimum": 0

@@ -22,6 +22,15 @@ RUN conda env create --file environment.yml \
     && conda clean --all --yes \
     && rm -rf /tmp/edgewarn-build /tmp/edgewarn-wheel
 
+# NWS zone geometry is a hard requirement for alert processing: the build fails
+# when the download fails or yields no zones, and ingest refuses to start without
+# them (run_ingest.py). Built beside the other stages from the installed
+# package so the sync uses the same code and catalog as the running service.
+FROM runtime-build AS nws-zones
+RUN /opt/conda/envs/EdgeWARN/bin/edgewarn sync-nws-zones --apply --no-progress \
+        --config-path /etc/edgewarn/config --assets-dir /opt/edgewarn/nws-zones \
+    && test -n "$(find /opt/edgewarn/nws-zones -name zones.json -print -quit)"
+
 # The Node API shares the processing image but is started as its own service
 # (see compose.yaml); only production dependencies and API sources are bundled.
 FROM node:22-bookworm-slim AS api-build
@@ -37,6 +46,7 @@ FROM continuumio/miniconda3:25.3.1-1
 
 COPY --from=runtime-build /opt/conda/envs/EdgeWARN /opt/conda/envs/EdgeWARN
 COPY --from=runtime-build /etc/edgewarn/config /etc/edgewarn/config
+COPY --from=nws-zones /opt/edgewarn/nws-zones /opt/edgewarn/nws-zones
 COPY --from=api-build /usr/local/bin/node /usr/local/bin/node
 COPY --from=api-build /opt/edgewarn/api /opt/edgewarn/api
 
@@ -50,6 +60,7 @@ COPY --chmod=0755 docker/edgewarn-entrypoint.sh /usr/local/bin/edgewarn-entrypoi
 ENV PATH="/opt/conda/envs/EdgeWARN/bin:${PATH}" \
     EDGEWARN_BASE_DIR="/var/lib/edgewarn" \
     EDGEWARN_CONFIG_DIR="/etc/edgewarn/config" \
+    EDGEWARN_BUNDLED_NWS_ZONES_DIR="/opt/edgewarn/nws-zones" \
     EDGEWARN_WITH_API=1 \
     PYTHONUNBUFFERED=1 \
     EDGEWARN_LOG_DIR="/var/log/edgewarn"

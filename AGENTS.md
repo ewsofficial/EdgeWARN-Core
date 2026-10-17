@@ -9,7 +9,7 @@ files before editing; the closest guide takes precedence.
 
 Four deployable surfaces:
 
-- Ingest (Python): MRMS/RAP/scan-time GLM acquisition, validated inventory,
+- Ingest (Python): MRMS/RAP/scan-time GLM acquisition, a background NWS alert loop, validated inventory,
   immutable Core readiness, and reference-aware retention.
 - Core (Python): detection, tracking/lineage, multi-source enrichment, CTAM,
   StormProb, alerts, and filesystem API publication.
@@ -62,8 +62,8 @@ legacy and retired render/RAP/WPC/METAR routes return RFC 9457 404 responses.
 
 ## Configuration and filesystem
 
-The 13 catalogs are api, api_index, detection, filesystem, historical, ingest,
-integration, kalman, lineage, nexrad, runtime, scheduler, synoptic_rap. Each has
+The 14 catalogs are api, api_index, detection, filesystem, historical, ingest,
+integration, kalman, lineage, nexrad, nws, runtime, scheduler, synoptic_rap. Each has
 a schema in config/schema/. Deploy the complete tree and restart after edits.
 Both runtimes use these catalogs and supported overlays; avoid hard-coded defaults.
 

@@ -37,9 +37,9 @@ def add_retired_fields(docs):
                 abi_channels=[{'id': 'C01', 'name': 'visible_blue', 'outdir': 'GOES_ABI_VISIBLE_BLUE_DIR'}])
     run = docs['runtime']['run']
     run['disable_goes'] = run.pop('disable_glm')
-    run.update({f'disable_{RETIRED}': False, 'disable_nws': False, 'disable_metar': False, 'disable_wpc': False})
+    run.update({f'disable_{RETIRED}': False, 'disable_metar': False, 'disable_wpc': False})
     docs['runtime']['goes_coordination'] = {'poll_seconds': 60}
-    docs['runtime']['background_intervals'].update(metar_boundary_minutes=5, nws_seconds=120, **{f'{RETIRED}_consumer_seconds': 10})
+    docs['runtime']['background_intervals'].update(metar_boundary_minutes=5, **{f'{RETIRED}_consumer_seconds': 10})
     docs['runtime']['consumers'][f'{RETIRED}_notification_seconds'] = 1.0
     api = docs['api']
     api['server']['enabled_services'] = ['ingest', 'edgewarn', RETIRED, 'nexrad']

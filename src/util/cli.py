@@ -26,6 +26,7 @@ def build_service_parser(service, *, add_help=True):
         add_base_directory_flags(parser)
         parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=None)
         parser.add_argument("--disable-glm", action=argparse.BooleanOptionalAction, default=None)
+        parser.add_argument("--disable-nws", action=argparse.BooleanOptionalAction, default=None, help="Disable background NWS alert fetching (default: from runtime.yaml)")
         add_stormprob_dependency_flags(parser)
         add_mrms_core_only_flag(parser)
     elif service == "edgewarn":
@@ -104,7 +105,7 @@ def add_mrms_core_only_flag(parser):
         default=None,
         help=(
             "Run only MRMS detection, MRMS feature integration, and CTAM; "
-            "disable GLM, RAP, and NEXRAD. "
+            "disable GLM, RAP, NEXRAD, and NWS alert fetching. "
             "(default: from runtime.yaml)"
         ),
     )

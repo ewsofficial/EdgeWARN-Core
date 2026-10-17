@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "nws.yaml",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "nws", "geomapper", "zone_sync"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "nws": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registry_ttl_hours", "dropped_events", "active_alerts_url", "download_chunk_size_bytes", "tornado_upgrade"],
+      "properties": {
+        "registry_ttl_hours": { "type": "number", "exclusiveMinimum": 0 },
+        "dropped_events": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "active_alerts_url": { "type": "string", "pattern": "^https://" },
+        "download_chunk_size_bytes": { "type": "integer", "exclusiveMinimum": 0 },
+        "tornado_upgrade": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event", "rules"],
+          "properties": {
+            "event": { "type": "string" },
+            "rules": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["description_contains", "name"],
+                "properties": {
+                  "description_contains": { "type": "string", "pattern": "^[^a-z]+$" },
+                  "name": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "geomapper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["geometry_precision", "simplify_tolerance", "junk_keys"],
+      "properties": {
+        "geometry_precision": { "type": "integer", "minimum": 0 },
+        "simplify_tolerance": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
+        "junk_keys": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+      }
+    },
+    "zone_sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assets_dir", "zone_types", "timeout_seconds", "max_retries", "max_workers", "retry_backoff_seconds", "geometry_precision", "geometry_precision_max", "pause_seconds", "progress", "zone_catalog_url_pattern", "zone_detail_url_pattern"],
+      "properties": {
+        "assets_dir": { "type": "string" },
+        "zone_types": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "timeout_seconds": { "type": "integer", "exclusiveMinimum": 0 },
+        "max_retries": { "type": "integer", "minimum": 1 },
+        "max_workers": { "type": "integer", "minimum": 1 },
+        "retry_backoff_seconds": { "type": "number", "minimum": 0 },
+        "geometry_precision": { "type": "integer", "minimum": 0 },
+        "geometry_precision_max": { "type": "integer", "exclusiveMinimum": 0 },
+        "pause_seconds": { "type": "number", "minimum": 0 },
+        "progress": { "type": "boolean" },
+        "zone_catalog_url_pattern": { "type": "string", "pattern": "^https://" },
+        "zone_detail_url_pattern": { "type": "string", "pattern": "^https://" }
+      }
+    }
+  }
+}

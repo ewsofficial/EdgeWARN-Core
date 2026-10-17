@@ -66,6 +66,7 @@ CONFIG_NAMES: tuple[str, ...] = (
     "ingest",
     "nexrad",
     "synoptic_rap",
+    "nws",
     "api",
     "kalman",
 )

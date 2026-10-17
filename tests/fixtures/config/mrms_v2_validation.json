@@ -835,6 +835,84 @@
         "ZDR": "ZDR"
       }
     },
+    "nws": {
+      "schema_version": 1,
+      "nws": {
+        "registry_ttl_hours": 2.0,
+        "dropped_events": [
+          "Administrative Message",
+          "Freezing Spray Advisory",
+          "Low Water Advisory",
+          "High Surf Advisory",
+          "Small Craft Advisory",
+          "Brisk Wind Advisory",
+          "Practice/Demo Warning",
+          "Required Weekly Test",
+          "Required Monthly Test",
+          "Test Message",
+          "Hurricane Local Statement",
+          "Flood Statement",
+          "Flash Flood Statement",
+          "Rip Current Statement",
+          "Lakeshore Flood Statement",
+          "Hydrologic Outlook",
+          "Air Quality Alert",
+          "Air Stagnation Advisory",
+          "Beach Hazards Statement"
+        ],
+        "active_alerts_url": "https://api.weather.gov/alerts/active",
+        "download_chunk_size_bytes": 8192,
+        "tornado_upgrade": {
+          "event": "Tornado Warning",
+          "rules": [
+            {
+              "description_contains": "TORNADO EMERGENCY",
+              "name": "Tornado Emergency"
+            },
+            {
+              "description_contains": "PARTICULARLY DANGEROUS SITUATION",
+              "name": "PDS Tornado Warning"
+            }
+          ]
+        }
+      },
+      "geomapper": {
+        "geometry_precision": 4,
+        "simplify_tolerance": 0.01,
+        "junk_keys": [
+          "references",
+          "sender",
+          "parameters",
+          "instruction",
+          "response",
+          "scope",
+          "code",
+          "language",
+          "web",
+          "eventCode"
+        ]
+      },
+      "zone_sync": {
+        "assets_dir": "assets/nws_zones",
+        "zone_types": [
+          "forecast",
+          "fire",
+          "public",
+          "county",
+          "marine"
+        ],
+        "timeout_seconds": 30,
+        "max_retries": 3,
+        "max_workers": 16,
+        "retry_backoff_seconds": 0.25,
+        "geometry_precision": 5,
+        "geometry_precision_max": 8,
+        "pause_seconds": 0.05,
+        "progress": true,
+        "zone_catalog_url_pattern": "https://api.weather.gov/zones/{zone_type}",
+        "zone_detail_url_pattern": "https://api.weather.gov/zones/{zone_type}/{code}"
+      }
+    },
     "runtime": {
       "schema_version": 1,
       "logging": {
@@ -862,7 +940,8 @@
         "ctam_module_dir": "ctam_modules",
         "disable_glm": false,
         "disable_nexrad": false,
-        "mrms_core_only": false
+        "mrms_core_only": false,
+        "disable_nws": false
       },
       "supervisor": {
         "check_ticks": 30,
@@ -883,6 +962,8 @@
         }
       },
       "background_intervals": {
+        "nws_seconds": 60,
+        "nws_interval_seconds": 1.0,
         "nexrad_seconds": 5,
         "nexrad_interval_seconds": 0.2
       },

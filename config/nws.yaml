@@ -1,0 +1,84 @@
+# NWS ingest and geometry defaults. Filtering and simplification affect downstream alert matching.
+
+schema_version: 1
+
+# NWS alert ingest. Event filtering affects both alert storage and cell matching.
+nws:
+  # Retention for alerts not seen recently and timestamp snapshots; polling cadence is separate.
+  registry_ttl_hours: 6.0
+
+  # Intentionally ignored events; review before removing entries because volume can rise sharply.
+  dropped_events:
+    - Administrative Message
+    - Freezing Spray Advisory
+    - Low Water Advisory
+    - High Surf Advisory
+    - Small Craft Advisory
+    - Brisk Wind Advisory
+    - Practice/Demo Warning
+    - Required Weekly Test
+    - Required Monthly Test
+    - Test Message
+    - Hurricane Local Statement
+    - Flood Statement
+    - Flash Flood Statement
+    - Rip Current Statement
+    - Lakeshore Flood Statement
+    - Hydrologic Outlook
+    - Air Quality Alert
+    - Air Stagnation Advisory
+    - Beach Hazards Statement
+
+  active_alerts_url: https://api.weather.gov/alerts/active
+
+  download_chunk_size_bytes: 8192
+
+  # Text-based severity upgrades; phrases must match official alert wording.
+  tornado_upgrade:
+    event: Tornado Warning
+    rules:
+      - {description_contains: TORNADO EMERGENCY,               name: Tornado Emergency}
+      - {description_contains: PARTICULARLY DANGEROUS SITUATION, name: PDS Tornado Warning}
+
+# Geometry simplification balances size against intersection accuracy.
+geomapper:
+  geometry_precision: 4
+
+  # Do not raise without validating alert-to-cell matching near boundaries.
+  simplify_tolerance: 0.01
+
+  junk_keys:
+    - references
+    - sender
+    - parameters
+    - instruction
+    - response
+    - scope
+    - code
+    - language
+    - web
+    - eventCode
+
+
+# Zone-asset downloader. Concurrency is capped to be respectful of weather.gov.
+zone_sync:
+  assets_dir: assets/nws_zones
+
+  zone_types: [forecast, fire, public, county, marine]
+  timeout_seconds: 30
+  max_retries: 3
+  max_workers: 16
+
+  retry_backoff_seconds: 0.25
+
+  geometry_precision: 5
+  # Safety ceiling for downloaded geometry precision; avoid raising without storage review.
+  geometry_precision_max: 8
+
+  pause_seconds: 0.05
+
+  progress: true
+
+
+  zone_catalog_url_pattern: 'https://api.weather.gov/zones/{zone_type}'
+  zone_detail_url_pattern: 'https://api.weather.gov/zones/{zone_type}/{code}'

@@ -10,6 +10,7 @@
     "--disable-ctam",
     "--disable-glm",
     "--disable-nexrad",
+    "--disable-nws",
     "--disable-polygon-expansion",
     "--disable-stormprob",
     "--disable-tracking",

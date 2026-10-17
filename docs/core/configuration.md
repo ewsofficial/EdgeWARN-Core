@@ -1,6 +1,6 @@
 # Configuration ownership
 
-The Python and Node loaders validate the same 13 catalogs and schemas:
+The Python and Node loaders validate the same 14 catalogs and schemas:
 
 | Catalog | Owner |
 | --- | --- |
@@ -13,6 +13,7 @@ The Python and Node loaders validate the same 13 catalogs and schemas:
 | scheduler | Discovery/check cadence and listing window |
 | api_index | Core publication and retention |
 | ingest | MRMS registry, bounded acquisition, scan-time GLM |
+| nws | NWS active-alert fetching, geometry mapping, and zone-asset sync |
 | nexrad | Level-II acquisition, selection, render cadence, retention, display mapping |
 | synoptic_rap | RAP acquisition and source validation |
 | api | HTTP security, gates, limits, caching, pagination, radar products |

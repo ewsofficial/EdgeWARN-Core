@@ -227,6 +227,7 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         disable_tracking=None,
         disable_polygon_expansion=None,
         disable_glm=None,
+        disable_nws=None,
         refl_threshold=None,
         min_seed_percentage=None,
         drop_offset=None,

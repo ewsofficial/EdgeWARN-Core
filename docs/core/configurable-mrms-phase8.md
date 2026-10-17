@@ -11,7 +11,7 @@ edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime --r
 edgewarn migrate-mrms --config-path /etc/edgewarn/config --base-dir /runtime --rollback
 ```
 
-Settings owned by retired products (GOES ABI channels, GOES/NWS/METAR/WPC
+Settings owned by retired products (GOES ABI channels, GOES/METAR/WPC
 switches and coordination, retired API render/product-catalog sections and the
 retired renderer's service entry) are discarded during conversion, and
 `disable_goes` becomes `disable_glm`. NEXRAD render cadence is carried over from
