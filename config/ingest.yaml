@@ -4,7 +4,7 @@ schema_version: 2
 mrms:
   decompress_chunk_size_bytes: 1048576
   remove_old_files: true
-  cleanup_max_age_minutes: 60
+  cleanup_max_age_minutes: 10
   products:
   - MRMS_EchoTop_18_00.50
   - MRMS_EchoTop_30_00.50

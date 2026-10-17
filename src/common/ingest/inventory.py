@@ -187,7 +187,9 @@ class InputInventory:
     def cleanup(self, *, before, protected_products=(), family_before=None):
         """Delete only completed unreferenced inputs older than the rediscovery window.
 
-        Keep each requested product's latest observation for previous history.
+        Always keep each product's newest observation, so a lone file is only
+        retired once a newer one exists, and each requested product's latest
+        for previous history.
         Family-specific cutoffs preserve slower analyses across radar scans.
         Compact inventory alongside deletion only after Core and worker
         pins have released their references. No operational directory
@@ -196,10 +198,13 @@ class InputInventory:
         with input_lock(self.base_dir):
             records = self.handoff.records('input')
             references = self._references()
-            for product in protected_products:
-                candidates = [r for r in records if r.data['input']['product'] == product]
-                if candidates:
-                    references.add(max(candidates, key=lambda r: utc(r.data['input']['analysis_time'])).key)
+            newest = {}
+            for record in records:
+                product = record.data['input']['product']
+                held = newest.get(product)
+                if held is None or utc(record.data['input']['analysis_time']) > utc(held.data['input']['analysis_time']):
+                    newest[product] = record
+            references.update(record.key for record in newest.values())
             removed = []
             for record in records:
                 cutoff = (family_before or {}).get(record.data['input']['family'], before)

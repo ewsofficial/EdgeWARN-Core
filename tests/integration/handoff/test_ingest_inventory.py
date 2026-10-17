@@ -230,6 +230,7 @@ def test_expiry_terminal_and_core_consumption_are_durable(inventory, dependencie
 
 def test_retention_protects_pins_and_shared_replay_lock(inventory, monkeypatch):
     item = add(inventory)
+    add(inventory, 'A', T + timedelta(minutes=2))
     h = inventory.handoff
     h.pin('history', [item.input_id])
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
@@ -254,6 +255,8 @@ def test_retention_protects_pins_and_shared_replay_lock(inventory, monkeypatch):
 def test_pending_core_phase_protects_inputs(inventory, dependencies):
     items = checks(inventory)
     inventory.publish_scan(T, dependencies, at=T)
+    for product in ('A', 'B', 'ProbSevere'):
+        add(inventory, product, T + timedelta(minutes=2))
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     inventory.handoff.disposition('core-state', canonical_cycle_id(T), status='success')
@@ -266,6 +269,7 @@ def test_pending_core_phase_protects_inputs(inventory, dependencies):
 
 def test_restart_finishes_interrupted_retention(inventory, monkeypatch):
     item = add(inventory)
+    add(inventory, 'A', T + timedelta(minutes=2))
     original = type(item.record.local_path).unlink
     def crash(path, *args, **kwargs):
         if path == item.record.local_path:
@@ -404,6 +408,15 @@ def test_protected_history_and_rap_pin_yield_to_active_references(inventory):
     assert newer.record.local_path.exists()
 
 
+def test_newest_input_survives_until_a_newer_one_exists(inventory):
+    only = add(inventory, 'A', T - timedelta(hours=5))
+    assert inventory.cleanup(before=T) == ()
+    assert only.record.local_path.exists()
+    newer = add(inventory, 'A', T - timedelta(hours=4))
+    assert inventory.cleanup(before=T) == (only.input_id,)
+    assert newer.record.local_path.exists()
+
+
 def test_file_verification_cache_invalidates_on_same_size_replacement(inventory):
     item = add(inventory)
     inventory.valid_inputs()
@@ -420,6 +433,8 @@ def test_active_core_keeps_phase_inputs_after_scan_expiry(inventory, dependencie
     assert set(active.data['input_ids']) == {item.input_id for item in items}
     inventory.handoff.disposition('terminal', key, status='expired', reason='Missing I')
     inventory.handoff.release_pin('core-history')
+    for product in ('A', 'B', 'ProbSevere'):
+        add(inventory, product, T + timedelta(minutes=2))
     assert inventory.cleanup(before=T + timedelta(days=1)) == ()
     inventory.handoff.disposition('core-state', key, status='abandoned', reason='Worker stopped')
     assert set(inventory.cleanup(before=T + timedelta(days=1))) == {item.input_id for item in items}
@@ -466,6 +481,10 @@ def test_reused_rap_is_pinned_by_two_active_scans(tmp_path, dependencies):
     inventory.cleanup(before=T + timedelta(days=1))
     assert path.exists()
     inventory.handoff.disposition('core-state', canonical_cycle_id(T + timedelta(minutes=2)), status='success')
+    newer_path = tmp_path / 'data/rap/RAP.20260930-13z.awp130pgrbf00.grib2'
+    newer_path.write_bytes(b'rap2')
+    inventory.commit_input(CommittedInput(StagedInput('RAP', str(newer_path), T + timedelta(hours=1), 'synoptic', 'rap'),
+                                          hashlib.sha256(b'rap2').hexdigest(), str(newer_path)))
     assert rap.input_id in inventory.cleanup(before=T + timedelta(days=1))
     assert not path.exists()
 

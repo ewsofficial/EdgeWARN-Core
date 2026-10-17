@@ -22,7 +22,7 @@
     "retry_max_seconds": 30,
     "scan_deadline_seconds": 180,
     "reconcile_interval_seconds": 10,
-    "retention_minutes": 60,
+    "retention_minutes": 10,
     "disk_budget_mb": 8192,
     "shutdown_timeout_seconds": 30
   },

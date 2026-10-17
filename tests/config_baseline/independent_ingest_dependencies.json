@@ -88,7 +88,7 @@
   "rap_enabled": true,
   "glm_enabled": true,
   "optional_timeout_seconds": 30,
-  "registry_fingerprint": "dc72b066e1a5aab80d9513c56b4a6f3541cbb060bb383e505c0b77a02587c82f",
+  "registry_fingerprint": "1d1cd4d57628428558927b62b043401a87948d4c938dc09c8cff9a259433d25c",
   "auxiliary_settings_json": "{\"glm\":{\"bucket\":\"noaa-goes19\",\"bucket_path_pattern\":\"{product}/{YYYY}/{DDD}/{HH}/\",\"glm_outdir\":\"GOES_GLM_DIR\",\"glm_product\":\"GLM-L2-LCFA\",\"hour_lookback\":3,\"max_entries\":96},\"rap\":{\"bucket\":\"noaa-rap-pds\",\"date_format\":\"%Y%m%d\",\"dir_pattern\":\"rap.{date}\",\"file_pattern\":\"rap.t{hour:02d}z.awp130pgrbf00.grib2\",\"filename_regex\":\"^RAP\\\\.(?P<date>\\\\d{8})-(?P<hour>\\\\d{2})z\\\\.awp130pgrbf00\\\\.grib2$\",\"local_file_pattern\":\"RAP.{date}-{hour:02d}z.awp130pgrbf00.grib2\",\"lookback_step_hours\":1,\"max_age_minutes\":180,\"max_files\":3,\"nomads_base_url\":\"https://nomads.ncep.noaa.gov/pub/data/nccf/com/rap/prod\",\"nomads_chunk_size_bytes\":1048576,\"nomads_timeout_seconds\":120}}",
   "final_snapshot": "pinned-integration-plus-terminal-optional-and-history",
   "history_policy": "latest-valid-strictly-earlier-if-available",

@@ -413,7 +413,7 @@ def test_scheduler_lookback_and_perf_gate_have_no_literals():
 
     recorded = _scheduler_yaml()["scheduler"]
     assert modifier_lookup_max_entries() == recorded["modifier_lookup_max_entries"] == 20
-    # Bounded by the 60-minute raw-input retention (catalog invariant).
+    # Bounded by the catalog raw-input retention (catalog invariant).
     assert s3_lookback_hours() == recorded["s3_lookback_hours"] == 1
     assert slow_check_log_threshold_ms() == recorded["slow_check_log_threshold_ms"] == 2000
 
@@ -1544,14 +1544,14 @@ def test_goes_cleanup_retention_is_catalog_owned():
 
 
 def test_mrms_and_goes_cleanup_windows_stay_separate_keys():
-    """Both are 60 today and must remain two keys.
+    """MRMS is 10 and GOES is 60 today and must remain two keys.
 
     GOES cleanup additionally enforces `max_files_per_spec`, so the two windows
     bound different retention policies; collapsing them would tie a count cap to
     an age cap that has no reason to move with it.
     """
     catalog = _ingest_yaml()
-    assert catalog["mrms"]["cleanup_max_age_minutes"] == 60
+    assert catalog["mrms"]["cleanup_max_age_minutes"] == 10
     assert catalog["goes"]["cleanup_max_age_minutes"] == 60
     assert "max_files_per_spec" in catalog["goes"]
 

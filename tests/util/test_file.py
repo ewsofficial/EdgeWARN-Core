@@ -206,6 +206,22 @@ class TestCleanOldFiles:
         assert files[3].exists()
         assert files[4].exists()
 
+    def test_lone_expired_file_is_kept_until_a_newer_one_exists(self, tmp_path):
+        fs._define_paths(tmp_path)
+        old = tmp_path / "old.txt"
+        old.write_text("a")
+        stamp = (datetime.now() - timedelta(hours=5)).timestamp()
+        os.utime(old, (stamp, stamp))
+
+        fs.clean_old_files(tmp_path, max_age_minutes=10, max_files=None)
+        assert old.exists()
+
+        newer = tmp_path / "newer.txt"
+        newer.write_text("b")
+        fs.clean_old_files(tmp_path, max_age_minutes=10, max_files=None)
+        assert not old.exists()
+        assert newer.exists()
+
     def test_keeps_all_files_when_under_limit(self, tmp_path):
         """Test that all files are kept when under limit"""
         fs._define_paths(tmp_path)

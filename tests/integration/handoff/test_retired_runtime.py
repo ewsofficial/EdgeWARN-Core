@@ -48,6 +48,11 @@ def test_inventory_has_only_core_readiness_and_preserves_pins(tmp_path):
     legacy.write_bytes(b'operator artifact')
     assert inventory.cleanup(before=stamp + timedelta(days=1)) == ()
     inventory.handoff.release_pin('core:test')
+    newer = tmp_path / 'data/MRMS_Test_20260101-000200.grib2'
+    newer.write_bytes(b'validated2')
+    inventory.commit_input(CommittedInput(
+        StagedInput('Test', str(newer), stamp + timedelta(minutes=2), 's3', 'mrms'),
+        hashlib.sha256(newer.read_bytes()).hexdigest(), 's3://test'))
     assert inventory.cleanup(before=stamp + timedelta(days=1)) == (committed.key,)
     assert not raw.exists()
     assert legacy.read_bytes() == b'operator artifact'

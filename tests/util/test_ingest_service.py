@@ -66,12 +66,10 @@ class TestIngestResources:
         assert second == min(resolved.retry_max_seconds, resolved.retry_initial_seconds * 2)
         assert resolved.retry_delay(99) == resolved.retry_max_seconds
 
-    def test_listing_window_never_exceeds_raw_input_retention(self):
-        """test-run-1001 listed 2 h but retained 60 min, so files were retired on arrival."""
+    def test_listing_window_is_independent_of_raw_input_retention(self):
         resolved = IngestResources.resolve()
-        assert resolved.listing_window_minutes <= resolved.retention_minutes
-        wide = resolved.with_overrides(lookback_hours=3, retention_minutes=60)
-        assert wide.listing_window_minutes == 60
+        wide = resolved.with_overrides(lookback_hours=3, retention_minutes=10)
+        assert wide.listing_window_minutes == 180
         narrow = resolved.with_overrides(lookback_hours=0.5, retention_minutes=60)
         assert narrow.listing_window_minutes == 30
 

@@ -82,13 +82,8 @@ class IngestResources:
 
     @property
     def listing_window_minutes(self):
-        """Effective listing lookback, never wider than raw-input retention.
-
-        Listing past retention only downloads inputs that maintenance retires
-        before they can be processed. Catalog validation rejects such a lookback; the
-        clamp also protects resources built with explicit overrides.
-        """
-        return min(self.lookback_hours * 60, self.retention_minutes)
+        """Effective listing lookback, independent of raw-input retention."""
+        return self.lookback_hours * 60
 
     @property
     def reserved_slots(self):

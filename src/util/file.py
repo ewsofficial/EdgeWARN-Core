@@ -306,12 +306,20 @@ def clean_old_files(directory: Path, max_age_minutes=None, max_files=_FROM_CATAL
     files_deleted = 0
     kept_files = []
 
+    candidates = []
     for file_path in directory.glob("*"):
         if not file_path.is_file() or file_path.suffix.lower() == ".idx":
             continue
         try:
-            mtime = file_path.stat().st_mtime
-            if mtime < cutoff:
+            candidates.append((file_path, file_path.stat().st_mtime))
+        except Exception as e:
+            _log("write_error", f"Could not process/delete {file_path.name}: {e}")
+    # The newest file is never aged out: a lone file stays until a newer one arrives.
+    newest = max(candidates, key=lambda item: item[1])[0] if candidates else None
+
+    for file_path, mtime in candidates:
+        try:
+            if mtime < cutoff and file_path != newest:
                 file_path.unlink()
                 files_deleted += 1
             else:

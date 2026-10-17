@@ -544,28 +544,3 @@ def test_the_colormap_accessor_hands_back_a_mutable_copy(render):
 # v3 render id == render layer name == legacyFilePrefix. Charset frozen for 3.1.0
 # dynamic ingest/render products (same as RAP layerId charset).
 PRODUCT_SLUG = r"[A-Za-z0-9_.-]+"
-
-
-def test_ingest_listing_lookback_never_exceeds_raw_input_retention():
-    """test-run-1001: a 2 h listing over 60 min retention retired files on arrival."""
-    scheduler = loader.load_config("scheduler")["scheduler"]
-    retention = (loader.load_config("runtime")["ingest"]["retention_minutes"]
-                 or loader.load_config("ingest")["mrms"]["cleanup_max_age_minutes"])
-    assert scheduler["s3_lookback_hours"] * 60 <= retention
-    loader.validate_catalog_invariants()
-
-
-def test_a_lookback_longer_than_retention_is_a_configuration_error(tmp_path):
-    import shutil
-
-    root = tmp_path / "config"
-    shutil.copytree(REPO_ROOT / "config", root)
-    path = root / "scheduler.yaml"
-    path.write_text(path.read_text(encoding="utf-8").replace(
-        "s3_lookback_hours: 1", "s3_lookback_hours: 2"), encoding="utf-8")
-    loader.reset_cache()
-    try:
-        with pytest.raises(loader.ConfigError, match="s3_lookback_hours"):
-            loader.validate_all_configs(config_dir=root)
-    finally:
-        loader.reset_cache()

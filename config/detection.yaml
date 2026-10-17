@@ -9,7 +9,7 @@ detection:
   min_seed_percentage: 0.001
   # Coupled with gatemapper thresholds; do not tune independently.
   drop_offset: 10.0
-  stormcell_cleanup_max_age_minutes: 120
+  stormcell_cleanup_max_age_minutes: 360
   fallback_dt_seconds: 120.0
 
   tracking_disabled_defaults:
