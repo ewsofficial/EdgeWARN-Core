@@ -313,21 +313,20 @@ def test_inactive_cell_age_is_a_separate_owner_from_alert_cleanup_age():
     """RESOLVED: two 120s, two owners, and only one of them is in a catalog.
 
     One expires cells from the API index; the other prunes alert files. They are
-    equal today, which is exactly why a single key would look correct right up to
-    the first time one subsystem needs a different budget. CTAM alert extraction is
-    deferred, so `cleanup_expired` keeps its literal and remains its sole owner --
-    a later phase moves it, and this test is what stops it being folded into the
-    api_index key on the way.
+    equal historically, which is exactly why a single key would look correct right up
+    to the first time one subsystem needs a different budget. `cleanup_expired` now
+    resolves nws.edgewarn_alert_retention_minutes, and this test stops it being
+    folded into the api_index key.
     """
     from EdgeWARN.api_integration.config import inactive_cell_max_age_minutes
 
     recorded = _api_index_yaml()["api_index"]["inactive_cell_max_age_minutes"]
-    assert inactive_cell_max_age_minutes() == recorded == 120
+    assert inactive_cell_max_age_minutes() == recorded == 360
 
     assert (
         param_default("EdgeWARN/alerts/manager.py", "AlertManager.cleanup_expired", "max_age_minutes")
-        == 120
-    ), "the alert cleanup budget moved; give it its own key rather than reusing api_index's"
+        is None
+    ), "the alert cleanup budget must resolve nws.edgewarn_alert_retention_minutes"
 
     source = (REPO_ROOT / "src/EdgeWARN/api_integration/index_manager.py").read_text(encoding="utf-8")
     assert "120 * 60" not in source

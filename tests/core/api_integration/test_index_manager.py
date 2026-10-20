@@ -199,3 +199,17 @@ def test_database_projection_cleanup_deletes_orphaned_cell_files(index_manager, 
     index_manager.remove_old_cells = True
     index_manager.publish_cycle_indexes("20261007-180000", [])
     assert not orphan.exists()
+
+
+def test_stormcell_index_lists_snapshot_files_the_database_pruned(index_manager, mock_fs, monkeypatch):
+    """StormProb prunes cycle rows on a shorter budget than snapshot-file retention."""
+    storm_dir = mock_fs / "stormcell"
+    (storm_dir / "stormcells_20230101-120000.json").touch()
+    (storm_dir / "stormcells_20230101-120500.json").touch()
+    monkeypatch.setattr(index_manager, "_load_database_projection", lambda: (["20230101-120500"], {}))
+
+    index_manager.initialize_indexes()
+    index_manager.publish_cycle_indexes("20230101-120500", [])
+
+    data = json.loads((storm_dir / "stormcell_index.json").read_text())
+    assert data["timestamps"] == ["20230101-120000", "20230101-120500"]

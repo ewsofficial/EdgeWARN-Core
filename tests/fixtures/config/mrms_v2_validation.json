@@ -839,6 +839,7 @@
       "schema_version": 1,
       "nws": {
         "registry_ttl_hours": 2.0,
+        "edgewarn_alert_retention_minutes": 120,
         "dropped_events": [
           "Administrative Message",
           "Freezing Spray Advisory",

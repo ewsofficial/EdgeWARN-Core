@@ -13,7 +13,7 @@ api_index:
     historical: false
 
   # Keep aligned with storm-cell retention unless historical behavior is intentionally different.
-  inactive_cell_max_age_minutes: 120
+  inactive_cell_max_age_minutes: 360
 
   # Prune StormProb history sooner than compatibility cell files.
   stormprob_inactive_cell_max_age_minutes: 20

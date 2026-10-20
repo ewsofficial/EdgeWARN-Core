@@ -34,6 +34,14 @@ class APIIndexManager:
         self.cleanup_seconds = 0.0
         self.index_write_seconds = 0.0
 
+    @staticmethod
+    def _stormcell_file_timestamps() -> set:
+        """Timestamps of the stormcell snapshot files currently on disk."""
+        return {
+            path.stem.removeprefix("stormcells_")
+            for path in fs.STORMCELL_DIR.glob("stormcells_*.json")
+        }
+
     def _load_database_projection(self):
         """Return one immutable database snapshot for this index update."""
         if self._database_projection_loaded:
@@ -79,11 +87,9 @@ class APIIndexManager:
         
         timestamps = []
         projection = self._load_database_projection()
+        timestamps = self._stormcell_file_timestamps()
         if projection is not None:
-            timestamps, _ = projection
-        else:
-            timestamps = [file.stem.removeprefix("stormcells_") for file in
-                          sorted(fs.STORMCELL_DIR.glob("stormcells_*.json"))]
+            timestamps |= set(projection[0])
 
         self.stormcell_timestamps = set(timestamps)
         self._stormcell_initial_scan_done = True
@@ -227,17 +233,16 @@ class APIIndexManager:
         fs.CELL_DIR.mkdir(parents=True, exist_ok=True)
         projection = self._load_database_projection()
         if projection is None:
-            self.stormcell_timestamps = {
-                path.stem.removeprefix("stormcells_")
-                for path in fs.STORMCELL_DIR.glob("stormcells_*.json")
-            }
+            self.stormcell_timestamps = self._stormcell_file_timestamps()
             self.cell_timestamps = {
                 path.stem: path.stat().st_mtime
                 for path in fs.CELL_DIR.glob("*.json") if path.stem != "cell_index"
             }
         else:
             timestamps, cell_timestamps = projection
-            self.stormcell_timestamps = set(timestamps)
+            # StormProb prunes cycle rows after its own, shorter budget; the
+            # snapshot files on disk are the retention source of truth.
+            self.stormcell_timestamps = self._stormcell_file_timestamps() | set(timestamps)
             self.cell_timestamps = dict(cell_timestamps)
             # SQLite pruning may already have removed an inactive cell from
             # its projection. Include orphan files in the age-based cleanup.

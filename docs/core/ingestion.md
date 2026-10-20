@@ -43,6 +43,8 @@ ID set. Registry and snapshots are under `<BASE_DIR>/data/Alerts/official/`.
 `nws.registry_ttl_hours` defaults to 6 hours for timestamp snapshots and alerts
 not seen recently. Expired alerts and alerts absent from a successful active-feed
 response are still removed earlier.
+`nws.edgewarn_alert_retention_minutes` (default 360) bounds EdgeWARN-generated
+alert files and timestamp snapshots under `<BASE_DIR>/data/Alerts/EdgeWARN/`.
 
 Zone assets are an operator prerequisite: run `edgewarn sync-nws-zones --apply`
 first. Without them ingest refuses to start (exit 1) unless NWS fetching is disabled.

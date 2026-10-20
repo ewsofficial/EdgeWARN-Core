@@ -20,6 +20,11 @@ def registry_ttl_hours() -> float:
     return _section("nws")["registry_ttl_hours"]
 
 
+def edgewarn_alert_retention_minutes() -> int:
+    """Age after which EdgeWARN alert files and timestamp snapshots are deleted."""
+    return _section("nws")["edgewarn_alert_retention_minutes"]
+
+
 def dropped_events() -> frozenset[str]:
     """Event names discarded on ingest.
 

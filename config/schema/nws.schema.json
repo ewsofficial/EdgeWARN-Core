@@ -9,9 +9,10 @@
     "nws": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["registry_ttl_hours", "dropped_events", "active_alerts_url", "download_chunk_size_bytes", "tornado_upgrade"],
+      "required": ["registry_ttl_hours", "edgewarn_alert_retention_minutes", "dropped_events", "active_alerts_url", "download_chunk_size_bytes", "tornado_upgrade"],
       "properties": {
         "registry_ttl_hours": { "type": "number", "exclusiveMinimum": 0 },
+        "edgewarn_alert_retention_minutes": { "type": "integer", "minimum": 1 },
         "dropped_events": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "active_alerts_url": { "type": "string", "pattern": "^https://" },
         "download_chunk_size_bytes": { "type": "integer", "exclusiveMinimum": 0 },
