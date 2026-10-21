@@ -18,7 +18,11 @@ be stalled despite live PIDs; radar routes retain service gates.
 
 Use a shared umask and group permissions so the API can read atomic outputs.
 Set `EDGEWARN_BASE_DIR`, `EDGEWARN_CONFIG_DIR`, browser origins, and trusted proxy
-IPs explicitly. Keep configuration read-only during operation. Restart after
+IPs explicitly. Write `TRUST_PROXY_IPS` as plain addresses or IPv4 CIDR (for
+example `10.0.0.0/8`). An IPv6 trust subnet must not mask to `::`: startup
+rejects `::ffff:10.0.0.0/8` because it would trust every client, so write
+`::ffff:10.0.0.0/104` or plain IPv4 notation instead. Keep configuration
+read-only during operation. Restart after
 configuration changes. Supervisors forward signals, bound termination, and
 reap process groups; service managers should allow at least the configured
 shutdown bound before force-killing.

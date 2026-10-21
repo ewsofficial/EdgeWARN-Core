@@ -67,9 +67,71 @@ function parseOrigins(value) {
   return Object.freeze([...new Set(origins)]);
 }
 
+// proxy-addr masks a configured trust subnet to its prefix. A subnet whose
+// masked network is all-zero therefore matches every peer: `::ffff:10.0.0.0/8`
+// (the correct spelling is /104) and `::/1` both compile to `::`. Express then
+// believes any client's X-Forwarded-For, which defeats rate limiting and audit
+// logging. Fail at startup instead of silently trusting the internet as a proxy.
+function ipv6Words(address) {
+  let text = address.toLowerCase();
+  if (!/^[0-9a-f:.]+$/.test(text)) return null;
+  let embedded = [];
+  if (text.includes('.')) {
+    const lastColon = text.lastIndexOf(':');
+    if (lastColon === -1) return null; // plain IPv4 is handled by proxy-addr
+    const octets = text.slice(lastColon + 1).split('.').map(Number);
+    if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return null;
+    embedded = [(octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]];
+    text = `${text.slice(0, lastColon + 1)}0:0`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const parse = (part) => (part ? part.split(':') : []);
+  const before = parse(halves[0]);
+  const after = halves.length === 2 ? parse(halves[1]) : [];
+  const missing = 8 - before.length - after.length;
+  if (halves.length === 2 && missing < 1) return null;
+  const groups = halves.length === 2
+    ? [...before, ...Array(missing).fill('0'), ...after]
+    : [...before, ...after];
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+  const words = groups.map((group) => parseInt(group, 16));
+  if (embedded.length) {
+    words[6] = embedded[0];
+    words[7] = embedded[1];
+  }
+  return words;
+}
+
+function networkIsZero(words, prefix) {
+  return words.every((word, index) => {
+    const bits = Math.min(16, Math.max(0, prefix - index * 16));
+    const mask = bits === 0 ? 0 : (0xffff << (16 - bits)) & 0xffff;
+    return (word & mask) === 0;
+  });
+}
+
+function validateTrustSubnet(entry) {
+  if (typeof entry !== 'string' || !entry.includes(':') || !entry.includes('/')) return;
+  const [address, prefixText, ...rest] = entry.split('/');
+  if (rest.length) throw new Error(`Invalid TRUST_PROXY subnet: ${entry}`);
+  const prefix = prefixText === '' ? 128 : Number(prefixText);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 128) throw new Error(`Invalid TRUST_PROXY subnet: ${entry}`);
+  const words = ipv6Words(address);
+  if (words && prefix < 128 && networkIsZero(words, prefix)) {
+    throw new Error(`Invalid TRUST_PROXY subnet ${entry}: it masks to :: and would trust every client; use plain IPv4 notation (for example 10.0.0.0/8) or a specific IPv6 subnet`);
+  }
+}
+
+function validateTrustEntries(entries) {
+  for (const entry of entries) validateTrustSubnet(entry);
+  return entries;
+}
+
 export function parseTrustProxy(value, env = {}) {
   if (value === false || value === undefined || value === '') return false;
-  if (Number.isInteger(value) || Array.isArray(value)) return value;
+  if (Number.isInteger(value)) return value;
+  if (Array.isArray(value)) return validateTrustEntries(value);
   if (value === true || typeof value === 'string') {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : 'true';
     if (normalized === '' || normalized === 'false') return false;
@@ -82,7 +144,7 @@ export function parseTrustProxy(value, env = {}) {
       if (Number.isSafeInteger(hops) && hops >= 0 && hops <= 8) return hops;
       throw new Error('Invalid TRUST_PROXY hop count');
     }
-    return Object.freeze(value.split(',').map((entry) => entry.trim()).filter(Boolean));
+    return Object.freeze(validateTrustEntries(value.split(',').map((entry) => entry.trim()).filter(Boolean)));
   }
   throw new Error('Invalid TRUST_PROXY');
 }

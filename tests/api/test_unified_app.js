@@ -42,14 +42,11 @@ describe('unified API app', () => {
     expect(root.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains');
     await request(app).get('/robots.txt').expect(200).expect('Content-Type', /text\/plain/);
     const live = await request(app).get('/health/live').expect(200);
-    expect(live.body.config).toMatchObject({
-      source: { schemaVersion: 1 },
-      overrides: ['EDGEWARN_BASE_DIR', 'RATE_LIMIT_MAX_SEC', 'RATE_LIMIT_MAX_MIN'],
-      restartRequired: true,
-      effective: { baseDir, radarProductCount: 7 },
-    });
+    expect(live.body).toEqual({ status: 'ok', requestId: expect.any(String) });
+    expect(JSON.stringify(live.body)).not.toContain(baseDir);
     const ready = await request(app).get('/health/ready').expect(503);
-    expect(ready.body.config).toEqual(live.body.config);
+    expect(ready.body).not.toHaveProperty('config');
+    expect(JSON.stringify(ready.body)).not.toContain(baseDir);
     const cells = await request(app).get('/api/v3/cells').expect(200);
     expect(cells.body.data).toEqual(['4']);
     expect(cells.body.meta.requestId).toBeUndefined();

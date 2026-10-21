@@ -38,7 +38,7 @@ export async function createApp(options = {}) {
   app.use(...securityMiddleware(config.api.security), createCors(config.allowedOrigins, config.api.security.cors), ...createRateLimiters(config.rateLimits), requestTimeout(config.requestTimeoutMs));
   app.get('/', (req, res) => res.json({ service: 'EdgeWARN Unified API', version: exposedVersion, links: { api: '/api/v3', openapi: '/api/v3/openapi.json' } }));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send("# No clankers\nUser-agent: *\nDisallow: /\n"));
-  app.get('/health/live', (req, res) => res.json({ status: 'ok', requestId: req.requestId, config: config.diagnostics }));
+  app.get('/health/live', (req, res) => res.json({ status: 'ok', requestId: req.requestId }));
   app.get('/health/ready', async (req, res, next) => {
     try {
     const checks = await Promise.all([config.dataDir, config.guiDir].map(async (dir) => { try { return (await fs.stat(dir)).isDirectory(); } catch { return false; } }));
@@ -48,7 +48,6 @@ export async function createApp(options = {}) {
     res.status(ready ? 200 : 503).json({
       status: ready ? 'ready' : 'not-ready',
       requestId: req.requestId,
-      config: config.diagnostics,
       services,
     });
     } catch (error) { next(error); }
