@@ -2,7 +2,7 @@ services:
   edgewarn:
     build:
       context: .
-    image: edgewarn-core:3.0.2
+    image: edgewarn-core:3.1.0
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-m", "util.runtime.healthcheck"]
@@ -38,7 +38,7 @@ services:
     stop_grace_period: 25s
 
   edgewarn-configure:
-    image: edgewarn-core:3.0.2
+    image: edgewarn-core:3.1.0
     profiles: ["admin"]
     entrypoint: ["edgewarn"]
     command: ["configure", "--config-path", "/etc/edgewarn/config"]

@@ -35,7 +35,7 @@ def make_beat(service="nexrad", **overrides):
         run_id="run-abc",
         updated_at=datetime(2026, 8, 23, 12, 0, 0, tzinfo=timezone.utc),
         phase="idle",
-        version="3.0.2",
+        version="3.1.0",
     )
     values.update(overrides)
     return ServiceHeartbeat(**values)
