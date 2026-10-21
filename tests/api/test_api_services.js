@@ -42,6 +42,20 @@ describe('unified API services', () => {
     await expect(service.getCell('../7')).rejects.toMatchObject({ code: 'INVALID_PATH' });
   });
 
+  it('lists storm snapshots newest first, degrading to empty when the index is absent', async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
+    const service = createAnalysisService(new ArtifactRepository({ data: path.join(root, 'data') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT));
+    // Missing index degrades to an empty collection rather than a NOT_FOUND error.
+    const empty = await service.listStormSnapshots();
+    expect(empty).toEqual([]);
+    // Descending by the YYYYMMDD-HHMMSS key (the index builds ascending); 'reverse' is derived.
+    await fs.mkdir(path.join(root, 'data', 'stormcells'), { recursive: true });
+    await fs.writeFile(path.join(root, 'data', 'stormcells', 'stormcell_index.json'),
+      JSON.stringify({ timestamps: ['20260317-200000', '20260318-000000', '20260319-120000'], lastUpdated: '2026-03-19T00:00:00Z' }));
+    const listed = await service.listStormSnapshots();
+    expect(listed).toEqual(['20260319-120000', '20260318-000000', '20260317-200000']);
+  });
+
   
 
   

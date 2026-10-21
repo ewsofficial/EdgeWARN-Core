@@ -17,7 +17,14 @@ export function createAnalysisService(repository) {
       return repository.readJson('data', ['cells', `${cellId}.json`]);
     },
     async listStormSnapshots() {
-      try { return (await repository.readJson('data', ['stormcells', 'stormcell_index.json'])).timestamps || []; } catch (error) { if (error.code === 'NOT_FOUND') return []; throw error; }
+      try {
+        const fromIndex = (await repository.readJson('data', ['stormcells', 'stormcell_index.json'])).timestamps || [];
+        // Descending by the YYYYMMDD-HHMMSS index key, matching alert-snapshots ordering
+        // (the index builds it ascending). slice copies so the index stays the source of truth.
+        return fromIndex.slice().sort().reverse();
+      } catch (error) {
+        if (error.code === 'NOT_FOUND') return []; throw error;
+      }
     },
     async getStormSnapshot(value) {
       if (!timestamp(value)) throw new ArtifactError('INVALID_PATH', 'Invalid timestamp');
