@@ -83,6 +83,13 @@ rm -rf -- "$runtime_root/wpc/surface_analysis" \
 Historical plans and release notes retain retired names; live code, guides,
 configuration, tests, and packaging contain no references to the retired name.
 
+### Fixed
+
+- Fixed a NEXRAD worker-pool recycle race: a volume that grabbed the pool just
+  before `record_volume_and_maybe_recycle` retired it hit `cannot schedule new
+  futures after shutdown` and logged "worker parse failed". Submission now
+  retries on a fresh pool (at most 3 attempts); other errors are unchanged.
+
 ## [3.1.0] 2026-10-05
 
 ### Added

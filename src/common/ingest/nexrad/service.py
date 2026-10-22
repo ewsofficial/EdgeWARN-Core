@@ -172,6 +172,23 @@ def _nexrad_worker_timeout_seconds() -> float:
     # configured value at 1 or more, so the catalog cannot be silently rewritten.
     return max(1.0, float(nexrad_config.worker_timeout_seconds()))
 
+_POOL_SHUTDOWN_SUBMIT_ATTEMPTS = 3
+
+
+def _submit_to_live_pool(pool, **submit_kwargs):
+    # A recycle can retire the pool between get_nexrad_pool() and submit(). Only
+    # that shutdown RuntimeError is retried, on a fresh pool, with a bounded count.
+    for attempt in range(_POOL_SHUTDOWN_SUBMIT_ATTEMPTS):
+        try:
+            return pool, pool.submit(**submit_kwargs)
+        except RuntimeError as exc:
+            if (
+                "cannot schedule new futures after shutdown" not in str(exc)
+                or attempt == _POOL_SHUTDOWN_SUBMIT_ATTEMPTS - 1
+            ):
+                raise
+            pool = get_nexrad_pool()
+
 def _artifact_group_key(artifact: ElevationArtifact) -> str:
     return f"{artifact.elevation}:{','.join(artifact.member_group_names)}"
 
@@ -721,7 +738,8 @@ class NexradIngestService:
             Path(state.file_path).stem + f".snapshot-{uuid.uuid4().hex}.ar2v")
         shutil.copyfile(state.file_path, snapshot_path)
         try:
-            future = pool.submit(
+            pool, future = _submit_to_live_pool(
+                pool,
                 volume_path=str(snapshot_path),
                 output_root=str(output_root),
                 site=site,
