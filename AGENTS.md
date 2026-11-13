@@ -94,7 +94,7 @@ alerts, API publication, CTAM, StormProb, detection, integration, and scheduling
 src/NEXRAD owns radar serialization/rendering. src/util owns shared helpers and
 runtime lifecycle/handoff. Do not reference removed legacy HTTP packages.
 Models live in models/stormprob and are installed as package data files.
-Benchmarks are opt-in; scripts contain diagnostics and qualification tools.
+Scripts contain diagnostics and qualification tools.
 
 ## Development rules
 
@@ -160,8 +160,7 @@ PYTHONPATH=src python -m common.config.validate
 
 `pytest.ini` collects `tests/core`, `tests/architecture`, `tests/integration`,
 `tests/packaging`, `tests/unit`, and `tests/util`; it ignores `tests/api` because
-those are Jest tests and ignores `benchmarks` because performance tests are
-opt-in. Respect `network`, `slow`, and `benchmark` markers and do not make the
+those are Jest tests. Respect `network`, `slow`, and `benchmark` markers and do not make the
 default suite depend on live external services.
 
 Choose the narrowest relevant tests while iterating, then run broader suites in

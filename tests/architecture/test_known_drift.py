@@ -1598,13 +1598,22 @@ def test_no_javascript_file_restates_the_package_version():
     string equal to package.json's is exactly what it must never be. It is
     owned by `api.yaml` as `server.production_version_label` and read at
     src/api/app.js:33, where it replaces the real version under NODE_ENV=production.
+
+    Lines that read the OpenAPI document's `.openapi` dialect field are also
+    exempt: that value is the OpenAPI Specification version (for example
+    `3.1.0`), owned by src/api/openapi/v3.yaml, and only coincidentally equal
+    to a package release.
     """
     import json
+    import re
 
     version = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))["version"]
+    literal = f"'{version}'"
+    dialect_line = re.compile(r"\.openapi\b")
     offenders = []
     for path in list((REPO_ROOT / "src").rglob("*.js")) + list((REPO_ROOT / "tests").rglob("*.js")):
-        if f"'{version}'" in path.read_text(encoding="utf-8"):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if any(literal in line and not dialect_line.search(line) for line in lines):
             offenders.append(str(path.relative_to(REPO_ROOT)))
 
     assert offenders == [], f"version literal restated in {offenders}"
