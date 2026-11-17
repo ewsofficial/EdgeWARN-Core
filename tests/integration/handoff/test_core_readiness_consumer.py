@@ -13,6 +13,7 @@ import hashlib
 import json
 import multiprocessing
 from pathlib import Path
+import time
 
 import pytest
 from common.ingest.mrms.core_contract import resolve_dependencies
@@ -278,7 +279,12 @@ class TestIntegrationWait:
 
         def release_integration():
             # The optional layer arrives only after detection has finished, which
-            # proves detection never waited on it.
+            # proves detection never waited on it. Poll: a fixed delay races
+            # slow runners, and a failed assert here dies in the timer thread.
+            deadline = time.monotonic() + 30
+            while (["detection_manifest", True] not in observations(worker)
+                   and time.monotonic() < deadline):
+                time.sleep(0.02)
             assert ["detection_manifest", True] in observations(worker)
             notify(inventory, commit(inventory, PRECIP_RATE, later))
             publish(inventory, dependencies, optional_started_at=later)
