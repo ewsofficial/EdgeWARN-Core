@@ -1,21 +1,23 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-import asyncio
 import json
 import multiprocessing
 import os
 from pathlib import Path
+import threading
 import time
+import uuid
 
 from common.ingest.manifest import CycleInputManifest
-from common.pipeline.coordinator import run_staged_ingest_cycle
+from common.ingest.replay import protect_runtime_inputs  # noqa: F401  (historical pipeline)
 from EdgeWARN.pipeline import edgewarn_cycle_worker
 from EdgeWARN.process.detect.config import DetectionConfig
+from util.runtime.handoff import canonical_cycle_id
+from util.runtime.ingest_handoff import IngestRecordError
 
 from .config import section
-from .goes import download_glm_for_scan
-from .logging import drain_log_queue, queue_log
+from .logging import drain_log_queue
 from .processes import StartedProcessRegistry
 
 
@@ -327,39 +329,230 @@ class PrimaryCycleConfig:
     config_dir: str | None
     goes_enabled: bool
     mrms_core_only: bool
-    # Phase 2 durable handoff: publish immutable mrms-ready/rap-ready records
-    # beneath <base_dir>/state/realtime/cycles/ for the EWMRS service to
-    # consume. Publication failures never fail a cycle.
+    # Durable ingest v1: Core is a consumer of the immutable readiness records
+    # the ingest service commits beneath <base_dir>/state/realtime/ingest/v1/.
     base_dir: str | None = None
     handoff_enabled: bool = False
+    disable_stormprob: bool = False
+    ctam_discovery: object = None
+    # The frozen producer/consumer agreement. ``dependencies.fingerprint`` is
+    # what every record is validated against, so a configuration change on
+    # either side fails visibly instead of weakening a gate.
+    dependencies: object | None = None
+    ingest_run_id: str | None = None
+    # ``None`` resolves runtime.consumers.core_readiness_seconds, the one-second
+    # local check interval that replaced the old 15-second supervisor wait.
+    readiness_check_seconds: float | None = None
+    max_cycle_seconds: float | None = None
 
 
-def run_primary_cycle_once(
+def readiness_handoff(config: PrimaryCycleConfig):
+    """Bind this Core process to the durable ingest v1 namespace."""
+    from util.runtime.ingest_handoff import IngestHandoff
+
+    if config.base_dir is None or config.dependencies is None:
+        raise ValueError(
+            "Realtime Core requires the independent ingest agreement: no base directory "
+            "or dependency fingerprint was configured"
+        )
+    return IngestHandoff(
+        config.base_dir,
+        fingerprint=config.dependencies.fingerprint,
+        run_id=config.ingest_run_id or uuid.uuid4().hex,
+    )
+
+
+def release_pin_safely(handoff, owner, *, log=print):
+    """Release a Core pin without letting a lock failure change the outcome.
+
+    A failure here must never mask the cycle's own exception or turn a clean
+    cycle into a crash. A pin left behind only delays retention of its inputs;
+    :func:`sweep_core_pins` reclaims it on the next cycle or restart.
+    """
+    try:
+        handoff.release_pin(owner)
+        return True
+    except Exception as exc:
+        log(f"[Readiness] WARNING: could not release pin {owner}; it is left for the "
+            f"next stale-pin sweep: {type(exc).__name__}: {exc}")
+        return False
+
+
+def sweep_core_pins(handoff, *, keep=None, log=print):
+    """Release every Core scan pin except ``keep``'s, tolerating lock failure.
+
+    Core runs one cycle at a time under its single-instance service lock, so a
+    ``core:<scan>`` pin other than the active cycle's belongs to a finished or
+    dead run. Pins are keyed by owner digest, so candidates are derived from
+    the scans the ingest namespace knows about.
+    """
+    try:
+        return handoff.release_stale_pins(
+            prefix="core:", keep=None if keep is None else f"core:{keep}")
+    except Exception as exc:
+        log(f"[Readiness] WARNING: stale Core pin sweep deferred: "
+            f"{type(exc).__name__}: {exc}")
+        return ()
+
+
+def read_ready_phase(handoff, kind, key, dependencies, base_dir, owner):
+    """Return a committed phase, verifying its exact pinned bytes, or ``None``.
+
+    Dependency preflight, exact-selection matching, and byte verification all
+    run before a consumer can act on a record, and the reference is taken under
+    the same lease that retention deletion needs.
+    """
+    from common.pipeline.readiness import validate_phase_dependencies
+
+    record = handoff.read(kind, key)
+    if record is None:
+        return None
+    validate_phase_dependencies(record, dependencies)
+    handoff.pin_phase(owner, record)
+    return record
+
+
+class ReadinessWatcher(threading.Thread):
+    """Install each validated immutable snapshot before releasing its barrier.
+
+    Core never waits on a network producer. This watcher polls the local
+    durable namespace, so a long integration wait costs no analysis retry and a
+    stopped ingest service produces an explicit wait/degraded diagnostic rather
+    than a hung cycle. A terminal scan disposition or an operator shutdown wakes
+    every outstanding barrier with a truthful unavailable state.
+    """
+
+    def __init__(self, *, handoff, key, dependencies, base_dir, shared_state, owner,
+                 interval, stop_event, release, emit_phase, is_worker_alive, io=None, max_wait_seconds=None):
+        super().__init__(name="core-readiness-watcher", daemon=True)
+        self.handoff = handoff
+        self.key = key
+        self.dependencies = dependencies
+        self.base_dir = base_dir
+        self.shared_state = shared_state
+        self.owner = owner
+        self.interval = max(0.05, float(interval))
+        self._stop_event = stop_event
+        self._release = release
+        self._emit_phase = emit_phase
+        self._is_worker_alive = is_worker_alive
+        self._io = io
+        self.installed = {"core-integration-ready": False, "core-final-ready": False}
+        self.reason = ""
+        self.terminal = False
+        self.deadline = time.monotonic() + max_wait_seconds if max_wait_seconds is not None else None
+
+    def run(self):
+        while not self._stop_event.is_set():
+            if all(self.installed.values()):
+                return
+            if not self._is_worker_alive():
+                return
+            self._stop_event.wait(self.interval)
+            if self._stop_event.is_set():
+                break
+            if self.deadline is not None and time.monotonic() >= self.deadline:
+                self.reason = "integration/final readiness deadline exceeded"
+                self._finish_unavailable()
+                return
+            try:
+                self._poll()
+            except IngestRecordError as exc:
+                self._warn(f"readiness snapshot for {self.key} is unusable: {exc}")
+            except Exception as exc:
+                self._warn(f"readiness watcher failed: {type(exc).__name__}: {exc}")
+        self._finish_unavailable()
+
+    def _poll(self):
+        if self.handoff.read("terminal", self.key) is not None:
+            self.reason = "scan has a terminal ingest disposition"
+            self.terminal = True
+            self._finish_unavailable()
+            return
+        if not self.installed["core-integration-ready"]:
+            record = read_ready_phase(self.handoff, "core-integration-ready", self.key,
+                                      self.dependencies, self.base_dir, self.owner)
+            if record is not None:
+                self._install(record, "integration_manifest",
+                             "edgewarn_integration_inputs_ready", "integration")
+                self.installed["core-integration-ready"] = True
+        if not self.installed["core-final-ready"]:
+            record = read_ready_phase(self.handoff, "core-final-ready", self.key,
+                                      self.dependencies, self.base_dir, self.owner)
+            if record is not None:
+                self._install(record, "ctam_manifest", "optional_inputs_complete", "optional")
+                self.installed["core-final-ready"] = True
+
+    def _install(self, record, manifest_key, ready_key, barrier):
+        # The complete immutable snapshot is written before its barrier moves,
+        # so a woken worker can never observe a released event without inputs.
+        self.shared_state[manifest_key] = record.to_manifest().as_dict()
+        self.shared_state[ready_key] = True
+        self._emit_phase(f"{manifest_key}_installed", "ready")
+        self._release(barrier, "ready")
+
+    def _finish_unavailable(self):
+        if not self.installed["core-integration-ready"]:
+            self.shared_state["edgewarn_integration_inputs_ready"] = False
+            self._release("integration", "unavailable")
+        if not self.installed["core-final-ready"]:
+            self.shared_state["optional_inputs_complete"] = False
+            self._release("optional", "failed")
+
+    def _warn(self, message):
+        if self._io is not None:
+            self._io.write_warning(f"[Readiness] {message}")
+        else:
+            print(f"[Readiness] WARN: {message}", flush=True)
+
+
+def run_primary_cycle_once(dt, manager, *, config: PrimaryCycleConfig, stop_event=None):
+    from util.runtime.ingest_handoff import IngestRecordError
+
+    try:
+        return _run_primary_cycle_once(dt, manager, config=config, stop_event=stop_event)
+    except (OSError, IngestRecordError) as exc:
+        release_pin_safely(readiness_handoff(config), f"core:{canonical_cycle_id(dt)}")
+        return _unavailable_outcome(dt, f"Transient readiness failure: {type(exc).__name__}: {exc}")
+
+
+def _run_primary_cycle_once(
     dt,
     manager,
     *,
     config: PrimaryCycleConfig,
+    stop_event=None,
 ):
-    """Run one primary cycle: staged ingest, scan-time GLM, and the EdgeWARN worker.
+    """Run one primary cycle from durable local readiness records.
 
-    Decomposition Phase 4: this is now a primary-only cycle. The EWMRS worker,
-    its readiness events, and the GOES render task queue are gone — EWMRS runs
-    as its own service (``run_ewmrs.py``) and consumes the committed
-    ``mrms-ready``/``rap-ready`` phase records published here.
+    Core performs no source acquisition: the ingest service owns every realtime
+    MRMS, raw RAP, and scan-time GLM download. This function validates the
+    committed start record, spawns exactly one worker, and then waits locally
+    for the integration and final snapshots the ingest service publishes.
+
+    Unlike the retired acquisition path, this cycle does **not** hold the
+    coarse input lease for its whole duration. Every selection and pin takes
+    the same lease briefly and retention honours those pins, so a long
+    integration wait blocks neither maintenance nor another producer while the
+    exact bytes this cycle needs stay protected.
+
+    Historical processing keeps its own explicit staged ingest entry point in
+    ``EdgeWARN.pipeline.historical_pipeline``; only the realtime path here
+    became a pure consumer.
     """
+    from common.pipeline.readiness import validate_phase_dependencies
+
     cycle_settings = section("cycle")
+    max_cycle_seconds = config.max_cycle_seconds if config.max_cycle_seconds is not None else cycle_settings["max_cycle_seconds"]
+    deadline = time.monotonic() + max_cycle_seconds
     log_queue = multiprocessing.Queue()
     shared_state = manager.dict()
 
     detection_ready_event = multiprocessing.Event()
     integration_ready_event = multiprocessing.Event()
-    # No worker waits on render-input readiness anymore (the EWMRS service
-    # consumes durable records), but the transition keeps its own event so the
-    # release/telemetry path stays uniform.
-    render_inputs_ready_event = multiprocessing.Event()
+    optional_complete_event = multiprocessing.Event()
     shared_state.update({
         "detection_inputs_ready": False,
-        "render_mrms_inputs_ready": False,
         "edgewarn_integration_inputs_ready": False,
         "edgewarn_generated_file": "",
         "input_manifest": {},
@@ -370,6 +563,60 @@ def run_primary_cycle_once(
         },
         "errors": {},
     })
+    released_phases: set[str] = set()
+
+    def emit_phase(phase: str, status: str):
+        print(
+            "[PhaseTelemetry] "
+            f"utc={datetime.now(timezone.utc).isoformat()} "
+            f"monotonic={time.perf_counter():.6f} "
+            f"cycle={dt.isoformat()} phase={phase} status={status}",
+            flush=True,
+        )
+
+    def release(event, phase: str, status: str):
+        if phase not in released_phases:
+            emit_phase(phase, status)
+            released_phases.add(phase)
+            event.set()
+
+    if not config.handoff_enabled:
+        return _unavailable_outcome(
+            dt,
+            "Core requires the durable realtime handoff; runtime.handoff.enabled is false",
+        )
+
+    handoff = readiness_handoff(config)
+    key = canonical_cycle_id(dt)
+    owner = f"core:{key}"
+    sweep_core_pins(handoff, keep=key)
+
+    # Freeze the producer generation for the spawned worker, exactly as before.
+    from common.ingest.mrms.config import get_registry
+
+    registry = get_registry()
+    if registry is not None:
+        shared_state["mrms_registry"] = {
+            "base_dir": str(registry.base_dir),
+            "config_dir": str(config.config_dir) if config.config_dir else None,
+            "fingerprint": registry.fingerprint,
+        }
+
+    start = read_ready_phase(handoff, "core-start-ready", key, config.dependencies,
+                             config.base_dir, owner)
+    if start is None:
+        release_pin_safely(handoff, owner)
+        return _unavailable_outcome(
+            dt,
+            "No committed start readiness record for this scan; the local check set is "
+            "not complete",
+        )
+    validate_phase_dependencies(start, config.dependencies)
+    detection_manifest = start.to_manifest()
+    if detection_manifest is None or detection_manifest.validate_alignment():
+        release_pin_safely(handoff, owner)
+        return _unavailable_outcome(
+            dt, "The committed start readiness record failed alignment validation")
 
     # Resolved in the parent so the spawned worker inherits one frozen, already
     # validated object instead of re-reading and re-validating the YAML.
@@ -386,237 +633,138 @@ def run_primary_cycle_once(
             log_queue, shared_state, detection_ready_event, integration_ready_event,
             dt, config.lat_limits, config.lon_limits, detection_config,
             config.profile, config.disable_ctam, config.disable_ctam_modules, config.disable_tracking,
-            config.disable_polygon_expansion, config.mrms_core_only,
+            config.disable_polygon_expansion, config.mrms_core_only, optional_complete_event,
+            config.disable_stormprob, config.ctam_discovery,
         ),
     )
     started_processes = StartedProcessRegistry()
-    released_phases: set[str] = set()
-
-    def emit_phase(phase: str, status: str):
-        """Temporary direct phase telemetry; bypasses delayed queue draining."""
-        print(
-            "[PhaseTelemetry] "
-            f"utc={datetime.now(timezone.utc).isoformat()} "
-            f"monotonic={time.perf_counter():.6f} "
-            f"cycle={dt.isoformat()} phase={phase} status={status}",
-            flush=True,
-        )
-
-    def release(event, phase: str, status: str):
-        if phase not in released_phases:
-            emit_phase(phase, status)
-            released_phases.add(phase)
-        event.set()
-
-    # Durable handoff: publish immutable phase records alongside the in-memory
-    # callbacks below. A failed publication or validation is logged and never
-    # blocks or fails the cycle. Validation deliberately stays primary-owned
-    # (alignment plus exact input existence) so no EWMRS import is needed here;
-    # the consumer re-validates against the configured render layers.
-    publisher = None
-    if config.handoff_enabled and config.base_dir:
-        from util.runtime.handoff import PhaseRecordPublisher
-
-        publisher = PhaseRecordPublisher(config.base_dir)
-
-    def durable_handoff(phase: str, state, ready: bool):
-        if publisher is None or not ready or state.input_manifest is None:
-            return
-        try:
-            committed = publisher.publish(phase, state.input_manifest)
-            if committed is None:
-                return
-            from util.runtime.handoff import read_phase_record, shadow_validate_phase_record
-
-            record = read_phase_record(committed)
-            if record is None:
-                print(
-                    f"[Handoff] {phase} record for {committed.parent.name} "
-                    "could not be re-read after commit"
-                )
-                return
-            problems = shadow_validate_phase_record(record)
-            if problems:
-                print(
-                    f"[Handoff] Validation problems for {phase} "
-                    f"{record.cycle_id}: {list(problems)}"
-                )
-            else:
-                print(f"[Handoff] Published validated {phase} record for {record.cycle_id}")
-        except Exception as exc:
-            print(f"[Handoff] Durable handoff publication failed for {phase}: {exc}")
-
-    def publish(state, event, phase: str):
-        """Write the complete snapshot before waking a worker."""
-        shared_state["detection_inputs_ready"] = state.detection_inputs_ready
-        shared_state["render_mrms_inputs_ready"] = state.ewmrs_mrms_inputs_ready
-        if state.input_manifest is not None:
-            shared_state["input_manifest"] = state.input_manifest.as_dict()
-        shared_state["errors"] = dict(state.errors)
-        ready_key = {
-            "detection_released": "detection_inputs_ready",
-            "render_mrms_released": "render_mrms_inputs_ready",
-        }[phase]
-        if phase == "detection_released":
-            emit_phase(
-                "detection_mrms_validated",
-                "validated" if shared_state[ready_key] else "unavailable",
-            )
-        release(event, phase, "ready" if shared_state[ready_key] else "unavailable")
+    watcher_stop = threading.Event()
+    watcher: ReadinessWatcher | None = None
 
     try:
         started_processes.start(edgewarn_proc, "EdgeWARN")
         emit_phase("edgewarn_worker_started", "started")
+        # Detection begins from the pinned manifest, never a directory's newest
+        # file, and the barrier is released only after the snapshot is installed.
+        shared_state["detection_manifest"] = detection_manifest.as_dict()
+        shared_state["input_manifest"] = detection_manifest.as_dict()
+        shared_state["detection_inputs_ready"] = True
+        emit_phase("detection_mrms_validated", "validated")
+        release(detection_ready_event, "detection_released", "ready")
 
-        async def ingest_and_glm():
-            glm_task = None
-            if config.goes_enabled:
-                glm_task = asyncio.create_task(asyncio.to_thread(download_glm_for_scan, dt))
-            base_ready = False
-            glm_ready = not config.goes_enabled
-            glm_records = ()
+        interval = (config.readiness_check_seconds
+                    if config.readiness_check_seconds is not None
+                    else section("consumers")["core_readiness_seconds"])
+        watcher = ReadinessWatcher(
+            handoff=handoff, key=key, dependencies=config.dependencies,
+            base_dir=config.base_dir, shared_state=shared_state, owner=owner,
+            interval=interval, stop_event=watcher_stop,
+            release=lambda name, status: release(
+                integration_ready_event if name == "integration" else optional_complete_event,
+                "integration_released" if name == "integration" else "optional_complete",
+                status),
+            emit_phase=emit_phase, is_worker_alive=edgewarn_proc.is_alive,
+            max_wait_seconds=min(max_cycle_seconds, section("ingest")["scan_deadline_seconds"] + interval))
+        watcher.start()
 
-            def publish_integration_if_ready():
-                if base_ready and glm_ready:
-                    if glm_records:
-                        base_manifest = CycleInputManifest.from_dict(
-                            shared_state.get("input_manifest")
-                        ) or CycleInputManifest(cycle_time=dt)
-                        shared_state["input_manifest"] = base_manifest.with_inputs(
-                            glm_records
-                        ).as_dict()
-                    shared_state["edgewarn_integration_inputs_ready"] = True
-                    release(integration_ready_event, "integration_released", "ready")
-
-            def base_integration_ready(state):
-                nonlocal base_ready
-                base_ready = state.edgewarn_integration_inputs_ready
-                if state.input_manifest is not None:
-                    shared_state["input_manifest"] = state.input_manifest.as_dict()
-                shared_state["errors"] = dict(state.errors)
-                # rap_inputs_ready is settled before the base-integration
-                # release, so the raw-RAP record can be published here. In
-                # mrms-core-only mode no RAP is staged, and publishing a
-                # "successful" record without its input would poison the
-                # consumer's rap phase forever.
-                durable_handoff(
-                    "rap-ready",
-                    state,
-                    state.rap_inputs_ready and not config.mrms_core_only,
-                )
-                publish_integration_if_ready()
-
-            cycle_task = asyncio.create_task(run_staged_ingest_cycle(
-                dt, lambda msg: queue_log(log_queue, msg),
-                include_goes=False,
-                include_rap=not config.mrms_core_only,
-                on_detection_ready=lambda state: publish(state, detection_ready_event, "detection_released"),
-                on_ewmrs_mrms_ready=lambda state: (
-                    durable_handoff("mrms-ready", state, state.ewmrs_mrms_inputs_ready),
-                    publish(state, render_inputs_ready_event, "render_mrms_released"),
-                ),
-                on_base_integration_ready=base_integration_ready,
-            ))
-            if glm_task is not None:
-                try:
-                    glm_results = tuple(await glm_task)
-                    glm_records = glm_results
-                    glm_manifest = CycleInputManifest(
-                        cycle_time=dt,
-                        inputs=glm_results,
-                    )
-                    glm_errors = glm_manifest.validate_alignment()
-                    glm_ready = bool(glm_results) and not glm_errors
-                    glm_path = glm_results[-1].path if glm_ready else None
-                    queue_log(log_queue, (
-                        f"INFO: Scan-time GLM ingest satisfied by {len(glm_results)} file(s)"
-                        if glm_results else f"INFO: Scan-time GLM ingest found no files for {dt.isoformat()}"
-                    ))
-                    if glm_ready:
-                        queue_log(log_queue, f"INFO: Local GLM readiness satisfied by {glm_path}")
-                    else:
-                        detail = "; ".join(glm_errors) if glm_errors else "no staged file"
-                        queue_log(log_queue, f"INFO: No valid pinned GLM input for {dt.isoformat()}: {detail}")
-                except Exception as exc:
-                    queue_log(log_queue, f"WARN: Scan-time GLM ingest failed for {dt.isoformat()}: {exc}")
-                    glm_ready = False
-                publish_integration_if_ready()
-            else:
-                queue_log(log_queue, "INFO: GOES/GLM components disabled; EdgeWARN integration will not wait for GLM inputs")
-            return await cycle_task, glm_ready
-
-        cycle_state, glm_ready = asyncio.run(ingest_and_glm())
-    except Exception as exc:
-        print(f"[Scheduler] Primary ingest cycle failed for {dt}: {exc}")
-        cycle_state = None
-        glm_ready = False
-
-    edgewarn_integration_ready = bool(
-        cycle_state
-        and cycle_state.detection_inputs_ready
-        and cycle_state.mrms_integration_inputs_ready
-        and (cycle_state.rap_inputs_ready or config.mrms_core_only)
-        and (glm_ready or not config.goes_enabled)
-    )
-    shared_state["edgewarn_integration_inputs_ready"] = edgewarn_integration_ready
-    errors = dict(shared_state.get("errors", {}))
-    if not edgewarn_integration_ready:
-        errors.setdefault("edgewarn_integration_ingest", "EdgeWARN integration inputs unavailable")
-    shared_state["errors"] = errors
-    # Failure paths may have occurred before a coordinator callback.  Release
-    # every waiter after the terminal false state has been written.
-    release(detection_ready_event, "detection_released", "ready" if shared_state["detection_inputs_ready"] else "unavailable")
-    release(render_inputs_ready_event, "render_mrms_released", "ready" if shared_state["render_mrms_inputs_ready"] else "unavailable")
-    release(integration_ready_event, "integration_released", "ready" if edgewarn_integration_ready else "unavailable")
-
-    try:
-        while edgewarn_proc.is_alive() or not log_queue.empty():
-            drain_log_queue(log_queue)
-            time.sleep(cycle_settings["log_drain_poll_seconds"])
-    except KeyboardInterrupt:
-        print("CTRL+C detected, stopping primary cycle workers...")
+        try:
+            while edgewarn_proc.is_alive() or not log_queue.empty():
+                drain_log_queue(log_queue)
+                if ((stop_event is not None and stop_event.is_set()) or time.monotonic() >= deadline
+                        or (watcher.reason and not watcher.terminal)):
+                    shared_state["watchdog_failure"] = "cycle stopped or progress deadline exceeded"
+                    watcher_stop.set()
+                    break
+                time.sleep(min(cycle_settings["log_drain_poll_seconds"], max_cycle_seconds, 0.1))
+        except KeyboardInterrupt:
+            print("CTRL+C detected, stopping primary cycle workers...")
+            watcher_stop.set()
+            raise
+    except (KeyboardInterrupt, SystemExit):
+        watcher_stop.set()
+        if watcher is not None:
+            watcher.join(timeout=5)
+        release_pin_safely(handoff, owner)
+        started_processes.shutdown()
         raise
     finally:
+        watcher_stop.set()
+        if watcher is not None:
+            watcher.join(timeout=5)
+        # Release barriers before termination: a killed process can leave an
+        # Event's condition lock held, making a later parent set() hang.
+        release(integration_ready_event, "integration_released",
+                "ready" if bool(shared_state.get("edgewarn_integration_inputs_ready")) else "unavailable")
+        release(optional_complete_event, "optional_complete",
+                "complete" if bool(shared_state.get("optional_inputs_complete")) else "failed")
+        if edgewarn_proc.pid is not None:
+            edgewarn_proc.join(timeout=0.2)
         started_processes.shutdown()
         drain_log_queue(log_queue)
+    if watcher is not None:
+        watcher.join(timeout=5)
+    # Any barrier the watcher never installed is released with its truthful
+    # terminal state so no worker can outlive this call.
+    release(integration_ready_event, "integration_released",
+            "ready" if bool(shared_state.get("edgewarn_integration_inputs_ready")) else "unavailable")
+    release(optional_complete_event, "optional_complete",
+            "complete" if bool(shared_state.get("optional_inputs_complete")) else "failed")
+    release_pin_safely(handoff, owner)
+    if watcher is not None and watcher.reason:
+        shared_state["errors"] = dict(shared_state.get("errors", {})) | {
+            "ingest_readiness": watcher.reason}
 
     edgewarn_stage = _stage_result_from_shared(
         shared_state.get("edgewarn_stage"),
         worker_exit_status=edgewarn_proc.exitcode,
         fallback_error="EdgeWARN worker exited without publishing a terminal stage result",
     )
+    if shared_state.get("fatal_dependency"):
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
 
-    ingest_errors = tuple(
-        f"{name}: {message}"
-        for name, message in dict(shared_state.get("errors", {})).items()
-        if name != "ewmrs_goes_ingest"
-    )
-    ingest_ready = bool(
-        cycle_state
-        and cycle_state.detection_inputs_ready
-        and cycle_state.mrms_integration_inputs_ready
-        and (cycle_state.rap_inputs_ready or config.mrms_core_only)
-    )
+        raise StormProbDependencyError(shared_state["fatal_dependency"])
+
+    errors = tuple(dict(shared_state.get("errors", {})).items())
+    integration_ready = bool(shared_state.get("edgewarn_integration_inputs_ready"))
     ingest_stage = CycleStageResult(
-        status=CycleStatus.COMPLETED if ingest_ready else CycleStatus.UNAVAILABLE,
-        errors=() if ingest_ready else (ingest_errors or ("Required ingest inputs unavailable",)),
+        status=CycleStatus.COMPLETED if integration_ready else CycleStatus.UNAVAILABLE,
+        errors=() if integration_ready else (
+            tuple(f"{name}: {message}" for name, message in errors)
+            or ("Core integration readiness snapshot unavailable",)),
     )
-
-    stages = {
-        "ingest": ingest_stage,
-        "edgewarn": edgewarn_stage,
-    }
-    retryable = any(
+    stages = {"ingest": ingest_stage, "edgewarn": edgewarn_stage}
+    stormprob_skip = shared_state.get("stormprob_unavailable")
+    if stormprob_skip:
+        stages["stormprob"] = CycleStageResult(
+            CycleStatus.UNAVAILABLE, errors=(str(stormprob_skip),))
+    # A terminal ingest disposition or a StormProb gate over committed,
+    # immutable inputs gives the same answer on every retry, so the scan is
+    # skipped at once instead of re-running detection against it.
+    scan_terminal = bool(watcher is not None and watcher.terminal)
+    retryable = not (scan_terminal or stormprob_skip) and any(
         stage.status in {CycleStatus.UNAVAILABLE, CycleStatus.FAILED}
         for stage in stages.values()
     )
+    if shared_state.get("watchdog_failure"):
+        stages["watchdog"] = CycleStageResult(CycleStatus.UNAVAILABLE,
+                                              errors=(shared_state["watchdog_failure"],))
+        retryable = True
+    final_manifest = (CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
+                      or CycleInputManifest.from_dict(shared_state.get("integration_manifest"))
+                      or CycleInputManifest.from_dict(shared_state.get("detection_manifest")))
     return CycleOutcome(
         timestamp=dt,
         stages=stages,
         retryable=retryable,
-        input_manifest=CycleInputManifest.from_dict(
-            shared_state.get("input_manifest")
-        ),
+        input_manifest=final_manifest,
+    )
+
+
+def _unavailable_outcome(dt, reason):
+    return CycleOutcome(
+        timestamp=dt,
+        stages={"ingest": CycleStageResult(CycleStatus.UNAVAILABLE, errors=(reason,))},
+        retryable=True,
     )
 
 

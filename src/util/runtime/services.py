@@ -1,18 +1,4 @@
-"""Canonical realtime service-name registry and heartbeat contract.
-
-Phase 0 of the realtime runner decomposition
-(plans/realtime-runner-decomposition-plan.md): the three decomposed services are
-published under exactly one canonical name each, and every service publishes an
-atomic heartbeat beneath ``<BASE_DIR>/state/realtime/services/<name>.json``.
-
-The filenames under that directory are the registry. Accessory loops (METAR,
-NWS, WPC, GOES ABI) are deliberately absent: they surface as child entries
-inside their owning service's heartbeat, never as top-level names.
-
-This module is schema only. Producers write heartbeats; the unified Node API is
-the consumer that classifies them. Python services never read heartbeats for
-correctness -- correctness uses committed phase records and checkpoints.
-"""
+"""Canonical service heartbeats, locks, and route requirements."""
 
 from __future__ import annotations
 
@@ -28,7 +14,13 @@ from util.atomic import atomic_write_json
 #: Canonical service names. The single-instance locks, heartbeats, leases, and
 #: API discovery all key off these strings; nothing else may appear under the
 #: services directory.
-CANONICAL_SERVICE_NAMES: tuple[str, ...] = ("edgewarn", "ewmrs", "nexrad")
+#:
+#: ``ingest`` owns every realtime MRMS/RAP/GLM acquisition. Its heartbeat is
+#: diagnostic poll liveness only: a quiet upstream leaves it ``active`` with no
+#: new inputs, so it never becomes evidence that an input is ready, and it is
+#: absent from :data:`ROUTE_SERVICE_REQUIREMENTS` so an ingest outage stays
+#: visible without gating already-rendered artifacts.
+CANONICAL_SERVICE_NAMES: tuple[str, ...] = ("ingest", "edgewarn", "nexrad")
 
 HEARTBEAT_SCHEMA_VERSION = 1
 
@@ -40,14 +32,11 @@ ROUTE_SERVICE_REQUIREMENTS: dict[str, str] = {
     "/api/v3/storm-snapshots": "edgewarn",
     "/api/v3/alert-snapshots": "edgewarn",
     "/api/v3/alerts": "edgewarn",
-    "/api/v3/render-products": "ewmrs",
-    "/api/v3/models/rap": "ewmrs",
-    "/api/v3/analyses/wpc": "ewmrs",
     "/api/v3/radar-sites": "nexrad",
 }
 
 #: Heartbeat states reported by :func:`classify_heartbeat_state`.
-SERVICE_STATES = ("active", "stale", "disabled", "degraded", "unsupported-schema")
+SERVICE_STATES = ("active", "stale", "stalled", "disabled", "degraded", "unsupported-schema")
 
 
 class HeartbeatSchemaError(ValueError):
@@ -217,6 +206,7 @@ def classify_heartbeat_state(
     *,
     stale_after_seconds: float,
     now: datetime | None = None,
+    progress_stale_after_seconds: float | None = None,
 ) -> tuple[str, ServiceHeartbeat | None]:
     """Classify one registry file into a service state.
 
@@ -247,6 +237,12 @@ def classify_heartbeat_state(
         return ("stale", beat)
     if age > stale_after_seconds:
         return ("stale", beat)
+    if progress_stale_after_seconds is not None:
+        activity = beat.last_successful_activity
+        if beat.service in {"ingest", "edgewarn"} or activity is not None:
+            progress_age = (reference - activity).total_seconds() if activity else float("inf")
+            if progress_age > progress_stale_after_seconds or progress_age < -stale_after_seconds:
+                return ("stalled", beat)
     if beat.degraded_children:
         return ("degraded", beat)
     return ("active", beat)

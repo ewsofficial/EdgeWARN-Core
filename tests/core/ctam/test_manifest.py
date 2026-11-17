@@ -643,11 +643,11 @@ def test_unknown_input_role_points_at_cells_history_for_history():
     assert "cells.history" in str(excinfo.value)
 
 
-def test_product_typo_fails_at_discovery_against_the_host_catalog():
-    """A typo must not become a requirement that is perpetually unsatisfied."""
-    with pytest.raises(ManifestError) as excinfo:
-        parse_selector("input:MRMS:VIL_00.51:current")
-    assert "not in the host's mrms catalog" in str(excinfo.value)
+def test_product_membership_is_deferred_until_preflight():
+    """A disabled product must remain visible to the fatal dependency audit."""
+    selector = parse_selector("input:MRMS:VIL_00.51:current")
+    assert selector.product == "VIL_00.51"
+    assert parse_selector("input:MRMS:ProbSevere:current").product == "ProbSevere"
 
 
 def test_selector_violating_the_frozen_pattern_is_rejected():
@@ -939,7 +939,7 @@ def test_traversal_segment_is_rejected_as_a_literal_key_not_as_a_path(tmp_path):
     ``/id``. So the case the host must get right is the *sibling* form
     ``/features/*/modules/../id``, which names a key ``..`` under ``modules``
     that the caller does not own. It is rejected for not being the owner's key,
-    not for containing dots. See ``plans/modular-ctam-phase0-findings.md``
+    not for containing dots. See the retired ``plans/modular-ctam-phase0-findings.md``
     section 10.
     """
     from EdgeWARN.ctam.manifest import validate_write_pointer

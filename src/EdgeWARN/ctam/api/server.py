@@ -83,7 +83,7 @@ class LoopbackCTAMServer:
                     query = parse_qs(split.query)
                     if self.command == "GET" and route == "/health": data = outer.service.health()
                     elif self.command == "GET" and route == "/cycle": data = outer.service.cycle(module_id)
-                    elif self.command == "GET" and route == "/files": data = outer.service.files()
+                    elif self.command == "GET" and route == "/files": data = outer.service.files(module_id)
                     elif self.command == "GET" and route == "/requirements": data = outer.service.requirements(module_id)
                     elif self.command == "POST" and route == "/requirements/check": data = outer.service.requirements(module_id)
                     elif self.command == "GET" and route == "/stormcells": data = outer.service.stormcells(module_id)
@@ -113,7 +113,7 @@ class LoopbackCTAMServer:
                         file_id = unquote(route[len("/files/"):-len("/content")])
                         status = self._send_content(module_id, request_id, file_id); return
                     elif self.command == "GET" and route.startswith("/files/"):
-                        data = outer.service.descriptor(unquote(route[len("/files/"):]))
+                        data = outer.service.descriptor(module_id, unquote(route[len("/files/"):]))
                     else: raise APIError("not_found", "route was not found", 404)
                     status = 200; self._send_json(status, self._envelope(module_id, request_id, data, []))
                 except APIError as error:

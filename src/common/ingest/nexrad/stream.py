@@ -23,12 +23,18 @@ def detect_next_volume_offset(
     previous_tail: bytes,
     payload: bytes,
     stream_has_started: bool,
+    chunk_type: str | None = None,
 ) -> tuple[bool, int]:
     """Detect the next volume magic in the combined tail+payload stream.
 
     Returns (found, payload_offset) where payload_offset is the position
     within *payload* where the new volume magic begins, or -1 if not found.
     """
+    if chunk_type is not None:
+        # Level-II S chunks carry volume headers at offset zero. Magic bytes
+        # inside compressed payloads are data, never a framing delimiter.
+        found = chunk_type == "S" and stream_has_started and any(payload.startswith(magic) for magic in VOLUME_MAGICS)
+        return (found, 0 if found else -1)
     search_space = previous_tail + payload
     best_offset = -1
     best_magic_len = 0

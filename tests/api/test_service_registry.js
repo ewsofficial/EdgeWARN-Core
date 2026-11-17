@@ -20,6 +20,7 @@ const freshHeartbeat = (overrides = {}) => JSON.stringify({
   pid: 4321,
   run_id: 'run-abc',
   updated_at: new Date().toISOString(),
+  last_successful_activity: new Date().toISOString(),
   phase: 'supervising',
   degraded_children: [],
   ...overrides,
@@ -100,58 +101,14 @@ describe('service registry scanner', () => {
     expect(requiredServiceForRoute('/api/v3/radar-sites/KTLX/scans/20240101-120000/elevations/0.5/products/DBZH')).toBe('nexrad');
     expect(requiredServiceForRoute('/nexrad/KTLX')).toBeNull();
     expect(requiredServiceForRoute('/api/v3/cells')).toBe('edgewarn');
-    expect(requiredServiceForRoute('/api/v3/render-products')).toBe('ewmrs');
-    expect(requiredServiceForRoute('/api/v3/models/rap/layers')).toBe('ewmrs');
-    expect(requiredServiceForRoute('/api/v3/analyses/wpc/surface')).toBe('ewmrs');
     expect(requiredServiceForRoute('/renders/get-items')).toBeNull();
     expect(requiredServiceForRoute('/health/ready')).toBeNull();
   });
 });
 
-describe('OpenAPI chunk endpoint failures', () => {
-  it('documents both service gating and invalid render artifacts as 503 causes', async () => {
-    const spec = await fs.readFile(OPENAPI_PATH, 'utf8');
-    const openApi = JSON.parse(spec);
-    for (const route of [
-      '/api/v3/render-products/{productId}/snapshots/{timestamp}/chunks',
-      '/api/v3/render-products/{productId}/snapshots/{timestamp}/chunks/{x}/{y}',
-    ]) {
-      const response = openApi.paths[route].get.responses['503'];
-      expect(response.description).toContain('SERVICE_NOT_ENABLED');
-      expect(response.description).toContain('INVALID_ARTIFACT');
-    }
-  });
-});
 
-describe('SERVICE_NOT_ENABLED gating for the ewmrs route family', () => {
-  let baseDir;
-  afterEach(async () => {
-    resetServiceStateCache();
-    if (baseDir) await fs.rm(baseDir, { recursive: true, force: true });
-  });
 
-  async function createAppWithBaseDir() {
-    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'svc-gate-ewmrs-'));
-    for (const dir of ['data', 'gui', 'wpc']) {
-      await fs.mkdir(path.join(baseDir, dir), { recursive: true });
-    }
-    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
-    return app;
-  }
 
-  it('returns problem+json on v3 render routes when ewmrs is disabled', async () => {
-    const app = await createAppWithBaseDir();
-    const v3 = await request(app).get('/api/v3/render-products').expect(503).expect('Content-Type', /application\/problem\+json/);
-    expect(v3.body).toMatchObject({ code: 'SERVICE_NOT_ENABLED', service: 'ewmrs', state: 'disabled' });
-
-  });
-
-  it('serves render routes normally when ewmrs heartbeats as active', async () => {
-    const app = await createAppWithBaseDir();
-    await writeHeartbeat(baseDir, 'ewmrs', freshHeartbeat({ service: 'ewmrs' }));
-    await request(app).get('/api/v3/render-products').expect(200);
-  });
-});
 
 describe('SERVICE_NOT_ENABLED gating for the edgewarn route family', () => {
   let baseDir;
@@ -169,16 +126,22 @@ describe('SERVICE_NOT_ENABLED gating for the edgewarn route family', () => {
     return app;
   }
 
-  it('returns 503 problem+json on analysis routes when the service is disabled', async () => {
+  it('serves published analysis artifacts while Core is disabled', async () => {
     const app = await createAppWithBaseDir();
-    for (const endpoint of ['/api/v3/cells', '/api/v3/storm-snapshots', '/api/v3/alert-snapshots']) {
-      const response = await request(app).get(endpoint).expect(503).expect('Content-Type', /application\/problem\+json/);
-      expect(response.body).toMatchObject({
-        code: 'SERVICE_NOT_ENABLED',
-        service: 'edgewarn',
-        state: 'disabled',
-      });
+    for (const endpoint of ['/api/v3/cells', '/api/v3/storm-snapshots', '/api/v3/alert-snapshots?source=edgewarn']) {
+      await request(app).get(endpoint).expect(200);
     }
+    await request(app).get('/health/ready').expect(503);
+  });
+
+  it('reports stalled progress while still serving cells and alerts', async () => {
+    const app = await createAppWithBaseDir();
+    await writeHeartbeat(baseDir, 'edgewarn', freshHeartbeat({ service: 'edgewarn',
+      last_successful_activity: new Date(Date.now() - 3600000).toISOString() }));
+    const ready = await request(app).get('/health/ready').expect(503);
+    expect(ready.body.services.edgewarn.state).toBe('stalled');
+    await request(app).get('/api/v3/cells').expect(200);
+    await request(app).get('/api/v3/alert-snapshots?source=edgewarn').expect(200);
   });
 
   it('serves analysis routes normally when the service heartbeats as active', async () => {
@@ -246,21 +209,39 @@ describe('SERVICE_NOT_ENABLED gating for the nexrad route family', () => {
     await writeHeartbeat(baseDir, 'nexrad', freshHeartbeat({ degraded_children: ['NEXRAD Ingest'] }));
     await request(app).get('/api/v3/radar-sites').expect(200);
 
-    const ready = await request(app).get('/health/ready').expect(200);
+    const ready = await request(app).get('/health/ready').expect(503);
     expect(ready.body.services.nexrad).toEqual({
       state: 'degraded',
       phase: 'supervising',
       lastSeen: expect.any(String),
       degradedChildren: ['NEXRAD Ingest'],
     });
-    // Readiness keeps its directory-based contract regardless of services.
-    expect(ready.body.status).toBe('ready');
+    // Missing enabled producers make readiness fail even with healthy directories.
+    expect(ready.body.status).toBe('not-ready');
   });
 
   it('reports every canonical service in the health services block', async () => {
     const app = await createAppWithBaseDir();
-    const ready = await request(app).get('/health/ready').expect(200);
-    expect(Object.keys(ready.body.services).sort()).toEqual(['edgewarn', 'ewmrs', 'nexrad']);
+    const ready = await request(app).get('/health/ready').expect(503);
     expect(ready.body.services.edgewarn).toEqual({ state: 'disabled', phase: null, lastSeen: null, degradedChildren: [] });
+  });
+});
+
+
+describe('OpenAPI service diagnostics', () => {
+  it('documents all three services on readiness without an ingest route gate', async () => {
+    const spec = JSON.parse(await fs.readFile(OPENAPI_PATH, 'utf8'));
+    expect(spec.paths['/health/ready'].get.responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/Readiness');
+  });
+});
+
+
+describe('progress-aware classification', () => {
+  it('detects stalled Core despite a fresh liveness heartbeat', () => {
+    const now = new Date();
+    const heartbeat = freshHeartbeat({ service: 'edgewarn',
+      last_successful_activity: new Date(now.getTime() - 601000).toISOString() });
+    expect(classifyHeartbeatState(heartbeat, { service: 'edgewarn',
+      staleAfterSeconds: 30, progressStaleAfterSeconds: 600, now }).state).toBe('stalled');
   });
 });

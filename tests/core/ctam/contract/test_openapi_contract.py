@@ -268,7 +268,7 @@ def test_every_error_code_in_the_envelope_enum_is_exercised():
     }
     # Recorded rather than asserted-empty: these have no natural single-route
     # example, and Phase 2 adds them with the handlers that raise them.
-    deferred = {"unsupported_version", "requirement_unmet", "conflict", "timed_out", "internal_error", "route_not_declared"}
+    deferred = {"unsupported_version", "conflict", "timed_out", "internal_error", "route_not_declared"}
     assert used <= enum, f"example uses a code absent from the enum: {sorted(used - enum)}"
     assert enum - used == deferred, f"error-code example coverage changed: missing {sorted(enum - used - deferred)}"
 

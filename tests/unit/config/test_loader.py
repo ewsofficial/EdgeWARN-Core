@@ -374,15 +374,6 @@ def _expand(template, **roots):
     )
 
 
-def test_a_token_expands_against_the_root_the_caller_supplied(tmp_path):
-    root = tmp_path / "src"
-    root.mkdir()
-
-    assert _expand("<src_dir>/EWMRS/colormaps.json", src_dir=root) == (
-        root / "EWMRS" / "colormaps.json"
-    ).resolve()
-
-
 @pytest.mark.parametrize("template", [
     "<src_dir>/../secrets.json",
     "<src_dir>/a/../../b",
@@ -415,16 +406,6 @@ def test_an_allowlisted_token_with_no_value_here_is_rejected(tmp_path):
     """`<base_dir>` is allowlisted but meaningless to a caller that has no base directory."""
     with pytest.raises(config_loader.ConfigError, match="<base_dir> has no value in this context"):
         _expand("<base_dir>/data", src_dir=tmp_path)
-
-
-def test_a_backslash_template_is_reported_as_a_separator_problem(tmp_path):
-    r"""Catalog paths are posix-style on every platform.
-
-    Worth its own message because on Windows `<src_dir>\..\x` would otherwise be
-    one opaque filename rather than the traversal it is.
-    """
-    with pytest.raises(config_loader.ConfigError, match="must use '/' separators"):
-        _expand(r"<src_dir>\EWMRS\colormaps.json", src_dir=tmp_path)
 
 
 def test_a_non_string_path_value_names_its_key(tmp_path):

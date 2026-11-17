@@ -1,22 +1,4 @@
-"""Supported primary EdgeWARN command (decomposition Phase 5).
-
-The latency-sensitive primary service. Owns MRMS timestamp selection and the
-S3/HTTPS selection policy, detection/integration MRMS downloads exactly once
-per cycle, raw RAP download, scan-time GLM when GOES is enabled, detection,
-tracking/lineage, integration, CTAM, alert generation, and API index updates,
-plus the truthful primary cycle outcome/retry state and publication of the
-immutable ``mrms-ready``/``rap-ready`` records ``run_ewmrs.py`` consumes.
-
-Run directly:
-
-    python src/run_edgewarn.py --lat_limits 20 55 --lon_limits 230 300
-
-It does not import or start EWMRS, NEXRAD, METAR, NWS, WPC, or GOES ABI loops.
-Behavior mirrors the other direct services: a single-instance lock beneath
-``state/realtime/services/``, an atomic canonical heartbeat refreshed by an
-independent liveness thread, and clean SIGINT/SIGTERM shutdown of its own worker.
-No import side effects: parsing and runtime initialization happen in ``main()``.
-"""
+"""Core analysis service consuming durable local ingest readiness."""
 
 import os
 import signal
@@ -27,8 +9,7 @@ from datetime import datetime, timezone
 
 from common.config import loader as config_loader
 from EdgeWARN import initialize_runtime
-from EdgeWARN.stormprob.assets import validate_assets
-from EdgeWARN.schedule.scheduler import MRMSUpdateChecker
+from EdgeWARN.ctam.preflight import PreflightError, StormProbDependencyError, check_core_startup
 from util.io import TimestampedOutput, IOManager
 from util.release import get_release_version
 from util.runtime.handoff import ServiceLock
@@ -56,17 +37,34 @@ def main():
 
     io_manager = IOManager("[EdgeWARN]")
     args = io_manager.get_args()
+    args.ingest_run_id = uuid.uuid4().hex
 
     try:
-        validate_assets()
-    except (FileNotFoundError, RuntimeError) as exc:
-        print(f"[EdgeWARN] StormProb startup validation failed: {exc}")
+        from util.runtime.mrms_migration import require_completed_migration
+        require_completed_migration(args.config_dir)
+        args.ctam_discovery = check_core_startup(
+            config_dir=args.config_dir, base_dir=args.base_dir,
+            module_root=args.ctam_module_dir, disable_ctam=args.disable_ctam,
+            disable_ctam_modules=args.disable_ctam_modules,
+            disable_stormprob=args.disable_stormprob,
+            mrms_core_only=args.mrms_core_only,
+        )
+    except (PreflightError, StormProbDependencyError, RuntimeError) as exc:
+        print(f"[EdgeWARN] {exc}")
         sys.exit(1)
 
     initialize_runtime(base_dir=args.base_dir, io_manager=io_manager)
+    import util.file as fs
+    from common.ingest.mrms.config import get_registry
+
+    registry = get_registry()
+    if registry is not None:
+        fs.ensure_mrms_directories(registry)
 
     print(f"Primary EdgeWARN service started (v{get_release_version()}). Press CTRL+C to exit.")
-    print("[EdgeWARN] EWMRS and its accessories are owned by run_ewmrs.py; NEXRAD by run_nexrad.py.")
+    print("[EdgeWARN] NEXRAD is owned by run_nexrad.py.")
+    print("[EdgeWARN] Realtime MRMS/RAP/GLM acquisition is owned by run_ingest.py; this "
+          "process consumes its durable readiness records and waits when they are absent.")
     log_effective_flags(args)
 
     run_id = uuid.uuid4().hex
@@ -86,6 +84,7 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, _request_stop)
 
+    progress = {"phase": "starting", "last_successful_activity": None}
     heartbeat_destination = str(services_dir(args.base_dir) / f"{SERVICE_NAME}.json")
     def refresh_heartbeat():
         beat = ServiceHeartbeat(
@@ -93,7 +92,8 @@ def main():
             pid=os.getpid(),
             run_id=run_id,
             updated_at=datetime.now(timezone.utc),
-            phase="cycling",
+            phase=progress["phase"],
+            last_successful_activity=progress["last_successful_activity"],
             version=get_release_version(),
             degraded_children=(),
         )
@@ -111,11 +111,11 @@ def main():
 
     try:
         run_primary_cycle_loop(
-            checker=MRMSUpdateChecker(verbose=True),
             cycle_config=build_cycle_config(args),
             supervisor=None,
             on_tick=None,
             stop_event=stop_event,
+            progress=progress,
         )
     finally:
         stop_event.set()

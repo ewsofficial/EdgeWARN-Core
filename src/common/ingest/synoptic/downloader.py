@@ -190,6 +190,7 @@ async def download_synoptic(
     *,
     max_age_minutes,
     https_base_url: str | None = None,
+    preserve_existing: bool = False,
 ):
     """
     Select the newest acceptable local or remote synoptic analysis.
@@ -220,6 +221,8 @@ async def download_synoptic(
                 dataset_name, requested_time, current_dt, local_path, "local"
             )
             return local_path
+        if preserve_existing and (local_path.exists() or local_path.is_symlink()):
+            raise ValueError(f"Invalid existing {dataset_name} observation; inventory owns repair: {local_path}")
         if local_path.exists():
             io_manager.write_warning(
                 f"Ignoring invalid local {dataset_name} file: {local_path}"
@@ -309,7 +312,7 @@ async def download_synoptic(
     raise error
 
 
-async def download_rap(dt):
+async def download_rap(dt, *, preserve_existing=False):
     """
     Wrapper for RAP dataset download.
     """
@@ -322,4 +325,5 @@ async def download_rap(dt):
         dataset_name="RAP",
         max_age_minutes=get_rap_max_age_minutes(),
         https_base_url=rap_nomads_base_url(),
+        preserve_existing=preserve_existing,
     )

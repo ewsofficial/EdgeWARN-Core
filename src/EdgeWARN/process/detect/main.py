@@ -15,7 +15,7 @@ from EdgeWARN.process.detect.config import DetectionConfig
 from util.io import IOManager
 import util.file as fs
 import json as js
-from datetime import datetime
+from datetime import datetime, timezone
 from util.performance import tracker as perf_tracker
 
 io_manager = IOManager("[CellDetection]")
@@ -174,6 +174,16 @@ def main(
                 repository.mark_projection_published(cycle_id)
         previous = repository.latest_cycle_before(json_ts)
         if previous:
+            from EdgeWARN.api_integration.config import inactive_cell_max_age_minutes
+            previous_time = datetime.fromisoformat(previous[0]["timestamp"].replace("Z", "+00:00"))
+            target_time = datetime.fromisoformat(json_ts.replace("Z", "+00:00"))
+            if previous_time.tzinfo is None:
+                previous_time = previous_time.replace(tzinfo=timezone.utc)
+            if target_time.tzinfo is None:
+                target_time = target_time.replace(tzinfo=timezone.utc)
+            if (target_time - previous_time).total_seconds() > inactive_cell_max_age_minutes() * 60:
+                previous = []
+        if previous:
             data_old = {"features": previous,
                         "latest_timestamp": previous[0].get("timestamp")}
             io_manager.write_debug("Loaded previous cells from committed StormProb database")
@@ -189,6 +199,16 @@ def main(
             latest_json = None
             for candidate in stormcell_dir.glob("stormcells_*.json"):
                 if candidate.stem < f"stormcells_{final_ts}":
+                    from EdgeWARN.api_integration.config import inactive_cell_max_age_minutes
+                    try:
+                        candidate_time = datetime.strptime(candidate.stem.removeprefix("stormcells_"), "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+                        target_time = datetime.fromisoformat(json_ts.replace("Z", "+00:00"))
+                        if target_time.tzinfo is None:
+                            target_time = target_time.replace(tzinfo=timezone.utc)
+                        if (target_time - candidate_time).total_seconds() > inactive_cell_max_age_minutes() * 60:
+                            continue
+                    except ValueError:
+                        continue
                     if latest_json is None or candidate.stem > latest_json.stem:
                         latest_json = candidate
 

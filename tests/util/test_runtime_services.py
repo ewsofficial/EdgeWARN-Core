@@ -3,7 +3,7 @@
 Covers the heartbeat schema, atomic publication, state classification
 (disabled / unsupported-schema / stale / active / degraded), and the
 route-family-to-service dependency map recorded in
-plans/realtime-runner-decomposition-plan.md.
+retired plans/realtime-runner-decomposition-plan.md.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -28,22 +28,26 @@ from util.runtime.services import (
 )
 
 
-def make_beat(service="ewmrs", **overrides):
+def make_beat(service="nexrad", **overrides):
     values = dict(
         service=service,
         pid=4321,
         run_id="run-abc",
         updated_at=datetime(2026, 8, 23, 12, 0, 0, tzinfo=timezone.utc),
         phase="idle",
-        version="3.0.1",
+        version="3.1.0",
     )
     values.update(overrides)
     return ServiceHeartbeat(**values)
 
 
 class TestRegistry:
-    def test_canonical_names_are_exactly_three_services(self):
-        assert CANONICAL_SERVICE_NAMES == ("edgewarn", "ewmrs", "nexrad")
+    def test_canonical_names_are_exactly_the_four_owned_services(self):
+        assert CANONICAL_SERVICE_NAMES == ("ingest", "edgewarn", "nexrad")
+
+    def test_ingest_is_diagnostic_and_never_gates_a_route_family(self):
+        assert "ingest" in CANONICAL_SERVICE_NAMES
+        assert "ingest" not in ROUTE_SERVICE_REQUIREMENTS.values()
 
     def test_heartbeat_paths_live_under_state_realtime_services(self, tmp_path):
         base = tmp_path / "base"
@@ -141,7 +145,7 @@ class TestPublicationAndClassification:
         beat = make_beat(
             updated_at=self.REFERENCE - timedelta(seconds=91),
         )
-        path = self.write(tmp_path, "ewmrs", beat)
+        path = self.write(tmp_path, "nexrad", beat)
         state, parsed = classify_heartbeat_state(
             path, stale_after_seconds=90, now=self.REFERENCE
         )
@@ -165,7 +169,7 @@ class TestPublicationAndClassification:
         assert beat is None
 
     def test_malformed_json_classifies_unsupported_schema(self, tmp_path):
-        path = heartbeat_path(tmp_path, "ewmrs")
+        path = heartbeat_path(tmp_path, "nexrad")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{not json", encoding="utf-8")
         state, beat = classify_heartbeat_state(
@@ -179,7 +183,7 @@ class TestPublicationAndClassification:
         payload["schema_version"] = 99
         import json
 
-        path = heartbeat_path(tmp_path, "ewmrs")
+        path = heartbeat_path(tmp_path, "nexrad")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
         state, beat = classify_heartbeat_state(
@@ -190,7 +194,7 @@ class TestPublicationAndClassification:
 
     def test_degraded_children_report_degraded_while_fresh(self, tmp_path):
         beat = make_beat(degraded_children=("metar",))
-        path = self.write(tmp_path, "ewmrs", beat)
+        path = self.write(tmp_path, "nexrad", beat)
         state, parsed = classify_heartbeat_state(
             path, stale_after_seconds=90, now=self.REFERENCE
         )
@@ -204,16 +208,18 @@ class TestPublicationAndClassification:
         )
         assert set(states) == set(CANONICAL_SERVICE_NAMES)
         assert states["edgewarn"][0] == "active"
-        assert states["ewmrs"][0] == "disabled"
+        assert states["ingest"][0] == "disabled"
+        assert states["nexrad"][0] == "disabled"
         assert states["nexrad"][0] == "disabled"
 
     def test_read_returns_none_for_missing_file(self, tmp_path):
-        assert read_heartbeat_file(heartbeat_path(tmp_path, "ewmrs")) is None
+        assert read_heartbeat_file(heartbeat_path(tmp_path, "nexrad")) is None
 
     def test_states_vocabulary_is_complete(self):
         assert set(SERVICE_STATES) == {
             "active",
             "stale",
+            "stalled",
             "disabled",
             "degraded",
             "unsupported-schema",

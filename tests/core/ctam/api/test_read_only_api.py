@@ -56,7 +56,7 @@ def test_loopback_api_reads_pinned_catalog_content_and_history(api):
     assert client.history(7, limit=999)["returned"] == 1
 
 
-def test_token_cannot_read_undeclared_content_while_catalog_stays_visible(api):
+def test_token_cannot_read_undeclared_content(api):
     server, _ = api
     client = CTAMClient(server.url, "wrong-token")
     with pytest.raises(CTAMAPIError) as excinfo:
@@ -72,7 +72,10 @@ def test_server_enforces_declared_content_scope_for_every_artifact_read(api):
         **{**server.service._manifests["reader"].__dict__, "requires": ()}
     )
     client = CTAMClient(server.url, "test-token")
-    assert len(client.files()) == 3
+    assert client.files() == []
+    with pytest.raises(CTAMAPIError) as excinfo:
+        client.file("input:mrms:VIL_00.50:current")
+    assert excinfo.value.status == 403
     with pytest.raises(CTAMAPIError) as excinfo:
         client.content("input:mrms:VIL_00.50:current")
     assert excinfo.value.status == 403

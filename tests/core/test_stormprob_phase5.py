@@ -248,7 +248,52 @@ def test_alert_is_labeled_as_a_swept_envelope():
         [265.01, 35.01], [264.99, 35.01], [264.99, 34.99]]]}
     cell = _cell()
     cell["modules"] = {"StormProb": {"status": "success", "leads": [
-        {"lead_minutes": 15, "polygon": polygon}, {"lead_minutes": 30, "polygon": polygon}]}}
+        {"lead_minutes": 15, "status": "ok", "polygon": polygon}, {"lead_minutes": 30, "status": "ok", "polygon": polygon}]}}
     alerts = BuiltinStormProbAdapter(Service()).alerts(cell)
     assert len(alerts) == 1
     assert cell["modules"]["StormProb"]["alert_geometry"]["geometry_kind"] == "swept-envelope-0-30min"
+
+
+def test_negative_rays_terminate_at_centroid():
+    calibrator = {"parameters": [{"calibrated_probabilities": [0.0] + [1.0] * 20}] * 4}
+    radii = np.full((20, 64), -10.0)
+    radii[:, 0] = 5.0
+    boundary = postprocess.calibrated_radial_boundary(radii, calibrator, 0)
+    assert boundary[0] == 5.0
+    assert np.all(boundary[1:] == 0.0)
+
+
+def test_geometry_failure_preserves_other_leads(tmp_path, monkeypatch):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    repo.commit_cycle("cycle1", cell["timestamp"], [cell])
+    monkeypatch.setattr(onnx_runtime, "load_sessions", lambda *args: (object(), object()))
+    monkeypatch.setattr(onnx_runtime, "load_calibrator", lambda *args: {})
+    monkeypatch.setattr(onnx_runtime, "infer_pair", lambda *args, **kwargs: {
+        "coefficient_mean": np.zeros((1, 4, 33), np.float32),
+        "coefficient_log_std": np.full((1, 4, 33), -20, np.float32),
+        "residual_motion_mps": np.zeros((1, 4, 2), np.float32)})
+    def geometry(*args):
+        if args[5] == 3:
+            raise ValueError("injected geometry failure")
+        return {"type": "Polygon", "coordinates": [[[265.0, 35.0], [265.1, 35.0],
+            [265.1, 35.1], [265.0, 35.1], [265.0, 35.0]]]}
+    monkeypatch.setattr(postprocess, "operational_envelope", geometry)
+    adapter = BuiltinStormProbAdapter(StormProbCycleService(repo))
+    adapter.run(cell)
+    result = cell["modules"]["StormProb"]
+    assert result["status"] == "partial"
+    assert [lead["status"] for lead in result["leads"]] == ["ok", "ok", "ok", "error"]
+    assert result["leads"][3]["reason"] == "geometry-failed"
+    projection_path = tmp_path / "snapshot.json"
+    projection_path.write_text("[]")
+    repo.commit_cycle("publication", cell["timestamp"], [cell],
+                      projection_cells=[cell], projection_path=projection_path,
+                      forecasts=result["leads"])
+    repo.mark_projection_published("publication")
+    projection = repo.latest_cycle_before("2024-05-01T12:02:00")[0]
+    assert [lead["status"] for lead in projection["modules"]["StormProb"]["leads"]] == ["ok", "ok", "ok", "error"]
+    monkeypatch.setattr(adapter._service, "previous_alert", lambda cell_id: None)
+    assert len(adapter.alerts(cell)) == 1
+    result["leads"][0]["status"] = "error"
+    assert adapter.alerts(cell) == []

@@ -57,3 +57,6 @@ node_modules
 /assets/nws_zones/
 
 .kilo
+# Local planning notes and generated reports (never commit)
+plans/
+workspaces/

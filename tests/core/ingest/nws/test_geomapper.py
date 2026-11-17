@@ -7,7 +7,7 @@ import json
 import shutil
 from pathlib import Path
 from unittest.mock import patch, mock_open
-from EdgeWARN.ingest.nws.geomapper import (
+from common.ingest.nws.geomapper import (
     ZoneLookup,
     _assets_dir,
     _reset_bootstrap,
@@ -117,7 +117,7 @@ class TestZoneLookup:
         zone_file.write_text(json.dumps(zone_data))
         
         with patch.object(ZoneLookup, '_cache', {}):
-            with patch('EdgeWARN.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
+            with patch('common.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
                 polygon = ZoneLookup.get_polygon("TXC121")
                 
                 assert polygon is not None
@@ -134,7 +134,7 @@ class TestZoneLookup:
         zone_file.write_text(json.dumps([]))
         
         with patch.object(ZoneLookup, '_cache', {}):
-            with patch('EdgeWARN.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
+            with patch('common.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
                 polygon = ZoneLookup.get_polygon("INVALID")
                 assert polygon is None
 
@@ -155,7 +155,7 @@ class TestZoneLookup:
         zone_file = tx_dir / "zones.json"
         zone_file.write_text(json.dumps(zone_data))
         
-        with patch('EdgeWARN.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
+        with patch('common.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
             # Clear cache
             ZoneLookup._cache.clear()
             
@@ -172,7 +172,7 @@ class TestZoneLookup:
         assets_dir = tmp_path / "assets" / "nws_zones"
         
         with patch.object(ZoneLookup, '_cache', {}):
-            with patch('EdgeWARN.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
+            with patch('common.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
                 with pytest.raises(
                     RuntimeError, match=r"edgewarn sync-nws-zones --apply"
                 ):
@@ -184,7 +184,7 @@ class TestZoneLookup:
         state_dir.mkdir(parents=True)
         (state_dir / "zones.json").write_text("[]", encoding="utf-8")
 
-        with patch('EdgeWARN.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
+        with patch('common.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
             ensure_zone_assets()
 
 
@@ -302,7 +302,7 @@ class TestProcessWarning:
         }
         
         with patch.object(ZoneLookup, '_cache', {}):
-            with patch('EdgeWARN.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
+            with patch('common.ingest.nws.geomapper._assets_dir', return_value=assets_dir):
                 result = process_warning(feature)
                 
                 assert "properties" in result

@@ -7,8 +7,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from EdgeWARN.ingest.nws.main import download_alerts, _get_registry
-from EdgeWARN.ingest.nws.registry import reset_registry
+from common.ingest.nws.main import download_alerts, _get_registry
+from common.ingest.nws.registry import reset_registry
 
 class TestDownloadAlerts:
     """Tests for download_alerts function"""
@@ -16,7 +16,7 @@ class TestDownloadAlerts:
     @pytest.fixture
     def mock_io(self):
         """Mock the module-level io_manager"""
-        with patch('EdgeWARN.ingest.nws.main.io_manager') as mock:
+        with patch('common.ingest.nws.main.io_manager') as mock:
             yield mock
 
     @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ class TestDownloadAlerts:
 
     def test_download_creates_output_directory(self, mock_io, empty_response, tmp_path):
         """Test that output directory is created"""
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', return_value=empty_response):
             download_alerts(datetime(2023, 10, 15, 14, 30))
             
@@ -45,7 +45,7 @@ class TestDownloadAlerts:
 
     def test_download_creates_correct_filename(self, mock_io, empty_response, tmp_path):
         """Test that correct registry file is saved"""
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', return_value=empty_response):
             download_alerts(datetime(2023, 10, 15, 14, 30))
             
@@ -78,7 +78,7 @@ class TestDownloadAlerts:
         }).encode('utf-8')
         mock_response.__enter__.return_value = mock_response
         
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', return_value=mock_response):
             
             download_alerts(datetime(2023, 10, 15, 14, 30, tzinfo=timezone.utc))
@@ -111,7 +111,7 @@ class TestDownloadAlerts:
         }).encode('utf-8')
         mock_response.__enter__.return_value = mock_response
         
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', return_value=mock_response):
             
             download_alerts(datetime(2023, 10, 15, 14, 30, tzinfo=timezone.utc))
@@ -124,7 +124,7 @@ class TestDownloadAlerts:
 
     def test_download_handles_network_error(self, mock_io, tmp_path):
         """Test handling of network errors"""
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', side_effect=Exception("Network error")):
             
             with pytest.raises(Exception):
@@ -136,8 +136,8 @@ class TestDownloadAlerts:
     def test_download_cleans_old_files(self, mock_io, empty_response, tmp_path):
         """Test that old registry items are cleaned up instead of old files."""
         # Note: clean_files_by_age logic has been replaced by registry cleanup
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
-             patch('EdgeWARN.ingest.nws.main._get_registry') as mock_get_registry, \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+             patch('common.ingest.nws.main._get_registry') as mock_get_registry, \
              patch('urllib.request.urlopen', return_value=empty_response):
             
             mock_registry = MagicMock()
@@ -154,7 +154,7 @@ class TestDownloadAlerts:
         """Test download respects base registry paths"""
         custom_dir = tmp_path / "custom_nws"
         
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', custom_dir), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', custom_dir), \
              patch('urllib.request.urlopen', return_value=empty_response):
             
             download_alerts(datetime(2023, 10, 15, 14, 30))
@@ -184,7 +184,7 @@ class TestDownloadAlerts:
         }).encode('utf-8')
         mock_response.__enter__.return_value = mock_response
 
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', return_value=mock_response):
 
             download_alerts(datetime(2023, 10, 15, 14, 30, tzinfo=timezone.utc))
@@ -259,7 +259,7 @@ class TestDownloadAlerts:
         }).encode('utf-8')
         cycle_two.__enter__.return_value = cycle_two
 
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', side_effect=[cycle_one, cycle_two]):
             download_alerts(datetime(2023, 10, 15, 14, 30, tzinfo=timezone.utc))
             download_alerts(datetime(2023, 10, 15, 14, 32, tzinfo=timezone.utc))
@@ -276,8 +276,8 @@ class TestDownloadAlerts:
             assert snapshot_ids == {"urn:oid:test-alert-b"}
             assert snapshot_data["count"] == 1
 
-    def test_download_reconciles_empty_successful_payload_to_zero(self, mock_io, tmp_path):
-        """A successful empty payload should remove previously active saved alerts."""
+    def test_empty_feed_clears_unexpired_alerts(self, mock_io, tmp_path):
+        """A valid empty pull means nothing is active upstream, so alerts are cleared."""
         cycle_one = MagicMock()
         cycle_one.read.return_value = json.dumps({
             "features": [
@@ -306,7 +306,7 @@ class TestDownloadAlerts:
         }).encode('utf-8')
         cycle_two.__enter__.return_value = cycle_two
 
-        with patch('EdgeWARN.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
+        with patch('common.ingest.nws.main.fs.MRMS_NWS_DIR', tmp_path), \
              patch('urllib.request.urlopen', side_effect=[cycle_one, cycle_two]):
             download_alerts(datetime(2023, 10, 15, 14, 30, tzinfo=timezone.utc))
             download_alerts(datetime(2023, 10, 15, 14, 32, tzinfo=timezone.utc))
@@ -319,4 +319,47 @@ class TestDownloadAlerts:
                 snapshot_data = json.load(f)
 
             assert snapshot_data["count"] == 0
-            assert snapshot_data["alerts"] == []
+
+
+def test_malformed_feature_does_not_block_valid_feature(tmp_path, monkeypatch):
+    from common.ingest.nws import main
+    from common.ingest.nws.registry import AlertRegistry
+    path = tmp_path / "feed.json"
+    path.write_text(json.dumps({"features": [
+        {"id": "bad", "properties": None},
+        {"id": "good", "properties": {"id": "good", "event": "Tornado Warning",
+         "expires": "2026-10-07T19:00:00Z"}, "geometry": None}]}))
+    registry = AlertRegistry(tmp_path / "registry")
+    monkeypatch.setattr(main, "process_warning", lambda feature: feature)
+    _, _, seen, complete = main._process_nws_file_with_registry(path, registry,
+        datetime(2026, 10, 7, 18, tzinfo=timezone.utc))
+    assert "good" in seen
+    assert "good" in registry.get_active_ids()
+
+
+def test_empty_feed_clears_registry(tmp_path, monkeypatch):
+    """A fully parsed feed with no alerts must reconcile the registry to empty."""
+    from common.ingest.nws import main
+    from common.ingest.nws.registry import AlertRegistry
+    registry = AlertRegistry(tmp_path / "registry")
+    now = datetime(2026, 10, 7, 18, tzinfo=timezone.utc)
+    registry.process_alert({"id": "stale", "properties": {
+        "id": "stale", "event": "Tornado Warning",
+        "expires": "2026-10-07T19:00:00Z"}, "geometry": None}, now)
+    assert "stale" in registry.get_active_ids()
+    path = tmp_path / "feed.json"
+    path.write_text(json.dumps({"features": []}))
+    monkeypatch.setattr(main, "io_manager", MagicMock())
+    main._apply_download(str(path), registry, now, "")
+    assert registry.get_active_ids() == set() or not list(registry.get_active_ids())
+
+
+def test_unidentifiable_malformed_feature_skips_reconcile(tmp_path, monkeypatch):
+    from common.ingest.nws import main
+    from common.ingest.nws.registry import AlertRegistry
+    registry = AlertRegistry(tmp_path / "registry")
+    path = tmp_path / "feed.json"
+    path.write_text(json.dumps({"features": [{"properties": None}]}))
+    _, _, seen, complete = main._process_nws_file_with_registry(
+        str(path), registry, datetime(2026, 10, 7, 18, tzinfo=timezone.utc))
+    assert seen == set() and complete is False

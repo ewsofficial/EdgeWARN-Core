@@ -50,6 +50,20 @@ def test_commit_is_revisioned_idempotent_and_preserves_core_fields(tmp_path):
     assert error.value.code == "transaction_sealed"
 
 
+def test_contract_violation_revokes_even_sealed_module_work(tmp_path):
+    transactions = service(tmp_path)
+    checkpoint = transactions.checkpoint()
+    transactions.stage_cell("cellstats", "7", revision=0, operations=[
+        {"op": "add", "path": "/modules/CellStats", "value": {"score": 4}},
+    ])
+    transactions.commit("cellstats")
+    assert transactions.cells["7"]["modules"]["CellStats"]["score"] == 4
+    transactions.revoke_after_contract_violation("cellstats", checkpoint)
+    assert "modules" not in transactions.cells["7"]
+    assert transactions.transaction("cellstats")["state"] == "abandoned"
+    assert transactions.cell_revisions["7"] == 0
+
+
 def test_invalid_or_host_owned_values_never_change_working_set(tmp_path):
     transactions = service(tmp_path)
     before = transactions.cells["7"].copy()

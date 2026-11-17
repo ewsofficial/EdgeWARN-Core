@@ -163,6 +163,25 @@ class CTAMTransactionService:
         self.history_revisions = {key: 0 for key in self.histories}
         self.transactions = {key: ModuleTransaction(key) for key in self.manifests}
 
+    def checkpoint(self):
+        """Snapshot the working set before a single external module runs."""
+        with self._lock:
+            return (deepcopy(self.cells), deepcopy(self.histories),
+                    dict(self.cell_revisions), dict(self.history_revisions))
+
+    def revoke_after_contract_violation(self, module_id: str, checkpoint) -> None:
+        """Discard even sealed work if a module used an undeclared input."""
+        with self._lock:
+            self.cells, self.histories, self.cell_revisions, self.history_revisions = checkpoint
+            tx = self._transaction(module_id)
+            tx.staged_cells.clear()
+            tx.staged_history.clear()
+            tx.alerts.clear()
+            tx.staged_routes.clear()
+            tx.sealed = False
+            tx.abandoned = True
+            tx.commit_result = None
+
     def _transaction(self, module_id: str) -> ModuleTransaction:
         if module_id not in self.transactions:
             raise APIError("authentication_failed", "module is not admitted for this cycle", 401)

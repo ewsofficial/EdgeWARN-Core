@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -39,23 +39,21 @@ def atomic_output_path(destination: str | Path, *, suffix: str = ".part") -> Ite
 
     The existing destination is deliberately left untouched if writing or
     validation fails.  The temporary path is removed on every failure path.
+    Files use normal creation permissions (0666 filtered by the process umask)
+    so an independent API user can read published artifacts.
     """
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_temp = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.name}.",
-        suffix=suffix,
-    )
+    temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}{suffix}"
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
     os.close(fd)
-    temporary = Path(raw_temp)
     try:
         yield temporary
         # "r+b", not "rb": os.fsync on Windows issues FlushFileBuffers, which
         # requires a handle opened for writing and returns EBADF on a read-only
         # descriptor.  Read-only is the intuitive mode for a file you only want
         # to flush, and choosing it made every atomic_write_json call fail on
-        # Windows -- see plans/modular-ctam-phase0-findings.md finding 1.  This
+        # Windows -- see the retired plans/modular-ctam-phase0-findings.md finding 1.  This
         # re-open is redundant for atomic_write_bytes, which fsyncs its own
         # writable handle below, but it is the only fsync a caller that drives
         # the context manager directly gets, so it stays.
@@ -85,5 +83,5 @@ def atomic_write_text(destination: str | Path, payload: str, *, encoding="utf-8"
 
 
 def atomic_write_json(destination: str | Path, value, *, indent=None, default=None) -> Path:
-    payload = json.dumps(value, indent=indent, default=default)
+    payload = json.dumps(value, indent=indent, default=default, allow_nan=False)
     return atomic_write_text(destination, payload)

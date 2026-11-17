@@ -70,8 +70,8 @@
     "/files": {
       "get": {
         "operationId": "listCtamFiles",
-        "summary": "Complete pinned cycle catalog",
-        "description": "Includes unavailable items with reasons. A module must not infer that an absent entry is merely late; the catalog is frozen for the cycle.",
+        "summary": "Declared pinned cycle catalog",
+        "description": "Includes only descriptors selected by this module's requires declarations, including unavailable declared items with reasons. The catalog is frozen for the cycle.",
         "responses": {
           "200": {
             "description": "Catalog",
@@ -138,7 +138,7 @@
     "/files/{file_id}": {
       "get": {
         "operationId": "getCtamFile",
-        "summary": "One catalog descriptor",
+        "summary": "One declared catalog descriptor",
         "parameters": [{"$ref": "#/components/parameters/fileId"}],
         "responses": {
           "200": {
@@ -170,6 +170,7 @@
             }}
           },
           "401": {"$ref": "#/components/responses/AuthenticationFailed"},
+          "403": {"$ref": "#/components/responses/UndeclaredInput"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
@@ -184,6 +185,7 @@
           "200": {"description": "Whole artifact", "content": {"application/octet-stream": {}}},
           "206": {"description": "Requested byte range", "content": {"application/octet-stream": {}}},
           "401": {"$ref": "#/components/responses/AuthenticationFailed"},
+          "403": {"$ref": "#/components/responses/UndeclaredInput"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {
             "description": "Artifact is catalogued but not readable, so the descriptor's readiness is not 'ready'",
@@ -765,6 +767,29 @@
               "message": "operation path names a key the caller does not own",
               "resource": "stormcells.current",
               "pointer": "/modules/StormProb/u",
+              "expected_revision": null,
+              "observed_revision": null,
+              "limit": null,
+              "retryable": false
+            }]
+          }
+        }}
+      },
+      "UndeclaredInput": {
+        "description": "The authenticated module did not declare this input selector in its manifest.",
+        "content": {"application/json": {
+          "schema": {"$ref": "../schema/response-envelope.schema.json"},
+          "example": {
+            "api_version": "1",
+            "cycle_id": "20260805-120000",
+            "module_id": "cellstats",
+            "request_id": "req-01HFZ9K3M7D0",
+            "data": null,
+            "errors": [{
+              "code": "requirement_unmet",
+              "message": "input is not declared by this module; add its selector to [[requires]] and restart",
+              "resource": "input:mrms:MESH_00.50:current",
+              "pointer": null,
               "expected_revision": null,
               "observed_revision": null,
               "limit": null,

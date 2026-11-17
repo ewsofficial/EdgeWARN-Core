@@ -1,0 +1,1507 @@
+{
+  "documents": {
+    "api": {
+      "schema_version": 1,
+      "server": {
+        "host": "0.0.0.0",
+        "port": 5000,
+        "debug_port": 3001,
+        "request_timeout_ms": 30000,
+        "service_stale_after_seconds": 30,
+        "service_progress_stale_after_seconds": 600,
+        "enabled_services": [
+          "ingest",
+          "edgewarn",
+          "nexrad"
+        ],
+        "openapi_spec": "<src_dir>/api/openapi/v3.yaml",
+        "production_version_label": "2.x",
+        "v3_api_version": "3.1.0"
+      },
+      "security": {
+        "hsts_max_age_seconds": 31536000,
+        "allowed_origins": [
+          "*"
+        ],
+        "trust_proxy": false,
+        "cors": {
+          "methods": [
+            "GET",
+            "HEAD",
+            "OPTIONS"
+          ],
+          "allowed_headers": [
+            "Content-Type",
+            "X-Request-Id"
+          ],
+          "max_age": 600,
+          "credentials": false
+        },
+        "csp_default_src": "'self'",
+        "compression_skip_media": "image/*"
+      },
+      "logging": {
+        "access_log_enabled": true
+      },
+      "rate_limits": {
+        "per_second": {
+          "max": 100,
+          "window_ms": 1000
+        },
+        "per_minute": {
+          "max": 6000,
+          "window_ms": 60000
+        },
+        "standard_headers": true,
+        "legacy_headers": false
+      },
+      "artifacts": {
+        "size_limits_bytes": {
+          "json": 8388608,
+          "binary": 134217728,
+          "image": 33554432
+        },
+        "json_cache": {
+          "max_entries": 256,
+          "max_size_bytes": 33554432
+        },
+        "list_limit": 1000
+      },
+      "pagination": {
+        "default_limit": 100,
+        "max_limit": 1000
+      },
+      "cache_control_max_age": {
+        "collection": 5,
+        "resource": 60,
+        "asset": 31536000
+      },
+      "query": {
+        "allowed_params": [
+          "cursor",
+          "limit"
+        ],
+        "max_value_length": 256,
+        "limit_pattern": "^(?:[1-9][0-9]{0,2}|1000)$"
+      },
+      "validation": {
+        "radar_products": [
+          "DBZH",
+          "VRADH",
+          "WRADH",
+          "PHIDP",
+          "CCORH",
+          "RHOHV",
+          "ZDR"
+        ]
+      }
+    },
+    "api_index": {
+      "api_index": {
+        "inactive_cell_max_age_minutes": 120,
+        "initialize_at_startup": {
+          "historical": false,
+          "realtime": true
+        },
+        "remove_old_cells": {
+          "historical": false,
+          "realtime": true
+        },
+        "stormprob_inactive_cell_max_age_minutes": 20
+      },
+      "schema_version": 1
+    },
+    "detection": {
+      "alert_matching": {
+        "events": [
+          "Tornado Warning",
+          "Severe Thunderstorm Warning",
+          "Tornado Watch",
+          "Severe Thunderstorm Watch",
+          "Special Weather Statement",
+          "Severe Weather Statement",
+          "Flash Flood Warning"
+        ],
+        "geometry_cache_max_entries": 512,
+        "point_match_buffer_deg": 0.01,
+        "polygon_match_buffer_deg": 0.005,
+        "snapshot_cache_max_entries": 8,
+        "snapshot_max_age_seconds": 600
+      },
+      "detection": {
+        "dataset_load_max_workers": 3,
+        "drop_offset": 10.0,
+        "fallback_dt_seconds": 120.0,
+        "min_seed_percentage": 0.001,
+        "refl_threshold": 37.5,
+        "stormcell_cleanup_max_age_minutes": 120,
+        "tracking_disabled_defaults": {
+          "event_type": "active",
+          "prediction_count": 0,
+          "tracking_mode": "active"
+        }
+      },
+      "gatemapper": {
+        "baseline_refl_floor": 37.5,
+        "contour_downsample": 8,
+        "contour_downsample_adaptive": {
+          "coarse_below_points": 24,
+          "coarse_step": 4,
+          "keep_all_below_points": 8,
+          "keep_all_step": 1
+        },
+        "contour_level": 0.5,
+        "coordinate_decimals": 3,
+        "crop_pad_px": 2,
+        "dynamic_min_threshold": {
+          "high": 40.0,
+          "low": 37.5,
+          "switch_max_refl": 45.0
+        },
+        "max_refl_clamp": 52.0,
+        "reject_clusters_at_or_below_gates": 5
+      },
+      "hail": {
+        "contour_level": 0.5,
+        "contour_sampling_step": 5,
+        "preciptype_class": 6
+      },
+      "morphology": {
+        "min_contour_points_for_defects": 10,
+        "min_pixels_full_analysis": 25
+      },
+      "save": {
+        "centroid_decimals": 3,
+        "polygon_decimals": 3
+      },
+      "schema_version": 1,
+      "tracker": {
+        "decay_confidence_factor": 0.85,
+        "decay_confidence_floor": 0.3,
+        "decay_max_refl_dbz": 30.0
+      }
+    },
+    "filesystem": {
+      "base_dir": {
+        "posix": "~/EdgeWARN_input",
+        "windows": "C:\\\\EdgeWARN_input"
+      },
+      "cleanup_defaults": {
+        "max_age_minutes": 60,
+        "max_files": 10
+      },
+      "schema_version": 1
+    },
+    "historical": {
+      "historical": {
+        "cleanup_max_files": 5,
+        "lat": [
+          20,
+          55
+        ],
+        "lon": [
+          -130,
+          -60
+        ],
+        "step_minutes": 1,
+        "throttle_seconds": 1
+      },
+      "schema_version": 1
+    },
+    "ingest": {
+      "goes": {
+        "bucket": "noaa-goes19",
+        "bucket_path_pattern": "{product}/{YYYY}/{DDD}/{HH}/",
+        "cleanup_max_age_minutes": 60,
+        "glm_outdir": "GOES_GLM_DIR",
+        "glm_product": "GLM-L2-LCFA",
+        "hour_lookback": 3,
+        "max_entries": 96,
+        "max_files_per_spec": 2
+      },
+      "mrms": {
+        "cleanup_max_age_minutes": 60,
+        "decompress_chunk_size_bytes": 1048576,
+        "downloads": {
+          "max_concurrency": 8,
+          "optional_timeout_seconds": 30
+        },
+        "ncep_https": {
+          "download_chunk_size_bytes": 8192,
+          "match_window_seconds": 120,
+          "sync_timeout_seconds": 10
+        },
+        "products": [
+          "MRMS_EchoTop_18_00.50",
+          "MRMS_EchoTop_30_00.50",
+          "MRMS_EchoTop_50_00.50",
+          "MRMS_RadarQualityIndex_00.00",
+          "MRMS_MESH_00.50",
+          "MRMS_NLDN_CG_001min_AvgDensity_00.00",
+          "MRMS_PrecipRate_00.00",
+          "MRMS_RadarOnly_QPE_01H_00.00",
+          "MRMS_MergedAzShear_0-2kmAGL_00.50",
+          "MRMS_MergedAzShear_3-6kmAGL_00.50",
+          "MRMS_VIL_Density_00.50",
+          "MRMS_MergedRhoHV_00.50",
+          "MRMS_MergedReflectivityAtLowestAltitude_00.50",
+          "MRMS_VII_00.50",
+          "MRMS_VIL_00.50",
+          "MRMS_Reflectivity_0C_00.50",
+          "MRMS_Reflectivity_-5C_00.50",
+          "MRMS_Reflectivity_-15C_00.50"
+        ],
+        "remove_old_files": true
+      },
+      "schema_version": 2
+    },
+    "integration": {
+      "glm": {
+        "bin_size_degrees": 1.0
+      },
+      "output": {
+        "decimals": 2
+      },
+      "probsevere_field_map": {
+        "AccumFCD": "AccumFCD",
+        "CAPE_M10M30": "CAPE_M10M30",
+        "CompRef": "COMPREF",
+        "DCAPE": "DCAPE",
+        "EBShear": "EBSHEAR",
+        "EchoTop50": "EchoTop_50",
+        "FlashDensity": "FLASH_DENSITY",
+        "FlashRate": "FLASH_RATE",
+        "H50_Above_0C": "H50_Above_0C",
+        "ICP": "ICP",
+        "LCL": "LCL",
+        "LJA": "LJA",
+        "LLLR": "LLLR",
+        "MESH": "MESH",
+        "MLCAPE": "MLCAPE",
+        "MLCIN": "MLCIN",
+        "MLLR": "MLLR",
+        "MUCAPE": "MUCAPE",
+        "MaxFCD": "MaxFCD",
+        "MaxFED": "MaxFED",
+        "MaxLLAz": "MAXLLAZ",
+        "MaxRC_Emiss": "MAXRC_EMISS",
+        "MeanWind_1-3kmAGL": "MEANWIND_1-3kmAGL",
+        "MinFlashArea": "MinFlashArea",
+        "PWAT": "PWAT",
+        "ProbHail": "ProbHail",
+        "ProbSevere": "ProbSevere",
+        "ProbTor": "ProbTor",
+        "ProbWind": "ProbWind",
+        "Ref10": "REF10",
+        "Ref20": "REF20",
+        "SRH01km": "SRH01KM",
+        "SRH02km": "SRW02KM",
+        "SRW46km": "SRW46KM",
+        "TE@MaxFCD": "TE@MaxFCD",
+        "VIL": "VIL",
+        "Wetbulb_0C_Hgt": "WETBULB_0C_HGT",
+        "avg_beam_hgt": "AVG_BEAM_HGT",
+        "p98LLAz": "P98LLAZ",
+        "p98MLAz": "P98MLAZ"
+      },
+      "rap_products": {
+        "derived": [
+          {
+            "formula": "temp_2m - dewpoint_2m",
+            "key": "dewpoint_depression"
+          },
+          {
+            "formula": "freezing_level_m / 1000",
+            "key": "freezing_level_height"
+          }
+        ],
+        "isobaric_levels_mb": [
+          1000,
+          975,
+          950,
+          925,
+          900,
+          875,
+          850,
+          825,
+          800,
+          775,
+          750,
+          725,
+          700,
+          675,
+          650,
+          625,
+          600,
+          575,
+          550,
+          525,
+          500,
+          475,
+          450,
+          425,
+          400,
+          375,
+          350,
+          325,
+          300,
+          275,
+          250,
+          225,
+          200,
+          175,
+          150,
+          125,
+          100
+        ],
+        "products": [
+          {
+            "filter": {
+              "typeOfLevel": "isobaricInhPa"
+            },
+            "key_template": "wind_field.u{level}",
+            "levels": [
+              1000,
+              975,
+              950,
+              925,
+              900,
+              875,
+              850,
+              825,
+              800,
+              775,
+              750,
+              725,
+              700,
+              675,
+              650,
+              625,
+              600,
+              575,
+              550,
+              525,
+              500,
+              475,
+              450,
+              425,
+              400,
+              375,
+              350,
+              325,
+              300,
+              275,
+              250,
+              225,
+              200,
+              175,
+              150,
+              125,
+              100
+            ],
+            "var": "u",
+            "var_aliases": [
+              "u",
+              "UGRD",
+              "u-component_of_wind_isobaric",
+              "wind_u"
+            ]
+          },
+          {
+            "filter": {
+              "typeOfLevel": "isobaricInhPa"
+            },
+            "key_template": "wind_field.v{level}",
+            "levels": [
+              1000,
+              975,
+              950,
+              925,
+              900,
+              875,
+              850,
+              825,
+              800,
+              775,
+              750,
+              725,
+              700,
+              675,
+              650,
+              625,
+              600,
+              575,
+              550,
+              525,
+              500,
+              475,
+              450,
+              425,
+              400,
+              375,
+              350,
+              325,
+              300,
+              275,
+              250,
+              225,
+              200,
+              175,
+              150,
+              125,
+              100
+            ],
+            "var": "v",
+            "var_aliases": [
+              "v",
+              "VGRD",
+              "v-component_of_wind_isobaric",
+              "wind_v"
+            ]
+          },
+          {
+            "filter": {
+              "level": 10,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "u10m",
+            "var": "u10",
+            "var_aliases": [
+              "u10",
+              "10u",
+              "u"
+            ]
+          },
+          {
+            "filter": {
+              "level": 10,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "v10m",
+            "var": "v10",
+            "var_aliases": [
+              "v10",
+              "10v",
+              "v"
+            ]
+          },
+          {
+            "filter": {
+              "level": 2,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "temp_2m",
+            "transform": "kelvin_to_celsius",
+            "var": "t2m",
+            "var_aliases": [
+              "t2m",
+              "2t",
+              "t"
+            ]
+          },
+          {
+            "filter": {
+              "level": 2,
+              "typeOfLevel": "heightAboveGround"
+            },
+            "key": "dewpoint_2m",
+            "transform": "kelvin_to_celsius",
+            "var": "d2m",
+            "var_aliases": [
+              "d2m",
+              "2d",
+              "dpt"
+            ]
+          },
+          {
+            "filter": {
+              "typeOfLevel": "isothermZero"
+            },
+            "key": "freezing_level_m",
+            "var": "gh"
+          }
+        ]
+      },
+      "schema_version": 1,
+      "stats_datasets": [
+        {
+          "key": "Ref0",
+          "method": "max",
+          "name": "Ref0",
+          "product": "Reflectivity_0C_00.50"
+        },
+        {
+          "key": "Ref5",
+          "method": "max",
+          "name": "Ref5",
+          "product": "Reflectivity_-5C_00.50"
+        },
+        {
+          "key": "Ref15",
+          "method": "max",
+          "name": "Ref15",
+          "product": "Reflectivity_-15C_00.50"
+        },
+        {
+          "key": "maxCGFlashDensity",
+          "method": "max",
+          "name": "NLDN",
+          "product": "NLDN_CG_001min_AvgDensity_00.00"
+        },
+        {
+          "key": "maxEchoTop18",
+          "method": "max",
+          "name": "EchoTop18",
+          "product": "EchoTop_18_00.50"
+        },
+        {
+          "key": "p95EchoTop18",
+          "method": "percentile",
+          "name": "EchoTop18 (95th)",
+          "percentile": 95,
+          "product": "EchoTop_18_00.50"
+        },
+        {
+          "key": "p90EchoTop18",
+          "method": "percentile",
+          "name": "EchoTop18 (90th)",
+          "percentile": 90,
+          "product": "EchoTop_18_00.50"
+        },
+        {
+          "key": "maxEchoTop30",
+          "method": "max",
+          "name": "EchoTop30",
+          "product": "EchoTop_30_00.50"
+        },
+        {
+          "key": "p90EchoTop30",
+          "method": "percentile",
+          "name": "EchoTop30 (90th)",
+          "percentile": 90,
+          "product": "EchoTop_30_00.50"
+        },
+        {
+          "key": "p90EchoTop50",
+          "method": "percentile",
+          "name": "EchoTop50 (90th)",
+          "percentile": 90,
+          "product": "EchoTop_50_00.50"
+        },
+        {
+          "key": "maxVIL",
+          "method": "max",
+          "name": "VIL",
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "p95VIL",
+          "method": "percentile",
+          "name": "VIL (95th)",
+          "percentile": 95,
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "p90VIL",
+          "method": "percentile",
+          "name": "VIL (90th)",
+          "percentile": 90,
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "p50VIL",
+          "method": "percentile",
+          "name": "VIL (50th)",
+          "percentile": 50,
+          "product": "VIL_00.50"
+        },
+        {
+          "key": "maxVILDensity",
+          "method": "max",
+          "name": "VIL Density",
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "p95VILDensity",
+          "method": "percentile",
+          "name": "VIL Density (95th)",
+          "percentile": 95,
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "p90VILDensity",
+          "method": "percentile",
+          "name": "VIL Density (90th)",
+          "percentile": 90,
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "p50VILDensity",
+          "method": "percentile",
+          "name": "VIL Density (50th)",
+          "percentile": 50,
+          "product": "VIL_Density_00.50"
+        },
+        {
+          "key": "maxAzShearLow",
+          "method": "max",
+          "name": "AzShear Low",
+          "product": "MergedAzShear_0-2kmAGL_00.50"
+        },
+        {
+          "key": "p95AzShearLow",
+          "method": "percentile",
+          "name": "AzShear Low (95th)",
+          "percentile": 95,
+          "product": "MergedAzShear_0-2kmAGL_00.50"
+        },
+        {
+          "key": "maxAzShearMid",
+          "method": "max",
+          "name": "AzShear Mid",
+          "product": "MergedAzShear_3-6kmAGL_00.50"
+        },
+        {
+          "key": "p95AzShearMid",
+          "method": "percentile",
+          "name": "AzShear Mid (95th)",
+          "percentile": 95,
+          "product": "MergedAzShear_3-6kmAGL_00.50"
+        },
+        {
+          "key": "maxPrecipRate",
+          "method": "max",
+          "name": "PrecipRate",
+          "product": "PrecipRate_00.00"
+        },
+        {
+          "key": "maxRALA",
+          "method": "max",
+          "name": "Reflectivity at Lowest Altitude",
+          "product": "MergedReflectivityAtLowestAltitude_00.50"
+        },
+        {
+          "key": "maxVII",
+          "method": "max",
+          "name": "VII",
+          "product": "VII_00.50"
+        }
+      ]
+    },
+    "kalman": {
+      "assignment": {
+        "gating_threshold": 6.0,
+        "method": "greedy",
+        "min_gating_radius_km": 2.0,
+        "prefilter_radius_km": 16.0,
+        "weights": {
+          "position": 1.0,
+          "size_similarity": 0.5,
+          "velocity_direction": 2.0
+        }
+      },
+      "assignment_costs": {
+        "default_dt_seconds": 120.0,
+        "implied_speed_deadband_ms": 0.5,
+        "predicted_speed_deadband_ms": 1.0,
+        "reflectivity_diff_cap": 1.0,
+        "size_cost_cap": 1.0,
+        "size_ratio_log2_divisor": 2.0
+      },
+      "confidence": {
+        "factor_floor": 0.8,
+        "motion_factor_variance_denominator": 2500.0,
+        "position_decay_onset_std": 5.0,
+        "position_decay_scale": 30.0,
+        "time_penalty_weight": 0.3
+      },
+      "filter_internals": {
+        "initial_acceleration_variance": 1.0,
+        "initial_position_uncertainty_km": 1.0,
+        "initial_velocity_variance": 100.0,
+        "innovation_covariance_regularization": 1e-06,
+        "singular_retry_regularization": 0.0001
+      },
+      "kalman_filter": {
+        "measurement_noise": {
+          "position": 0.5
+        },
+        "process_noise": {
+          "acceleration": 0.1
+        }
+      },
+      "schema_version": 1,
+      "tracking": {
+        "confidence_decay_factor": 0.7,
+        "confidence_threshold": 0.4,
+        "max_prediction_time_minutes": 6.0
+      }
+    },
+    "lineage": {
+      "lineage": {
+        "bounds_prefilter_buffer_deg": 0.0,
+        "buffer": {
+          "max_pending": 100,
+          "min_confirmations": 2,
+          "prune_after_scans": 5,
+          "scan_interval_seconds": 120.0
+        },
+        "tracked_overlap_ratio": 0.1
+      },
+      "schema_version": 1
+    },
+    "nexrad": {
+      "schema_version": 1,
+      "buckets": {
+        "chunks": "unidata-nexrad-level2-chunks"
+      },
+      "stations": {
+        "catalog_url": "https://api.weather.gov/radar/stations",
+        "api_timeout_seconds": 15,
+        "api_cache_ttl_seconds": 30
+      },
+      "selection": {
+        "allowed_vcps": [
+          12,
+          212,
+          215
+        ],
+        "high_max_angle_deg": 4.0,
+        "min_sweep_angle_deg": 0.4,
+        "canonical_elevation_bins": [
+          0.5,
+          0.9,
+          1.3,
+          1.8,
+          2.4,
+          3.1,
+          4.0
+        ],
+        "min_required_volume_chunks": 25,
+        "waveforms": {
+          "surveillance": "contiguous_surveillance",
+          "doppler": "contiguous_doppler",
+          "single_elevation": [
+            "staggered_pulse_pair",
+            "batch"
+          ]
+        }
+      },
+      "timeouts": {
+        "volume_discovery_seconds": 20.0,
+        "chunk_list_seconds": 20.0,
+        "ingest_seconds": 120.0,
+        "scan_seconds": 180.0,
+        "cancellation_grace_seconds": 2.0,
+        "heartbeat_stale_seconds": 240.0,
+        "heartbeat_startup_grace_seconds": 60.0
+      },
+      "concurrency": {
+        "max_site_tasks": 24,
+        "max_chunk_downloads": 64,
+        "worker_pool_size": 4,
+        "worker_recycle_interval": 24,
+        "worker_timeout_seconds": 40.0,
+        "parse_checkpoint_chunk_interval": 8,
+        "in_volume_prefetch": 4
+      },
+      "realtime": {
+        "scan_interval_seconds": 20,
+        "completion_interval_seconds": 10,
+        "max_candidate_volumes_per_site": 3
+      },
+      "cli": {
+        "sites": null,
+        "base_dir": null
+      },
+      "retention": {
+        "scan_dirs_to_keep": 3,
+        "elevation_dirs_to_keep": 2,
+        "stale_manifest_max_age_hours": 12
+      },
+      "gui": {
+        "retention_minutes": 120,
+        "poll_interval_seconds": 30.0,
+        "poll_interval_min_seconds": 1.0,
+        "max_workers": 8,
+        "cleanup_max_age_minutes": 120
+      },
+      "variable_colormaps": {
+        "DBZH": "NWS_Reflectivity",
+        "VRADH": "VRADH",
+        "WRADH": "WRADH",
+        "PHIDP": "PHIDP",
+        "RHOHV": "RHOHV",
+        "ZDR": "ZDR"
+      }
+    },
+    "nws": {
+      "schema_version": 1,
+      "nws": {
+        "registry_ttl_hours": 2.0,
+        "edgewarn_alert_retention_minutes": 120,
+        "dropped_events": [
+          "Administrative Message",
+          "Freezing Spray Advisory",
+          "Low Water Advisory",
+          "High Surf Advisory",
+          "Small Craft Advisory",
+          "Brisk Wind Advisory",
+          "Practice/Demo Warning",
+          "Required Weekly Test",
+          "Required Monthly Test",
+          "Test Message",
+          "Hurricane Local Statement",
+          "Flood Statement",
+          "Flash Flood Statement",
+          "Rip Current Statement",
+          "Lakeshore Flood Statement",
+          "Hydrologic Outlook",
+          "Air Quality Alert",
+          "Air Stagnation Advisory",
+          "Beach Hazards Statement"
+        ],
+        "active_alerts_url": "https://api.weather.gov/alerts/active",
+        "download_chunk_size_bytes": 8192,
+        "tornado_upgrade": {
+          "event": "Tornado Warning",
+          "rules": [
+            {
+              "description_contains": "TORNADO EMERGENCY",
+              "name": "Tornado Emergency"
+            },
+            {
+              "description_contains": "PARTICULARLY DANGEROUS SITUATION",
+              "name": "PDS Tornado Warning"
+            }
+          ]
+        }
+      },
+      "geomapper": {
+        "geometry_precision": 4,
+        "simplify_tolerance": 0.01,
+        "junk_keys": [
+          "references",
+          "sender",
+          "parameters",
+          "instruction",
+          "response",
+          "scope",
+          "code",
+          "language",
+          "web",
+          "eventCode"
+        ]
+      },
+      "zone_sync": {
+        "assets_dir": "assets/nws_zones",
+        "zone_types": [
+          "forecast",
+          "fire",
+          "public",
+          "county",
+          "marine"
+        ],
+        "timeout_seconds": 30,
+        "max_retries": 3,
+        "max_workers": 16,
+        "retry_backoff_seconds": 0.25,
+        "geometry_precision": 5,
+        "geometry_precision_max": 8,
+        "pause_seconds": 0.05,
+        "progress": true,
+        "zone_catalog_url_pattern": "https://api.weather.gov/zones/{zone_type}",
+        "zone_detail_url_pattern": "https://api.weather.gov/zones/{zone_type}/{code}"
+      }
+    },
+    "runtime": {
+      "schema_version": 1,
+      "logging": {
+        "retention_files": 32,
+        "max_file_mb": 64
+      },
+      "identity": {
+        "contact": "ewsbackend@gmail.com",
+        "weather_api_accept": "application/geo+json"
+      },
+      "run": {
+        "lat_limits": [
+          20,
+          55
+        ],
+        "lon_limits": [
+          230,
+          300
+        ],
+        "profile": false,
+        "disable_ctam": false,
+        "disable_stormprob": false,
+        "disable_tracking": false,
+        "disable_polygon_expansion": false,
+        "ctam_module_dir": "ctam_modules",
+        "disable_glm": false,
+        "disable_nexrad": false,
+        "mrms_core_only": false,
+        "disable_nws": false
+      },
+      "supervisor": {
+        "check_ticks": 30,
+        "tick_seconds": 0.5,
+        "max_restarts": 5,
+        "restart_window_seconds": 60.0,
+        "base_backoff_seconds": 1.0,
+        "max_backoff_seconds": 30.0,
+        "stop_join_timeout_seconds": 5,
+        "stop_kill_join_timeout_seconds": 1,
+        "health_file": {
+          "dir": "DATA_DIR",
+          "name": "runtime/accessory_health.json"
+        },
+        "nexrad_heartbeat_file": {
+          "dir": "DATA_DIR",
+          "name": "runtime/nexrad_ingest_heartbeat.json"
+        }
+      },
+      "background_intervals": {
+        "nws_seconds": 60,
+        "nws_interval_seconds": 1.0,
+        "nexrad_seconds": 5,
+        "nexrad_interval_seconds": 0.2
+      },
+      "cycle": {
+        "max_cycle_seconds": 300,
+        "state_file": {
+          "dir": "DATA_DIR",
+          "name": "runtime/cycle_state.json"
+        },
+        "retry": {
+          "max_attempts": 3,
+          "initial_backoff_seconds": 5.0,
+          "max_backoff_seconds": 30.0
+        },
+        "ingest_max_entries": 10,
+        "log_drain_poll_seconds": 1,
+        "max_backlog_cycles": 10
+      },
+      "nexrad_coordination": {
+        "pause_ingest_during_primary_activity": false,
+        "primary_lease_ttl_seconds": 90.0,
+        "pause_max_wait_seconds": 30.0,
+        "pause_poll_interval_seconds": 0.5
+      },
+      "handoff": {
+        "enabled": true,
+        "input_lock_timeout_seconds": 30,
+        "input_lock_hold_warning_seconds": 5
+      },
+      "profiling": {
+        "perf_tracker": null
+      },
+      "ingest": {
+        "listing_concurrency": null,
+        "download_concurrency": null,
+        "decode_concurrency": 2,
+        "auxiliary_concurrency": 2,
+        "listing_timeout_seconds": null,
+        "download_timeout_seconds": null,
+        "auxiliary_timeout_seconds": null,
+        "listing_page_size": 1000,
+        "listing_max_pages": 100,
+        "listing_max_objects": 4096,
+        "pending_max_jobs": 4096,
+        "retry_max_attempts": 3,
+        "retry_initial_seconds": 5,
+        "retry_max_seconds": 30,
+        "scan_deadline_seconds": 180,
+        "reconcile_interval_seconds": 10,
+        "retention_minutes": null,
+        "disk_budget_mb": 8192,
+        "shutdown_timeout_seconds": 30
+      },
+      "consumers": {
+        "core_readiness_seconds": 1.0
+      }
+    },
+    "scheduler": {
+      "scheduler": {
+        "modifier_lookup_max_entries": 20,
+        "s3_lookback_hours": 1,
+        "slow_check_log_threshold_ms": 2000,
+        "ingest_poll_seconds": 10
+      },
+      "schema_version": 1
+    },
+    "synoptic_rap": {
+      "rap": {
+        "bucket": "noaa-rap-pds",
+        "date_format": "%Y%m%d",
+        "dir_pattern": "rap.{date}",
+        "file_pattern": "rap.t{hour:02d}z.awp130pgrbf00.grib2",
+        "filename_regex": "^RAP\\.(?P<date>\\d{8})-(?P<hour>\\d{2})z\\.awp130pgrbf00\\.grib2$",
+        "local_file_pattern": "RAP.{date}-{hour:02d}z.awp130pgrbf00.grib2",
+        "lookback_step_hours": 1,
+        "max_age_minutes": 180,
+        "max_files": 3,
+        "nomads_base_url": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rap/prod",
+        "nomads_chunk_size_bytes": 1048576,
+        "nomads_timeout_seconds": 120
+      },
+      "schema_version": 1
+    }
+  },
+  "cases": [
+    {
+      "label": "empty",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [],
+      "valid": true
+    },
+    {
+      "label": "new",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_NewField_01.25"
+      ],
+      "valid": true
+    },
+    {
+      "label": "protected",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_ProbSevere"
+      ],
+      "valid": true
+    },
+    {
+      "label": "negative",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_Reflectivity_-5C_00.50"
+      ],
+      "valid": true
+    },
+    {
+      "label": "duplicate",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MESH_00.50",
+        "MRMS_MESH_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "collision",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MESH_00.50",
+        "MRMS_mesh_01.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "reserved_collision",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_PrecipFlag_01.00"
+      ],
+      "valid": false
+    },
+    {
+      "label": "prefix",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MRMS_MESH_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "traversal",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_../x_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "newline",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_MESH_00.50\n"
+      ],
+      "valid": false
+    },
+    {
+      "label": "length",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        "MRMS_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_00.50"
+      ],
+      "valid": false
+    },
+    {
+      "label": "override",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "products"
+      ],
+      "value": [
+        {
+          "product": "MESH_00.50",
+          "enabled": false
+        }
+      ],
+      "valid": false
+    },
+    {
+      "label": "removed_bucket",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "bucket"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_path_patterns",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "path_patterns"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_check_products",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "check_products"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_membership_lists",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "membership_lists"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_outdir",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "outdir"
+      ],
+      "value": {},
+      "valid": false
+    },
+    {
+      "label": "removed_https_base_url",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "base_url"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "removed_https_probsevere_url",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "probsevere_url"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "removed_https_directory_map",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "directory_map"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "removed_https_directory_split_token",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "ncep_https",
+        "directory_split_token"
+      ],
+      "value": "override",
+      "valid": false
+    },
+    {
+      "label": "zero_concurrency",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "max_concurrency"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "large_concurrency",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "max_concurrency"
+      ],
+      "value": 65,
+      "valid": false
+    },
+    {
+      "label": "fraction_concurrency",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "max_concurrency"
+      ],
+      "value": 1.5,
+      "valid": false
+    },
+    {
+      "label": "zero_deadline",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "optional_timeout_seconds"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "large_deadline",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "downloads",
+        "optional_timeout_seconds"
+      ],
+      "value": 3601,
+      "valid": false
+    },
+    {
+      "label": "zero_retention",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "cleanup_max_age_minutes"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "zero_chunk",
+      "name": "ingest",
+      "path": [
+        "mrms",
+        "decompress_chunk_size_bytes"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "integration_selector",
+      "name": "integration",
+      "path": [
+        "stats_datasets",
+        0,
+        "product"
+      ],
+      "value": "NewField_01.25",
+      "valid": true
+    },
+    {
+      "label": "integration_prefix",
+      "name": "integration",
+      "path": [
+        "stats_datasets",
+        0,
+        "product"
+      ],
+      "value": "MRMS_MESH_00.50",
+      "valid": false
+    },
+    {
+      "label": "integration_both",
+      "name": "integration",
+      "path": [
+        "stats_datasets",
+        0,
+        "filepath"
+      ],
+      "value": "MRMS_MESH_DIR",
+      "valid": false
+    },
+    {
+      "label": "stormprob_True",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": true,
+      "valid": true
+    },
+    {
+      "label": "stormprob_False",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": false,
+      "valid": true
+    },
+    {
+      "label": "stormprob_false",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": "false",
+      "valid": false
+    },
+    {
+      "label": "stormprob_1",
+      "name": "runtime",
+      "path": [
+        "run",
+        "disable_stormprob"
+      ],
+      "value": 1,
+      "valid": false
+    },
+    {
+      "label": "independent_ingest_poll_seconds_0",
+      "name": "scheduler",
+      "path": [
+        "scheduler",
+        "ingest_poll_seconds"
+      ],
+      "value": 0,
+      "valid": false
+    },
+    {
+      "label": "independent_ingest_poll_seconds_10",
+      "name": "scheduler",
+      "path": [
+        "scheduler",
+        "ingest_poll_seconds"
+      ],
+      "value": 10,
+      "valid": true
+    },
+    {
+      "label": "independent_download_concurrency_None",
+      "name": "runtime",
+      "path": [
+        "ingest",
+        "download_concurrency"
+      ],
+      "value": null,
+      "valid": true
+    },
+    {
+      "label": "independent_download_concurrency_65",
+      "name": "runtime",
+      "path": [
+        "ingest",
+        "download_concurrency"
+      ],
+      "value": 65,
+      "valid": false
+    },
+    {
+      "label": "independent_core_readiness_seconds_2",
+      "name": "runtime",
+      "path": [
+        "consumers",
+        "core_readiness_seconds"
+      ],
+      "value": 2,
+      "valid": false
+    }
+  ],
+  "phase6_cli_contract": [
+    {
+      "argv": [
+        "--disable-stormprob"
+      ],
+      "disable_stormprob": true
+    },
+    {
+      "argv": [
+        "--no-disable-stormprob"
+      ],
+      "disable_stormprob": false
+    }
+  ]
+}

@@ -86,11 +86,12 @@
     "alert_matching": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["events", "polygon_match_buffer_deg", "point_match_buffer_deg", "snapshot_cache_max_entries", "geometry_cache_max_entries"],
+      "required": ["events", "polygon_match_buffer_deg", "point_match_buffer_deg", "snapshot_max_age_seconds", "snapshot_cache_max_entries", "geometry_cache_max_entries"],
       "properties": {
         "events": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
         "polygon_match_buffer_deg": { "type": "number", "minimum": 0 },
         "point_match_buffer_deg": { "type": "number", "minimum": 0 },
+        "snapshot_max_age_seconds": { "type": "number", "exclusiveMinimum": 0 },
         "snapshot_cache_max_entries": { "type": "integer", "minimum": 1 },
         "geometry_cache_max_entries": { "type": "integer", "minimum": 1 }
       }

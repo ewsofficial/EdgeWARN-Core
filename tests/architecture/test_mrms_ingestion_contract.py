@@ -1,0 +1,82 @@
+"""Cross-catalog characterization for configurable MRMS ingestion Phase 1."""
+
+import json
+from pathlib import Path
+
+import pytest
+import yaml
+
+from common.config.loader import load_config
+import util.file as fs
+
+
+ROOT = Path(__file__).resolve().parents[2]
+BASELINE = json.loads((ROOT / "tests/fixtures/config/mrms_ingestion_contract.json").read_text())["v1_baseline"]
+
+
+def test_source_and_retention_settings_remain_v1_operator_owned():
+    mrms = json.loads((ROOT / "src/common/config/mrms-v1.json").read_text())["mrms"]
+    assert {key: mrms[key] for key in BASELINE["source"]} == BASELINE["source"]
+    assert {key: mrms[key] for key in BASELINE["retention"]} == BASELINE["retention"]
+    assert load_config("filesystem")["cleanup_defaults"]["max_files"] == BASELINE["cleanup_max_files"]
+
+
+def test_fourteen_optional_statistic_products_and_twenty_five_statistics():
+    expected = [stat for item in BASELINE["products"] for stat in item["stats"]]
+    from common.ingest.mrms.core_contract import LEGACY_ALIASES
+    aliases = {product: alias for alias, product in LEGACY_ALIASES.items()}
+    actual = [dict(stat) for stat in load_config("integration")["stats_datasets"]]
+    for stat in actual:
+        stat["filepath"] = aliases[stat.pop("product")]
+    assert sorted(actual, key=lambda item: item["key"]) == sorted(expected, key=lambda item: item["key"])
+    assert len(actual) == 25
+    assert len({item["filepath"] for item in actual}) == 14
+    assert not {item["filepath"] for item in actual} & {
+        "MRMS_COMPOSITE_DIR", "MRMS_PRECIPTYP_DIR", "MRMS_PROBSEVERE_DIR",
+    }
+
+
+def test_stormprob_mesh_is_probsevere_derived_and_not_the_raw_mesh_product():
+    from EdgeWARN.stormprob.features import IMPORTANT_SCALAR_PROPERTY_FEATURES
+    integration = load_config("integration")
+    assert "MESH" in IMPORTANT_SCALAR_PROPERTY_FEATURES
+    assert integration["probsevere_field_map"]["MESH"] == "MESH"
+    assert not any(stat["product"] == "MESH_00.50" for stat in integration["stats_datasets"])
+    # Lightning enrichment is supported but is not a trained property feature.
+    assert "maxCGFlashDensity" not in IMPORTANT_SCALAR_PROPERTY_FEATURES
+
+
+def test_stormprob_sources_are_one_list_across_preflight_and_ingest():
+    from common.ingest.mrms.core_contract import STORMPROB_INTEGRATION_PRODUCTS
+    from EdgeWARN.ctam.preflight import STORMPROB_MRMS_SOURCES
+
+    assert tuple(source.product for source in STORMPROB_MRMS_SOURCES) == \
+        STORMPROB_INTEGRATION_PRODUCTS
+
+
+def test_stormprob_sources_gate_integration_only_when_enabled():
+    """test-run-1001: no product had core_phase="integration", so integration
+    released with only RAP/GLM gating while StormProb inputs were absent."""
+    from common.ingest.mrms.config import get_ingest_dependencies
+    from common.ingest.mrms.core_contract import STORMPROB_INTEGRATION_PRODUCTS
+
+    enabled = get_ingest_dependencies()
+    assert set(STORMPROB_INTEGRATION_PRODUCTS) <= set(enabled.mandatory_integration)
+    assert not set(STORMPROB_INTEGRATION_PRODUCTS) & set(enabled.optional)
+    for flags in ({"disable_ctam": True}, {"disable_stormprob": True}):
+        disabled = get_ingest_dependencies(**flags)
+        assert not set(STORMPROB_INTEGRATION_PRODUCTS) & set(disabled.mandatory_integration)
+        assert disabled.fingerprint != enabled.fingerprint
+
+
+def test_a_disabled_stormprob_source_fails_dependency_preflight():
+    from dataclasses import replace
+    from common.ingest.mrms.config import get_registry
+    from common.ingest.mrms.core_contract import resolve_dependencies
+
+    registry = get_registry()
+    reduced = replace(registry, products=tuple(
+        p for p in registry.products if p.product_id != "VIL_00.50"))
+    with pytest.raises(ValueError, match="VIL_00.50"):
+        resolve_dependencies(reduced, require_stormprob_inputs=True)
+    resolve_dependencies(reduced, require_stormprob_inputs=False)

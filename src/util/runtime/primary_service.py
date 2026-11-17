@@ -1,61 +1,138 @@
-"""Primary EdgeWARN service functions (decomposition Phase 1).
+"""Core local-readiness polling, cycle configuration, and retry handling."""
 
-Owns MRMS timestamp selection, the truthful cycle-state store, retry policy,
-and the primary polling loop that drives ``run_primary_cycle_once``. Extracted
-verbatim from the former monolithic ``run.py`` so the future
-``run_edgewarn.py`` entry point can call this module directly while the old
-runner remains a temporary adapter.
-
-The primary service must not import EWMRS or NEXRAD implementations at module
-load: the EWMRS tandem worker is deferred inside ``util.runtime.cycle``, and
-accessory loops live behind ``util.runtime.background``, which this module
-never imports.
-"""
-
-from datetime import datetime, timezone
 import multiprocessing
+import math
+from datetime import datetime, timezone
 import time
 import uuid
 
 import util.file as fs
 from common.config import loader as config_loader, overlay
-from common.ingest.mrms.config import get_check_modifiers
 from util.runtime.cycle import (
     CycleRetryPolicy,
+    CycleOutcome,
+    CycleStageResult,
+    CycleStatus,
     CycleStateStore,
     PrimaryCycleConfig,
     run_primary_cycle_once,
+    sweep_core_pins,
 )
 from util.runtime.config import resolve_file, section
+from util.runtime.ingest_handoff import IngestRecordError, utc
 from util.runtime.scheduler import load_last_processed_from_stormcells
 
 
 def build_cycle_config(args):
     """Freeze one validated per-cycle configuration for the primary service."""
+    from common.ingest.mrms.config import get_ingest_dependencies
+
     mrms_core_only = args.mrms_core_only
     handoff_settings = section("handoff")
+    handoff_enabled = bool(overlay.resolve(
+        None,
+        env_names=["EDGEWARN_HANDOFF_ENABLED"],
+        yaml_value=handoff_settings["enabled"],
+        key="handoff.enabled",
+    ))
+    dependencies = get_ingest_dependencies(
+        mrms_core_only=mrms_core_only,
+        disable_glm=args.disable_glm,
+        disable_ctam=args.disable_ctam,
+        disable_stormprob=args.disable_stormprob,
+    )
+    consumers = section("consumers")
     return PrimaryCycleConfig(
         lat_limits=tuple(args.lat_limits),
         lon_limits=tuple(args.lon_limits),
         profile=args.profile,
         disable_ctam=args.disable_ctam,
         disable_ctam_modules=args.disable_ctam_modules,
+        disable_stormprob=args.disable_stormprob,
+        ctam_discovery=getattr(args, "ctam_discovery", None),
         disable_tracking=args.disable_tracking,
         disable_polygon_expansion=args.disable_polygon_expansion,
         refl_threshold=args.refl_threshold,
         min_seed_percentage=args.min_seed_percentage,
         drop_offset=args.drop_offset,
         config_dir=args.config_dir,
-        goes_enabled=not args.disable_goes and not mrms_core_only,
+        goes_enabled=not args.disable_glm and not mrms_core_only,
         mrms_core_only=mrms_core_only,
         base_dir=args.base_dir,
-        handoff_enabled=bool(overlay.resolve(
-            None,
-            env_names=["EDGEWARN_HANDOFF_ENABLED"],
-            yaml_value=handoff_settings["enabled"],
-            key="handoff.enabled",
-        )),
+        handoff_enabled=handoff_enabled,
+        dependencies=dependencies,
+        ingest_run_id=args.ingest_run_id,
+        readiness_check_seconds=consumers["core_readiness_seconds"],
     )
+
+
+class LocalReadinessReader:
+    """Select pending scans from durable local readiness records.
+
+    Replaces the remote S3/HTTPS timestamp intersection entirely. A scan is a
+    candidate only once the ingest service has committed a complete, locally
+    valid check set for it, so Core never selects, downloads, or validates a
+    source itself. Candidates are returned oldest first; the realtime loop
+    takes the newest and supersedes the rest.
+    """
+
+    def __init__(self, *, base_dir, run_id, dependencies, log=None):
+        from util.runtime.ingest_handoff import IngestHandoff
+
+        self.base_dir = base_dir
+        self.dependencies = dependencies
+        self._log = log if log is not None else print
+        self.handoff = IngestHandoff(base_dir, fingerprint=dependencies.fingerprint,
+                                     run_id=run_id)
+        self._reported = set()
+
+    def pending_scans(self):
+        """Candidate scan times in timestamp order, oldest first."""
+        from common.pipeline.readiness import validate_phase_dependencies
+
+        pending = set()
+        for record in self.handoff.records("core-start-ready"):
+            if self.handoff.read("terminal", record.key) is not None:
+                continue
+            try:
+                validate_phase_dependencies(record, self.dependencies)
+            except IngestRecordError as exc:
+                if record.key not in self._reported:
+                    self._reported.add(record.key)
+                    self._log(f"[Scheduler] Ignoring unusable start readiness for "
+                              f"{record.key}: {exc}")
+                continue
+            manifest = record.to_manifest()
+            if manifest is not None:
+                pending.add(manifest.cycle_time)
+        return tuple(sorted(pending))
+
+    def skip(self, scan, reason):
+        """Persist an explicit skip so a late old scan never rewinds tracking."""
+        from util.runtime.handoff import canonical_cycle_id
+
+        key = canonical_cycle_id(utc(scan))
+        if self.handoff.read("terminal", key) is not None:
+            return
+        self.handoff.disposition("terminal", key, status="skipped", reason=reason)
+        self._log(f"[Scheduler] Skipped {key}: {reason}")
+
+
+def require_ingest_producer(registry, dependencies, *, log):
+    """Fail visibly on a producer disagreement instead of weakening readiness."""
+    from util.runtime.mrms_registry import MrmsProducerUnavailable, require_ingest_agreement
+
+    if registry is None:
+        log("[Scheduler] Independent ingest requires the version 2 MRMS registry; "
+            "Core cannot read durable readiness records.")
+        return False
+    try:
+        require_ingest_agreement(registry, dependencies.fingerprint)
+    except MrmsProducerUnavailable as exc:
+        log(f"[Scheduler] {exc}")
+        return False
+    return True
+
 
 
 def report_effective_config(config_dir=None):
@@ -88,25 +165,20 @@ def report_effective_config(config_dir=None):
 
     # Lazy imports keep diagnostics from making optional render dependencies eager
     # at module import time.
-    from common.ingest.mrms.config import get_mrms_modifiers
-    from EWMRS.render.config import get_mrms_file_list, get_goes_file_list
+    from common.ingest.mrms.config import get_check_modifiers, get_mrms_modifiers
     from EdgeWARN.process.integrate.config import get_datasets_config
-    from EWMRS.rap.config import get_rap_uint16_layers
     print(
         "[Scheduler] Enabled products: "
         f"MRMS ingest={len(get_mrms_modifiers())}, "
         f"MRMS readiness={len(get_check_modifiers())}, "
-        f"EWMRS MRMS={len(get_mrms_file_list())}, "
-        f"GOES={len(get_goes_file_list())}, "
         f"integration datasets={len(get_datasets_config())}, "
-        f"RAP layers={len(get_rap_uint16_layers())}"
     )
     print("[Scheduler] Configuration changes require a process restart to take effect.")
 
 
 def log_effective_flags(args):
     mrms_core_only = args.mrms_core_only
-    goes_enabled = not args.disable_goes and not mrms_core_only
+    goes_enabled = not args.disable_glm and not mrms_core_only
     print(
         "[Scheduler] Configuration: "
         f"lat={tuple(args.lat_limits)}, lon={tuple(args.lon_limits)}, "
@@ -123,14 +195,8 @@ def log_effective_flags(args):
         print("[Scheduler] Tracking disabled via --disable-tracking")
     if args.disable_polygon_expansion:
         print("[Scheduler] Polygon expansion disabled via --disable-polygon-expansion; using original ProbSevere polygons")
-    if args.disable_ewmrs:
-        print("[Scheduler] EWMRS pipeline disabled via --disable-ewmrs")
-    if args.disable_nws:
-        print("[Scheduler] NWS background ingest disabled via --disable-nws")
-    if args.disable_metar:
-        print("[Scheduler] METAR background ingest disabled via --disable-metar")
-    if args.disable_goes:
-        print("[Scheduler] GOES/GLM ingest and GOES rendering disabled via --disable-goes")
+    if args.disable_glm:
+        print("[Scheduler] GOES/GLM ingest and GOES rendering disabled via --disable-glm")
     if args.disable_nexrad:
         print("[Scheduler] NEXRAD runs in its own service (run_nexrad.py); this runner never starts it")
     if mrms_core_only:
@@ -163,21 +229,30 @@ def _resolve_retry_policy(cycle_settings):
 
 def run_primary_cycle_loop(
     *,
-    checker,
     cycle_config,
     supervisor=None,
     on_tick=None,
     stop_event=None,
+    progress=None,
 ):
-    """Poll for MRMS timestamps and drive primary cycles until interrupted.
+    """Drive primary cycles from local durable readiness until interrupted.
 
-    Advances ``last_successful`` and the selection cursor only after a
-    validated ``CycleOutcome``; failed scans retry with bounded exponential
-    backoff and are abandoned explicitly after ``max_attempts``. The
-    supervisor is optional: the primary service owns no accessory children,
-    so it is None for the standalone primary. ``on_tick`` fires roughly once
-    per supervisor tick (used by ``run_edgewarn.py`` to refresh its service
-    heartbeat without blocking the selection loop).
+    A scan is selected only when the ingest service has committed a complete,
+    locally valid check set for it. Realtime processes the newest pending scan
+    and records every older pending scan as an explicit ``skipped`` terminal
+    disposition ("superseded"), so tracking and lineage stay monotonic and a
+    backlog never delays the freshest analysis. Waiting for a scan to become
+    ready costs no analysis retry: an attempt is recorded only once a start
+    record actually exists.
+
+    ``last_successful`` and the selection cursor advance only after a validated
+    ``CycleOutcome``. A failed scan retries with bounded exponential backoff and
+    is abandoned explicitly after ``max_attempts``, or at once when its outcome
+    is not retryable (a terminal scan or a StormProb input gap is skipped and
+    Core continues with the next scan); a start record that arrives
+    behind the processing cursor is recorded as an explicit skip and never
+    rewinds tracking. The supervisor is optional: the primary service owns no
+    accessory children, so it is None for the standalone primary.
     """
     stormcell_last_successful, init_message = load_last_processed_from_stormcells(fs.STORMCELL_DIR)
     print(init_message)
@@ -191,6 +266,8 @@ def run_primary_cycle_loop(
             stormcell_last_successful
         )
 
+    progress = progress if progress is not None else {}
+    progress.update(phase="waiting", last_successful_activity=persisted_cycle_state.last_successful)
     last_successful = persisted_cycle_state.last_successful
     last_abandoned = persisted_cycle_state.last_abandoned
     selection_cursor = persisted_cycle_state.selection_cursor
@@ -208,6 +285,20 @@ def run_primary_cycle_loop(
         f"last_abandoned={last_abandoned}, "
         f"pending_retry={pending_timestamp}"
     )
+
+    from common.ingest.mrms.config import get_registry
+
+    registry = get_registry()
+    reader = LocalReadinessReader(
+        base_dir=cycle_config.base_dir,
+        run_id=cycle_config.ingest_run_id or uuid.uuid4().hex,
+        dependencies=cycle_config.dependencies,
+    )
+    # One Core instance runs at a time, so any Core pin left by a crashed or
+    # interrupted earlier run is stale and must not block retention.
+    released = sweep_core_pins(reader.handoff)
+    if released:
+        print(f"[Scheduler] Released {len(released)} stale Core input pin(s) from an earlier run")
 
     supervisor_settings = section("supervisor")
 
@@ -232,87 +323,84 @@ def run_primary_cycle_loop(
 
     try:
         while stop_event is None or not stop_event.is_set():
-            now = datetime.now(timezone.utc)
-            check_modifiers = get_check_modifiers()
-            latest_common = None
-            if pending_timestamp is None:
-                # The selection cursor may include an explicitly abandoned
-                # scan, while last_successful always remains truthful.
-                latest_common = checker.latest_common_minute_1h(
-                    check_modifiers,
-                    last_processed=selection_cursor,
-                )
+            try:
+                if not require_ingest_producer(registry, cycle_config.dependencies, log=print):
+                    _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
+                    continue
 
-                is_new_s3 = bool(
-                    latest_common
-                    and (selection_cursor is None or latest_common > selection_cursor)
-                )
-                if not is_new_s3:
-                    latest_https = checker.check_https_fallback(check_modifiers, now)
-                    if latest_https and (
-                        selection_cursor is None or latest_https > selection_cursor
-                    ):
-                        print(
-                            f"[Scheduler] HTTPS Fallback found NEWER timestamp: {latest_https}"
+                pending = reader.pending_scans()
+                if pending_timestamp is None and pending:
+                    # Realtime takes the newest ready scan. Every older ready scan
+                    # is superseded, so a cold-start backlog never makes Core work
+                    # forward through stale data; tracking still only moves forward.
+                    selection = pending[-1]
+                    for older in pending[:-1]:
+                        reader.skip(
+                            older,
+                            f"superseded by newer ready scan {selection.isoformat()}",
                         )
-                        latest_common = latest_https
+                    if selection_cursor is not None and selection <= selection_cursor:
+                        reader.skip(
+                            selection,
+                            "start readiness arrived at or before the processing cursor; "
+                            "processing continues forward only",
+                        )
+                        selection = None
+                    if selection is not None:
+                        pending_timestamp = selection
+                        pending_attempt_count = 0
+                        print(
+                            f"[Scheduler] Local check set complete for {pending_timestamp}; "
+                            "scheduling detection"
+                        )
 
-                if latest_common and (
-                    selection_cursor is None or latest_common > selection_cursor
-                ):
-                    pending_timestamp = latest_common
-                    pending_attempt_count = 0
-
-            should_run_pipeline = (
-                pending_timestamp is not None
-                and time.monotonic() >= retry_not_before
-            )
-
-            if should_run_pipeline:
-                dt = pending_timestamp
-                pending_attempt_count += 1
-                cycle_state_store.record_attempt(dt, pending_attempt_count)
-                print(
-                    f"[Scheduler] Starting primary cycle for {dt} "
-                    f"(attempt {pending_attempt_count}/{retry_policy.max_attempts})"
+                should_run_pipeline = (
+                    pending_timestamp is not None
+                    and time.monotonic() >= retry_not_before
                 )
 
-                outcome = None
-                try:
-                    if primary_lease is not None:
-                        primary_lease.acquire(dt)
-                    outcome = run_primary_cycle_once(
-                        dt,
-                        manager,
-                        config=cycle_config,
-                    )
-                finally:
-                    if primary_lease is not None:
-                        primary_lease.release()
-                if outcome.completed:
-                    cycle_state_store.record_outcome(outcome, pending_attempt_count)
-                    last_successful = dt
-                    selection_cursor = max(
-                        value
-                        for value in (last_successful, last_abandoned)
-                        if value is not None
-                    )
-                    pending_timestamp = None
-                    pending_attempt_count = 0
-                    retry_not_before = 0.0
+                if should_run_pipeline:
+                    dt = pending_timestamp
+                    pending_attempt_count += 1
+                    cycle_state_store.record_attempt(dt, pending_attempt_count)
                     print(
-                        f"Primary cycle for {dt} finished with "
-                        f"{len(outcome.produced_artifacts)} validated artifact(s)"
+                        f"[Scheduler] Starting primary cycle for {dt} "
+                        f"(attempt {pending_attempt_count}/{retry_policy.max_attempts})"
                     )
-                else:
-                    abandon = pending_attempt_count >= retry_policy.max_attempts
-                    cycle_state_store.record_outcome(
-                        outcome,
-                        pending_attempt_count,
-                        abandoned=abandon,
-                    )
-                    if abandon:
-                        last_abandoned = dt
+
+                    progress["phase"] = "cycling"
+                    outcome = None
+                    try:
+                        if primary_lease is not None:
+                            primary_lease.acquire(dt)
+                        outcome = run_primary_cycle_once(
+                            dt,
+                            manager,
+                            config=cycle_config,
+                            stop_event=stop_event,
+                        )
+                    except Exception as exc:
+                        from EdgeWARN.ctam.preflight import StormProbDependencyError
+                        if isinstance(exc, StormProbDependencyError):
+                            cycle_state_store.record_outcome(
+                                CycleOutcome(
+                                    dt,
+                                    {"stormprob": CycleStageResult(
+                                        CycleStatus.FAILED, errors=(str(exc),))},
+                                    retryable=False,
+                                ),
+                                pending_attempt_count,
+                            )
+                            raise
+                        outcome = CycleOutcome(dt, {"edgewarn": CycleStageResult(
+                            CycleStatus.FAILED, errors=(f"{type(exc).__name__}: {exc}",))}, retryable=True)
+                    finally:
+                        if primary_lease is not None:
+                            primary_lease.release()
+                    if outcome.completed:
+                        progress.update(phase="waiting", last_successful_activity=datetime.now(timezone.utc))
+                        cycle_state_store.record_outcome(outcome, pending_attempt_count)
+                        last_successful = dt
                         selection_cursor = max(
                             value
                             for value in (last_successful, last_abandoned)
@@ -322,45 +410,80 @@ def run_primary_cycle_loop(
                         pending_attempt_count = 0
                         retry_not_before = 0.0
                         print(
-                            f"[Scheduler] Primary cycle for {dt} was explicitly "
-                            f"abandoned after {retry_policy.max_attempts} attempts; "
-                            f"errors={list(outcome.errors)}"
+                            f"Primary cycle for {dt} finished with "
+                            f"{len(outcome.produced_artifacts)} validated artifact(s)"
                         )
                     else:
-                        delay = retry_policy.delay_after(pending_attempt_count)
-                        retry_not_before = time.monotonic() + delay
+                        progress["phase"] = "degraded"
+                        abandon = (not outcome.retryable
+                                   or pending_attempt_count >= retry_policy.max_attempts)
+                        cycle_state_store.record_outcome(
+                            outcome,
+                            pending_attempt_count,
+                            abandoned=abandon,
+                        )
+                        if abandon:
+                            last_abandoned = dt
+                            selection_cursor = max(
+                                value
+                                for value in (last_successful, last_abandoned)
+                                if value is not None
+                            )
+                            pending_timestamp = None
+                            pending_attempt_count = 0
+                            retry_not_before = 0.0
+                            print(
+                                f"[Scheduler] Primary cycle for {dt} was explicitly "
+                                f"abandoned after {pending_attempt_count} attempt(s); "
+                                f"errors={list(outcome.errors)}"
+                            )
+                        else:
+                            delay = retry_policy.delay_after(pending_attempt_count)
+                            retry_not_before = time.monotonic() + delay
+                            print(
+                                f"[Scheduler] Primary cycle for {dt} failed and remains "
+                                f"pending; retrying in {delay:.1f}s; "
+                                f"errors={list(outcome.errors)}"
+                            )
+
+                else:
+                    if pending_timestamp is not None:
+                        remaining = max(0.0, retry_not_before - time.monotonic())
                         print(
-                            f"[Scheduler] Primary cycle for {dt} failed and remains "
-                            f"pending; retrying in {delay:.1f}s; "
-                            f"errors={list(outcome.errors)}"
+                            f"[Scheduler] Retry for {pending_timestamp} is pending "
+                            f"for another {remaining:.1f}s"
+                        )
+                    else:
+                        print(
+                            "[Scheduler] No locally complete check set yet; waiting for the "
+                            "ingest service to publish scan readiness."
                         )
 
-            else:
-                if pending_timestamp is not None:
-                    remaining = max(0.0, retry_not_before - time.monotonic())
-                    print(
-                        f"[Scheduler] Retry for {pending_timestamp} is pending "
-                        f"for another {remaining:.1f}s"
-                    )
-                elif not latest_common:
-                     print("[Scheduler] No new data found (S3 or HTTPS). Waiting...")
-                else:
-                     print(
-                         f"[Scheduler] Timestamp {latest_common} is not newer than "
-                         f"selection cursor {selection_cursor}. Waiting..."
-                     )
-
-            # Wait/Check loop — also monitor any supervised children
-            for _ in range(supervisor_settings["check_ticks"]):
-                if stop_event is not None and stop_event.is_set():
-                    break
-                time.sleep(supervisor_settings["tick_seconds"])
-                if on_tick is not None:
-                    on_tick()
-                if supervisor is not None:
-                    supervisor.check()
+                # Wait/Check loop — also monitor any supervised children
+                _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
+            except Exception as exc:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                if isinstance(exc, StormProbDependencyError):
+                    raise
+                progress["phase"] = "degraded"
+                print(f"[Scheduler] Recoverable loop failure: {type(exc).__name__}: {exc}")
+                retry_not_before = time.monotonic() + retry_policy.delay_after(max(1, pending_attempt_count))
+                _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings)
 
     except KeyboardInterrupt:
         print("CTRL+C detected, exiting ...")
     finally:
         manager.shutdown()
+
+
+def _wait_ticks(supervisor, stop_event, on_tick, supervisor_settings):
+    ticks = supervisor_settings["check_ticks"] if supervisor is not None else max(1, math.ceil(
+        section("consumers")["core_readiness_seconds"] / supervisor_settings["tick_seconds"]))
+    for _ in range(ticks):
+        if stop_event is not None and stop_event.is_set():
+            break
+        time.sleep(supervisor_settings["tick_seconds"])
+        if on_tick is not None:
+            on_tick()
+        if supervisor is not None:
+            supervisor.check()

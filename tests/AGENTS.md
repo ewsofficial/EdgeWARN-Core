@@ -1,12 +1,10 @@
 # AGENTS Guide for `tests/`
 
 ## Scope
-Repository test suites and benchmark helpers.
+Repository test suites.
 
 ## Layout
 - `api/`: Jest/Supertest coverage for Node services.
-- `benchmarks/`: top-level opt-in Python benchmark and performance helpers
-  (excluded from default pytest discovery).
 - `core/`: module-level Python tests.
 - `integration/`: cross-module pipeline tests.
 - `unit/`: focused regression and algorithm tests.

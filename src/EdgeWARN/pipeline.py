@@ -1,3 +1,4 @@
+import json
 import asyncio
 import sys
 import traceback
@@ -10,6 +11,7 @@ import EdgeWARN.process.detect.main as detect
 import EdgeWARN.process.integrate.main as integration
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
+from common.ingest.replay import protect_runtime_inputs, commit_ingest_report
 from common.ingest.mrms.config import get_goes_modifiers, get_mrms_modifiers
 from common.ingest.mrms.pipeline import get_output_dirs
 from common.pipeline.coordinator import run_staged_ingest_cycle
@@ -90,9 +92,15 @@ def _cleanup_historical_data_dirs(pipeline_io):
 
 
 def _prepare_realtime_detection_inputs(log, input_manifest=None):
+    from common.ingest.mrms.config import get_registry
+    registry = get_registry()
+    if registry is not None:
+        for product in ("MergedReflectivityQCComposite_00.50", "ProbSevere", "PrecipFlag_00.00"):
+            registry.require(product)
     if input_manifest is not None:
         def frame_pair(product):
-            records = input_manifest.records_for_product(product)
+            records = tuple(r for r in input_manifest.records_for_product(product)
+                            if r.family == "mrms" and r.validated)
             current = [record for record in records if record.role == "current"]
             previous = [record for record in records if record.role == "previous"]
             # The detector's legacy loader accepts string paths.  Keep the
@@ -101,6 +109,8 @@ def _prepare_realtime_detection_inputs(log, input_manifest=None):
             # into the loader.
             current_path = str(current[-1].local_path) if current else None
             previous_path = str(previous[-1].local_path) if previous else None
+            if current_path is None:
+                return None, None
             if previous_path is None:
                 return current_path, None
             return previous_path, current_path
@@ -185,21 +195,28 @@ def run_edgewarn_integration_phase(
     remove_old_cells=None,
     disable_ctam=False,
     disable_ctam_modules=False,
+    disable_stormprob=False,
+    frozen_discovery=None,
     mrms_core_only=False,
     input_manifest: CycleInputManifest | None = None,
+    final_input_provider=None,
 ):
     """Run only the integration phase from an existing detection artifact."""
     if not generated_file:
         log("WARN: No detection artifact was produced; skipping integration")
         return False
 
+    extra = {"final_input_provider": final_input_provider} if final_input_provider is not None else {}
     integration.main(
         generated_file,
         remove_old_cells=remove_old_cells,
         disable_ctam=disable_ctam,
         disable_ctam_modules=disable_ctam_modules,
+        disable_stormprob=disable_stormprob,
+        frozen_discovery=frozen_discovery,
         mrms_core_only=mrms_core_only,
         input_manifest=input_manifest,
+        **extra,
     )
     return True
 
@@ -219,6 +236,9 @@ def edgewarn_cycle_worker(
     disable_tracking=False,
     disable_polygon_expansion=False,
     mrms_core_only=False,
+    optional_complete_event=None,
+    disable_stormprob=False,
+    frozen_discovery=None,
 ):
     """Process target for staged EdgeWARN execution within the tandem runner."""
     sys.stdout = QueueWriter(log_queue)
@@ -240,20 +260,28 @@ def edgewarn_cycle_worker(
     perf_tracker.start("Total Pipeline")
 
     try:
-        log(f"INFO: EdgeWARN worker waiting for detection inputs for {dt}")
+        registry_generation = shared_state.get("mrms_registry")
+        if registry_generation is not None:
+            fs.initialize_filesystem(
+                registry_generation["base_dir"],
+                config_dir=registry_generation["config_dir"],
+                expected_mrms_fingerprint=registry_generation["fingerprint"],
+            )
+        log(f"INFO: EdgeWARN worker waiting for the committed detection snapshot for {dt}")
         detection_ready_event.wait()
 
         if not shared_state.get("detection_inputs_ready", False):
-            message = "Detection inputs were not staged successfully"
+            message = "The local check set was not complete for this scan"
             publish_stage("unavailable", errors=(message,))
             log(f"ERROR: {message}; skipping EdgeWARN pipeline")
             return
 
-        input_manifest = CycleInputManifest.from_dict(
-            shared_state.get("input_manifest")
-        )
-        if input_manifest is None:
-            message = "Cycle input manifest was not published"
+        # The parent installs the pinned start manifest before releasing the
+        # barrier, so detection always runs against exact committed inputs and
+        # never against a directory's newest file.
+        input_manifest = CycleInputManifest.from_dict(shared_state.get("detection_manifest"))
+        if input_manifest is None or input_manifest.validate_alignment():
+            message = "The pinned detection snapshot was missing or misaligned"
             publish_stage("failed", errors=(message,))
             log(f"ERROR: {message}")
             return
@@ -276,11 +304,12 @@ def edgewarn_cycle_worker(
             log(f"ERROR: {message}")
             return
 
-        log("INFO: EdgeWARN detection phase complete; waiting for integration inputs")
+        log("INFO: EdgeWARN detection phase complete; waiting for the committed "
+            "integration snapshot")
         integration_ready_event.wait()
 
         if not shared_state.get("edgewarn_integration_inputs_ready", False):
-            message = "EdgeWARN integration inputs were not staged successfully"
+            message = "The committed integration readiness snapshot never arrived"
             publish_stage(
                 "unavailable",
                 artifacts=(generated_file,),
@@ -289,11 +318,12 @@ def edgewarn_cycle_worker(
             log(f"ERROR: {message}; skipping integration")
             return
 
-        input_manifest = CycleInputManifest.from_dict(
-            shared_state.get("input_manifest")
-        )
-        if input_manifest is None:
-            message = "Cycle input manifest was unavailable at integration release"
+        # The parent installs the pinned integration manifest before releasing
+        # the barrier, so integration runs against the exact committed
+        # selections and never against a directory's newest file.
+        input_manifest = CycleInputManifest.from_dict(shared_state.get("integration_manifest"))
+        if input_manifest is None or input_manifest.validate_alignment():
+            message = "The pinned integration snapshot was missing or misaligned"
             publish_stage(
                 "failed",
                 artifacts=(generated_file,),
@@ -302,14 +332,34 @@ def edgewarn_cycle_worker(
             log(f"ERROR: {message}")
             return
 
+        def final_input_provider():
+            optional_complete_event.wait()
+            if not shared_state.get("optional_inputs_complete", False):
+                if not disable_ctam and not disable_stormprob:
+                    from EdgeWARN.ctam.preflight import StormProbScanUnavailable
+                    raise StormProbScanUnavailable(
+                        "WARNING: StormProb optional input acquisition did not reach a "
+                        "final snapshot. This scan is skipped without forecasts or alerts."
+                    )
+                raise RuntimeError("Optional acquisition did not finish cleanly")
+            final = CycleInputManifest.from_dict(shared_state.get("ctam_manifest"))
+            if final is None or final.validate_alignment():
+                raise RuntimeError("The pinned final optional-input snapshot is unusable")
+            return final
+
+        extra = ({"final_input_provider": final_input_provider}
+                 if optional_complete_event is not None else {})
         perf_tracker.start("Integration")
         integrated = run_edgewarn_integration_phase(
             log,
             shared_state.get("edgewarn_generated_file") or None,
             disable_ctam=disable_ctam,
             disable_ctam_modules=disable_ctam_modules,
+            disable_stormprob=disable_stormprob,
+            frozen_discovery=frozen_discovery,
             mrms_core_only=mrms_core_only,
             input_manifest=input_manifest,
+            **extra,
         )
         perf_tracker.stop("Integration")
         if not integrated or not Path(generated_file).is_file():
@@ -325,6 +375,16 @@ def edgewarn_cycle_worker(
         publish_stage("completed", artifacts=(generated_file,))
         log("INFO: EdgeWARN worker completed successfully")
     except Exception as exc:
+        from EdgeWARN.ctam.preflight import StormProbDependencyError, StormProbScanUnavailable
+        if isinstance(exc, StormProbScanUnavailable):
+            # Integration aborted before any forecast or alert was published;
+            # the parent skips this scan and Core keeps running.
+            shared_state["stormprob_unavailable"] = str(exc)
+            publish_stage("unavailable", errors=(str(exc),))
+            log(f"WARNING: {exc}")
+            return
+        if isinstance(exc, StormProbDependencyError):
+            shared_state["fatal_dependency"] = str(exc)
         publish_stage("failed", errors=(str(exc),))
         log(f"ERROR: EdgeWARN tandem worker failed: {exc}")
         log(traceback.format_exc())
@@ -365,6 +425,7 @@ def _find_historical_file(directory, target_dt, io_manager):
     return str(files[-1])
 
 
+@protect_runtime_inputs
 def historical_pipeline(
     dt,
     lat_limits,
@@ -375,6 +436,8 @@ def historical_pipeline(
     io_manager=None,
     disable_ctam=False,
     disable_ctam_modules=False,
+    disable_stormprob=False,
+    frozen_discovery=None,
     disable_tracking=False,
     disable_polygon_expansion=False,
 ):
@@ -394,22 +457,45 @@ def historical_pipeline(
                 dt,
                 lambda message: pipeline_io.write_info(message),
                 include_goes=False,
-                include_ewmrs=False,
             )
         )
+        if (getattr(cycle_state, "ingest_report", None)
+                and cycle_state.edgewarn_integration_inputs_ready):
+            report_path = commit_ingest_report(fs.BASE_DIR, cycle_state.ingest_report, historical=True)
+            cycle_state.input_manifest = CycleInputManifest.from_dict(
+                json.loads(report_path.read_text())["snapshots"]["ctam"])
         perf_tracker.stop("Ingestion")
 
         if not cycle_state.detection_inputs_ready:
+            if not disable_ctam and not disable_stormprob:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                raise StormProbDependencyError(
+                    "WARNING: Cannot continue historical Core: StormProb protected "
+                    "MRMS detection inputs are unavailable. Core is exiting nonzero."
+                )
             pipeline_io.write_warning("Detection inputs were not staged successfully; skipping historical pipeline")
             perf_tracker.stop("Total Pipeline")
             return None, (None, None, None)
 
         input_manifest = cycle_state.input_manifest
         if input_manifest is None:
+            if not disable_ctam and not disable_stormprob:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                raise StormProbDependencyError(
+                    "WARNING: Cannot continue historical Core: StormProb final input "
+                    "snapshot is missing. Core is exiting nonzero."
+                )
             pipeline_io.write_error(
                 "Historical ingest did not publish an input manifest"
             )
             return None, (None, None, None)
+        if (not disable_ctam and not disable_stormprob
+                and not cycle_state.optional_inputs_complete):
+            from EdgeWARN.ctam.preflight import StormProbDependencyError
+            raise StormProbDependencyError(
+                "WARNING: Cannot continue historical Core: StormProb optional input "
+                "acquisition did not complete. Core is exiting nonzero."
+            )
 
         if "mrms_integration_ingest" in cycle_state.errors or "rap_ingest" in cycle_state.errors:
             pipeline_io.write_warning(
@@ -451,6 +537,8 @@ def historical_pipeline(
                 remove_old_cells=remove_old_cells_historical(),
                 disable_ctam=disable_ctam,
                 disable_ctam_modules=disable_ctam_modules,
+                disable_stormprob=disable_stormprob,
+                frozen_discovery=frozen_discovery,
                 input_manifest=input_manifest,
             )
             perf_tracker.stop("Integration")
@@ -461,6 +549,12 @@ def historical_pipeline(
                 perf_tracker.stop("Total Pipeline")
                 return None, (None, None, None)
         else:
+            if not disable_ctam and not disable_stormprob:
+                from EdgeWARN.ctam.preflight import StormProbDependencyError
+                raise StormProbDependencyError(
+                    "WARNING: Cannot continue historical Core: StormProb required "
+                    "RAP/integration inputs are unavailable. Core is exiting nonzero."
+                )
             pipeline_io.write_warning(
                 "Staged historical integration inputs were unavailable; "
                 "the timestamp remains incomplete"
@@ -476,6 +570,9 @@ def historical_pipeline(
 
         return generated_file, (None, None, None)
     except Exception as exc:
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        if isinstance(exc, StormProbDependencyError):
+            raise
         pipeline_io.write_error(f"Pipeline failed: {exc}")
         traceback.print_exc()
         return None, (None, None, None)

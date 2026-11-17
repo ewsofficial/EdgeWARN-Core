@@ -19,6 +19,7 @@ from shapely.prepared import prep
 from shapely.strtree import STRtree
 import numpy as np
 import json
+from datetime import datetime, timezone
 
 from EdgeWARN.process.detect.config import section
 from util.io import IOManager
@@ -92,7 +93,6 @@ def _load_active_alerts_with_cache(
         
         if target_timestamp:
             # Parse target_timestamp
-            from datetime import datetime
             try:
                 target_dt = datetime.fromisoformat(target_timestamp.replace('Z', '+00:00'))
                 target_str = target_dt.strftime("%Y%m%d-%H%M%S")
@@ -108,10 +108,17 @@ def _load_active_alerts_with_cache(
                 # alert snapshot for a target preceding retained history.
                 return [], None
                 
+        reference = (datetime.fromisoformat(target_timestamp.replace('Z', '+00:00'))
+                     if target_timestamp else datetime.now(timezone.utc))
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=timezone.utc)
+        snapshot_time = datetime.strptime(selected_file.stem, "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+        if (reference - snapshot_time).total_seconds() > section("alert_matching")["snapshot_max_age_seconds"]:
+            return [], None
         cache_key = _build_alert_snapshot_cache_key(selected_file, ids_dir)
         cached_features = _ALERT_SNAPSHOT_CACHE.get(cache_key)
         if cached_features is not None:
-            return [dict(feature) for feature in cached_features], cache_key
+            return _unexpired_features(cached_features, reference), cache_key
 
         with open(selected_file, 'r', encoding='utf-8') as f:
             ts_data = json.load(f)
@@ -143,11 +150,28 @@ def _load_active_alerts_with_cache(
             features,
             section("alert_matching")["snapshot_cache_max_entries"],
         )
-        return [dict(feature) for feature in features], cache_key
+        return _unexpired_features(features, reference), cache_key
         
     except Exception as e:
         io_manager.write_warning(f"Failed to load alerts from registry directory: {e}")
         return [], None
+
+
+def _unexpired_features(features, reference):
+    result = []
+    for feature in features:
+        expiry = (feature.get("properties") or {}).get("expires")
+        if expiry:
+            try:
+                moment = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+                if moment.tzinfo is None:
+                    moment = moment.replace(tzinfo=timezone.utc)
+                if moment <= reference:
+                    continue
+            except (ValueError, TypeError, AttributeError):
+                continue
+        result.append(dict(feature))
+    return result
 
 
 def _build_alert_snapshot_cache_key(selected_file: Path, ids_dir: Path) -> tuple:
@@ -162,7 +186,8 @@ def _build_alert_snapshot_cache_key(selected_file: Path, ids_dir: Path) -> tuple
 
 def _build_alert_geometry_cache_key(snapshot_cache_key: Optional[tuple], filtered_alerts: List[Dict[str, Any]]) -> tuple:
     if snapshot_cache_key is not None:
-        return ("snapshot", snapshot_cache_key)
+        return ("snapshot", snapshot_cache_key, tuple(str(feature.get("id") or
+                (feature.get("properties") or {}).get("id")) for feature in filtered_alerts))
 
     ids = []
     for alert in filtered_alerts:

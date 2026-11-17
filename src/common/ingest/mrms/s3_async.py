@@ -15,9 +15,10 @@ from common.ingest.mrms.s3_common import select_target_file
 class AsyncFileFinder:
     """Async version of FileFinder using aioboto3 for non-blocking S3 operations"""
 
-    __slots__ = ("dt", "bucket", "max_entries", "io_manager", "s3", "paginator")
+    __slots__ = ("dt", "bucket", "max_entries", "io_manager", "s3", "paginator", "raise_errors")
 
-    def __init__(self, dt, bucket, max_entries, io_manager, s3_client=None):
+    def __init__(self, dt, bucket, max_entries, io_manager, s3_client=None, *, raise_errors=False):
+        self.raise_errors = raise_errors
         self.dt = dt
         self.bucket = bucket
         self.max_entries = max_entries
@@ -79,6 +80,8 @@ class AsyncFileFinder:
             return [(path, ts) for ts, path in top_files[:self.max_entries]]
 
         except Exception as e:
+            if self.raise_errors:
+                raise
             self.io_manager.write_error(f"Error in async lookup: {e}")
             return []
 

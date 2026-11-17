@@ -529,7 +529,7 @@ def test_run_worker_parse_submits_runtime_file_without_offset_bookkeeping(monkey
     captured = {}
 
     class _FakeFuture:
-        def result(self):
+        def result(self, timeout=None):
             return SimpleNamespace(
                 visible_sweeps=0,
                 saved_sweep_count=0,
@@ -562,6 +562,9 @@ def test_run_worker_parse_submits_runtime_file_without_offset_bookkeeping(monkey
 
     assert "volume_path" in captured
     assert "trim_buffer" in captured
+    assert captured["volume_path"] != str(runtime_path)
+    assert not Path(captured["volume_path"]).exists()
+    assert runtime_path.read_bytes() == b"normalized-runtime"
 
 
 def test_run_worker_parse_recycles_pool_after_timeout(monkeypatch, tmp_path):
@@ -585,7 +588,7 @@ def test_run_worker_parse_recycles_pool_after_timeout(monkeypatch, tmp_path):
 
     monkeypatch.setenv("NEXRAD_WORKER_TIMEOUT_SECONDS", "1")
     monkeypatch.setattr(nexrad_service_module, "get_nexrad_pool", lambda: _FakePool())
-    monkeypatch.setattr(nexrad_service_module, "shutdown_nexrad_pool", lambda wait=False: recycle_calls.append(("shutdown", wait)))
+    monkeypatch.setattr(nexrad_service_module, "shutdown_nexrad_pool", lambda wait=False, **kwargs: recycle_calls.append(("shutdown", wait)))
 
     state = SimpleNamespace(file_path=str(runtime_path), parse_errors=[], bytes_written=len(b"partial"))
 
@@ -622,7 +625,7 @@ def test_run_worker_parse_recycles_pool_after_broken_worker(monkeypatch, tmp_pat
             return _FakeFuture()
 
     monkeypatch.setattr(nexrad_service_module, "get_nexrad_pool", lambda: _FakePool())
-    monkeypatch.setattr(nexrad_service_module, "shutdown_nexrad_pool", lambda wait=False: recycle_calls.append(wait))
+    monkeypatch.setattr(nexrad_service_module, "shutdown_nexrad_pool", lambda wait=False, **kwargs: recycle_calls.append(wait))
 
     state = SimpleNamespace(file_path=str(runtime_path), parse_errors=[], bytes_written=len(b"partial"))
 
@@ -781,3 +784,21 @@ async def test_stream_ingest_async_persists_latest_group_export_timestamp(tmp_pa
     assert state["seen_elevation_exports"] == {"0.5:g0": "20260507-150011"}
     assert state["seen_elevation_keys"] == ["0.5:g0"]
     assert state["elevation_timestamps_by_id"] == {"0.5": "20260507-150011"}
+
+
+@pytest.mark.asyncio
+async def test_retry_rolls_back_chunks_written_by_failed_pass(tmp_path, monkeypatch):
+    fs.initialize_filesystem(tmp_path)
+    failed = [False]
+    async def fetch(chunk, **kwargs):
+        if chunk.chunk_number == 2 and not failed[0]:
+            failed[0] = True
+            raise OSError("injected download failure")
+        return f"chunk-{chunk.chunk_number}".encode()
+    service = NexradIngestService(async_chunk_fetcher=fetch, in_volume_prefetch=1)
+    monkeypatch.setattr(nexrad_service_module, "_required_elevation_paths_complete", lambda *a, **kw: False)
+    monkeypatch.setattr(service, "_run_worker_parse", lambda *a, **kw: None)
+    with pytest.raises(OSError):
+        await service._stream_ingest_volume_async("KTLH", "999", _chunks(), s3_client=object(), base_dir=tmp_path)
+    await service._stream_ingest_volume_async("KTLH", "999", _chunks(), s3_client=object(), base_dir=tmp_path)
+    assert runtime_scan_path("KTLH", "999").read_bytes() == b"chunk-1chunk-2"

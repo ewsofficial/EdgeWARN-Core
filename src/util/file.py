@@ -1,3 +1,4 @@
+from common.ingest.replay import guard_cleanup
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -5,6 +6,52 @@ import heapq
 import asyncio
 import os
 import sys
+from types import MappingProxyType
+
+MRMS_REGISTRY = None
+MRMS_CONFIG_DIR = None
+MRMS_PATHS = MappingProxyType({})
+_MRMS_ALIASES = MappingProxyType({})
+
+
+def __getattr__(name):
+    if name in MRMS_PATHS:
+        return MRMS_PATHS[name]
+    if name in _MRMS_ALIASES:
+        return _MRMS_ALIASES[name]
+    raise AttributeError(f"util.file has no enabled path {name!r}")
+
+
+def verify_mrms_containment(registry):
+    base = registry.base_dir.resolve()
+    data = registry.base_dir / "data"
+    if not data.resolve().is_relative_to(base):
+        raise ValueError(f"MRMS data directory escapes base directory: {data}")
+    for spec in registry.products:
+        if not spec.directory.resolve().is_relative_to(data.resolve()):
+            raise ValueError(f"MRMS product directory escapes data directory: {spec.directory}")
+
+
+def bind_mrms_paths(registry, *, expected_fingerprint=None):
+    """Bind without creating directories; children may verify a parent generation."""
+    global MRMS_REGISTRY, MRMS_PATHS, _MRMS_ALIASES
+    from common.ingest.mrms.core_contract import LEGACY_ALIASES
+    if expected_fingerprint is not None and registry.fingerprint != expected_fingerprint:
+        raise ValueError("MRMS registry fingerprint differs from parent generation")
+    verify_mrms_containment(registry)
+    for name in LEGACY_ALIASES:
+        globals().pop(name, None)
+    MRMS_REGISTRY = registry
+    MRMS_PATHS = registry.paths_by_name()
+    _MRMS_ALIASES = registry.legacy_paths()
+
+
+def ensure_mrms_directories(registry):
+    """Explicit producer startup hook: call only after complete preflight."""
+    verify_mrms_containment(registry)
+    for spec in registry.products:
+        spec.directory.mkdir(parents=True, exist_ok=True)
+    verify_mrms_containment(registry)
 
 from util.file_config import cleanup_max_age_minutes, cleanup_max_files
 from util.io import IOManager
@@ -46,7 +93,6 @@ def _define_paths(base_path, config_dir=None):
     global BASE_DIR
     global DATA_DIR, ALERTS_DIR
     global EDGEWARN_ALERTS_DIR, EDGEWARN_ALERTS_IDS_DIR, EDGEWARN_ALERTS_TS_DIR
-    global MRMS_NWS_RAW_DIR, MRMS_NWS_DIR, MRMS_NWS_IDS_DIR, MRMS_NWS_TS_DIR, NWS_REGISTRY_PATH
     global MRMS_RALA_DIR, MRMS_NLDN_DIR, MRMS_ECHOTOP18_DIR, MRMS_ECHOTOP30_DIR, MRMS_ECHOTOP50_DIR
     global MRMS_QPE_DIR, MRMS_PRECIPRATE_DIR, MRMS_PROBSEVERE_DIR
     global MRMS_FLASH_CREST_MAXUNIT_DIR, MRMS_FLASH_ARIMAX_DIR, MRMS_FLASH_ARI30M_DIR, MRMS_FLASH_ARI01H_DIR
@@ -54,24 +100,14 @@ def _define_paths(base_path, config_dir=None):
     global MRMS_RQI_DIR, MRMS_DVIL_DIR, MRMS_VIL_DIR, MRMS_VII_DIR
     global MRMS_AZSHEARLOW_DIR, MRMS_AZSHEARMID_DIR, MRMS_COMPOSITE_DIR
     global MRMS_REF_0C_DIR, MRMS_REFM5C_DIR, MRMS_REFM15C_DIR
-    global MRMS_RHOHV_DIR, MRMS_PRECIPTYP_DIR, MRMS_MESH_DIR, GUI_MESH_DIR
-    global GOES_GLM_DIR, GOES_ABI_RADC_DIR
-    global GOES_ABI_VISIBLE_BLUE_DIR, GOES_ABI_VISIBLE_RED_DIR, GOES_ABI_VEGGIE_DIR, GOES_ABI_CIRRUS_DIR
-    global GOES_ABI_SNOW_ICE_DIR, GOES_ABI_PARTICLE_SIZE_DIR, GOES_ABI_SHORTWAVE_IR_DIR
-    global GOES_ABI_UPPER_LEVEL_WV_DIR, GOES_ABI_MID_LEVEL_WV_DIR, GOES_ABI_LOWER_LEVEL_WV_DIR
-    global GOES_ABI_CLD_TOP_PHASE_DIR, GOES_ABI_OZONE_DIR, GOES_ABI_CLEAN_LWIR_DIR
-    global GOES_ABI_LONGWAVE_IR_DIR, GOES_ABI_DIRTY_LWIR_DIR, GOES_ABI_CO2_LWIR_DIR
-    global RAP_DIR, STORMCELL_DIR, CELL_DIR, METAR_DIR, SURFACE_DIR
-    global GUI_DIR, GUI_NEXRAD_DIR, GUI_RALA_DIR, GUI_NLDN_DIR, GUI_ECHOTOP18_DIR, GUI_ECHOTOP30_DIR, GUI_QPE_DIR
-    global GUI_AZSHEARLOW_DIR, GUI_AZSHEARMID_DIR, GUI_PRECIPRATE_DIR, GUI_PROBSEVERE_DIR, GUI_FLASH_DIR
-    global GUI_VIL_DIR, GUI_VILD_DIR, GUI_VII_DIR, GUI_ROTATIONT_DIR, GUI_COMPOSITE_DIR, GUI_REF_0C_DIR, GUI_REFM5C_DIR, GUI_REFM15C_DIR, GUI_RHOHV_DIR, GUI_PRECIPTYP_DIR
-    global GUI_GOES_C01_DIR, GUI_GOES_C02_DIR, GUI_GOES_C03_DIR, GUI_GOES_C04_DIR, GUI_GOES_C05_DIR
-    global GUI_GOES_C06_DIR, GUI_GOES_C07_DIR, GUI_GOES_C08_DIR, GUI_GOES_C09_DIR, GUI_GOES_C10_DIR
-    global GUI_GOES_C11_DIR, GUI_GOES_C12_DIR, GUI_GOES_C13_DIR, GUI_GOES_C14_DIR, GUI_GOES_C15_DIR
-    global GUI_GOES_C16_DIR
-    global GUI_RAP_DIR, GUI_MAP_DIR, GUI_MANIFEST_JSON
-    global WPC_DIR, WPC_SFC_DIR, STORMCELL_JSON
+    global MRMS_RHOHV_DIR, MRMS_PRECIPTYP_DIR, MRMS_MESH_DIR
+    global GOES_GLM_DIR
+    global RAP_DIR, STORMCELL_DIR, CELL_DIR
+    global GUI_DIR, GUI_NEXRAD_DIR
+    global STORMCELL_JSON
     global NEXRAD_LEVEL2_DIR, NEXRAD_LEVEL2_LOW_DIR, NEXRAD_LEVEL2_HIGH_DIR, NEXRAD_LEVEL2_MANIFEST_DIR
+
+    global MRMS_NWS_DIR
 
     base_path = Path(base_path)
     data_dir = base_path / "data"
@@ -79,6 +115,8 @@ def _define_paths(base_path, config_dir=None):
     alerts_dir = data_dir / "Alerts"
     edgewarn_alerts_dir = alerts_dir / "EdgeWARN"
     official_alerts_dir = alerts_dir / "official"
+    # Core still matches published official alerts; acquisition has a separate owner.
+    MRMS_NWS_DIR = official_alerts_dir
 
     BASE_DIR = base_path
     DATA_DIR = data_dir
@@ -86,11 +124,6 @@ def _define_paths(base_path, config_dir=None):
     EDGEWARN_ALERTS_DIR = edgewarn_alerts_dir
     EDGEWARN_ALERTS_IDS_DIR = edgewarn_alerts_dir / "ids"
     EDGEWARN_ALERTS_TS_DIR = edgewarn_alerts_dir / "timestamps"
-    MRMS_NWS_RAW_DIR = data_dir / "NWS_Raw"
-    MRMS_NWS_DIR = official_alerts_dir
-    MRMS_NWS_IDS_DIR = official_alerts_dir / "ids"
-    MRMS_NWS_TS_DIR = official_alerts_dir / "timestamps"
-    NWS_REGISTRY_PATH = official_alerts_dir / "alerts_registry.json"
     MRMS_RALA_DIR = data_dir / "MRMS_ReflectivityAtLowestAltitude"
     MRMS_NLDN_DIR = data_dir / "MRMS_NLDN_CG_001min_AvgDensity"
     MRMS_ECHOTOP18_DIR = data_dir / "MRMS_EchoTop18"
@@ -120,73 +153,12 @@ def _define_paths(base_path, config_dir=None):
     MRMS_PRECIPTYP_DIR = data_dir / "MRMS_PrecipFlag"
     MRMS_MESH_DIR = data_dir / "MRMS_MESH"
     GOES_GLM_DIR = data_dir / "GOES_GLM"
-    GOES_ABI_RADC_DIR = data_dir / "GOES_ABI"
-    GOES_ABI_VISIBLE_BLUE_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C01_Reflectance"
-    GOES_ABI_VISIBLE_RED_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C02_Reflectance"
-    GOES_ABI_VEGGIE_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C03_Reflectance"
-    GOES_ABI_CIRRUS_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C04_Reflectance"
-    GOES_ABI_SNOW_ICE_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C05_Reflectance"
-    GOES_ABI_PARTICLE_SIZE_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C06_Reflectance"
-    GOES_ABI_SHORTWAVE_IR_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C07_BrightnessTemp"
-    GOES_ABI_UPPER_LEVEL_WV_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C08_BrightnessTemp"
-    GOES_ABI_MID_LEVEL_WV_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C09_BrightnessTemp"
-    GOES_ABI_LOWER_LEVEL_WV_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C10_BrightnessTemp"
-    GOES_ABI_CLD_TOP_PHASE_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C11_BrightnessTemp"
-    GOES_ABI_OZONE_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C12_BrightnessTemp"
-    GOES_ABI_CLEAN_LWIR_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C13_BrightnessTemp"
-    GOES_ABI_LONGWAVE_IR_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C14_BrightnessTemp"
-    GOES_ABI_DIRTY_LWIR_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C15_BrightnessTemp"
-    GOES_ABI_CO2_LWIR_DIR = GOES_ABI_RADC_DIR / "GOES_ABI_C16_BrightnessTemp"
     RAP_DIR = data_dir / "RAP"
     STORMCELL_DIR = data_dir / "stormcells"
     CELL_DIR = data_dir / "cells"
-    METAR_DIR = data_dir / "METAR"
-    SURFACE_DIR = data_dir / "surface_features"
 
     GUI_DIR = gui_dir
     GUI_NEXRAD_DIR = gui_dir / "NEXRAD"
-    GUI_RALA_DIR = gui_dir / "MRMS_ReflectivityAtLowestAltitude"
-    GUI_NLDN_DIR = gui_dir / "MRMS_NLDN_CG_001min_AvgDensity"
-    GUI_ECHOTOP18_DIR = gui_dir / "MRMS_EchoTop18"
-    GUI_ECHOTOP30_DIR = gui_dir / "MRMS_EchoTop30"
-    GUI_QPE_DIR = gui_dir / "MRMS_QPE"
-    GUI_AZSHEARLOW_DIR = gui_dir / "MRMS_MergedAzShear_0-2kmAGL"
-    GUI_AZSHEARMID_DIR = gui_dir / "MRMS_MergedAzShear_3-6kmAGL"
-    GUI_PRECIPRATE_DIR = gui_dir / "MRMS_PrecipRate"
-    GUI_PROBSEVERE_DIR = gui_dir / "MRMS_ProbSevere"
-    GUI_FLASH_DIR = gui_dir / "MRMS_FLASH"
-    GUI_VIL_DIR = gui_dir / "MRMS_VIL"
-    GUI_VILD_DIR = gui_dir / "MRMS_VILDensity"
-    GUI_VII_DIR = gui_dir / "MRMS_VII"
-    GUI_ROTATIONT_DIR = gui_dir / "MRMS_RotationTrack30min"
-    GUI_COMPOSITE_DIR = gui_dir / "MRMS_MergedReflectivityQC"
-    GUI_REF_0C_DIR = gui_dir / "MRMS_ReflectivityAt0C"
-    GUI_REFM5C_DIR = gui_dir / "MRMS_ReflectivityAtM5C"
-    GUI_REFM15C_DIR = gui_dir / "MRMS_ReflectivityAtM15C"
-    GUI_MESH_DIR = gui_dir / "MRMS_MESH"
-    GUI_RHOHV_DIR = gui_dir / "MRMS_MergedRhoHV"
-    GUI_PRECIPTYP_DIR = gui_dir / "MRMS_PrecipFlag"
-    GUI_GOES_C01_DIR = gui_dir / "GOES_ABI_C01_Reflectance"
-    GUI_GOES_C02_DIR = gui_dir / "GOES_ABI_C02_Reflectance"
-    GUI_GOES_C03_DIR = gui_dir / "GOES_ABI_C03_Reflectance"
-    GUI_GOES_C04_DIR = gui_dir / "GOES_ABI_C04_Reflectance"
-    GUI_GOES_C05_DIR = gui_dir / "GOES_ABI_C05_Reflectance"
-    GUI_GOES_C06_DIR = gui_dir / "GOES_ABI_C06_Reflectance"
-    GUI_GOES_C07_DIR = gui_dir / "GOES_ABI_C07_BrightnessTemp"
-    GUI_GOES_C08_DIR = gui_dir / "GOES_ABI_C08_BrightnessTemp"
-    GUI_GOES_C09_DIR = gui_dir / "GOES_ABI_C09_BrightnessTemp"
-    GUI_GOES_C10_DIR = gui_dir / "GOES_ABI_C10_BrightnessTemp"
-    GUI_GOES_C11_DIR = gui_dir / "GOES_ABI_C11_BrightnessTemp"
-    GUI_GOES_C12_DIR = gui_dir / "GOES_ABI_C12_BrightnessTemp"
-    GUI_GOES_C13_DIR = gui_dir / "GOES_ABI_C13_BrightnessTemp"
-    GUI_GOES_C14_DIR = gui_dir / "GOES_ABI_C14_BrightnessTemp"
-    GUI_GOES_C15_DIR = gui_dir / "GOES_ABI_C15_BrightnessTemp"
-    GUI_GOES_C16_DIR = gui_dir / "GOES_ABI_C16_BrightnessTemp"
-    GUI_RAP_DIR = gui_dir / "RAP"
-    GUI_MAP_DIR = gui_dir / "maps"
-    GUI_MANIFEST_JSON = gui_dir / "overlay_manifest.json"
-    WPC_DIR = base_path / "wpc"
-    WPC_SFC_DIR = WPC_DIR / "surface_analysis"
     STORMCELL_JSON = data_dir / "stormcells.json"
     NEXRAD_LEVEL2_DIR = data_dir / "NEXRAD_Level2"
     NEXRAD_LEVEL2_LOW_DIR = NEXRAD_LEVEL2_DIR / "Low"
@@ -194,9 +166,27 @@ def _define_paths(base_path, config_dir=None):
     NEXRAD_LEVEL2_MANIFEST_DIR = NEXRAD_LEVEL2_DIR / "manifests"
 
 
-def initialize_filesystem(base_dir=None):
-    if base_dir:
-        _define_paths(Path(base_dir))
+def initialize_filesystem(base_dir=None, *, config_dir=None, expected_mrms_fingerprint=None):
+    """Rebind paths without creating runtime directories or starting workers."""
+    global MRMS_REGISTRY, MRMS_PATHS, _MRMS_ALIASES, MRMS_CONFIG_DIR
+    from common.config.loader import load_config
+    from common.ingest.mrms.registry import build_registry
+    catalog = load_config("ingest", config_dir=config_dir)
+    base = Path(base_dir or BASE_DIR).expanduser().resolve()
+    registry = build_registry(catalog["mrms"], base) if catalog["schema_version"] == 2 else None
+    if expected_mrms_fingerprint is not None and (
+        registry is None or registry.fingerprint != expected_mrms_fingerprint
+    ):
+        raise ValueError("MRMS registry fingerprint differs from parent generation")
+    if registry is not None:
+        verify_mrms_containment(registry)
+    _define_paths(base, config_dir=config_dir)
+    MRMS_CONFIG_DIR = config_dir
+    MRMS_REGISTRY = None
+    MRMS_PATHS = MappingProxyType({})
+    _MRMS_ALIASES = MappingProxyType({})
+    if registry is not None:
+        bind_mrms_paths(registry, expected_fingerprint=expected_mrms_fingerprint)
 
 
 # Phase one of base-directory resolution. Binding 113 path globals is a module-
@@ -298,6 +288,7 @@ def _is_safe_directory(directory: Path, allow_logical_inside=False):
         return False
 
 
+@guard_cleanup
 def clean_old_files(directory: Path, max_age_minutes=None, max_files=_FROM_CATALOG):
     directory = Path(directory)
     base_dir = globals().get("BASE_DIR", Path("."))
@@ -315,12 +306,20 @@ def clean_old_files(directory: Path, max_age_minutes=None, max_files=_FROM_CATAL
     files_deleted = 0
     kept_files = []
 
+    candidates = []
     for file_path in directory.glob("*"):
         if not file_path.is_file() or file_path.suffix.lower() == ".idx":
             continue
         try:
-            mtime = file_path.stat().st_mtime
-            if mtime < cutoff:
+            candidates.append((file_path, file_path.stat().st_mtime))
+        except Exception as e:
+            _log("write_error", f"Could not process/delete {file_path.name}: {e}")
+    # The newest file is never aged out: a lone file stays until a newer one arrives.
+    newest = max(candidates, key=lambda item: item[1])[0] if candidates else None
+
+    for file_path, mtime in candidates:
+        try:
+            if mtime < cutoff and file_path != newest:
                 file_path.unlink()
                 files_deleted += 1
             else:
@@ -337,6 +336,7 @@ def clean_old_files(directory: Path, max_age_minutes=None, max_files=_FROM_CATAL
             except Exception as e:
                 _log("write_error", f"Could not delete {file_path.name}: {e}")
 
+@guard_cleanup
 def clean_files_by_age(directory: Path, max_age_minutes=None):
     directory = Path(directory)
     base_dir = globals().get("BASE_DIR", Path("."))

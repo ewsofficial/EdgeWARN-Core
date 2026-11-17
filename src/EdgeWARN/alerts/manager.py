@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import util.file as fs
+from common.ingest.nws.config import edgewarn_alert_retention_minutes
 from util.atomic import atomic_write_json
 from util.io import IOManager
 
@@ -279,13 +280,14 @@ class AlertManager:
             return False
 
     @staticmethod
-    def cleanup_expired(max_age_minutes: Optional[int] = 120) -> int:
+    def cleanup_expired(max_age_minutes: Optional[int] = None) -> int:
         """
         Delete expired or stale alert files and old snapshots from disk.
 
         Args:
             max_age_minutes: Maximum age of a file (in minutes) before it is unconditionally
-                             deleted as a safety measure.
+                             deleted as a safety measure. None resolves
+                             nws.yaml's edgewarn_alert_retention_minutes.
 
         Returns:
             The number of files deleted.
@@ -294,6 +296,8 @@ class AlertManager:
         now = datetime.now(timezone.utc)
         now_ts = now.timestamp()
         
+        if max_age_minutes is None:
+            max_age_minutes = edgewarn_alert_retention_minutes()
         cutoff_ts = None
         if max_age_minutes is not None:
             cutoff_ts = now_ts - (max_age_minutes * 60)

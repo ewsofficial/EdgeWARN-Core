@@ -16,7 +16,7 @@ drop into the production module root.
   placed there would not survive a clone. Tests point discovery here explicitly,
   or copy a folder into `tmp_path`.
 - `cellstats/` is the fully populated valid manifest and mirrors the example in
-  `plans/modular-ctam-internal-api-plan.md`, except that `timeout_seconds` is the
+  retired `plans/modular-ctam-internal-api-plan.md`, except that `timeout_seconds` is the
   10-second default rather than the plan's 30 — see the deviation recorded in
   `docs/ctam/internal-api-limits.md`.
 - `brokenmanifest/` is invalid on purpose. Do not "fix" it: a test asserts that

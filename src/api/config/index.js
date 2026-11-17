@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { configRoot, expandPath, getProvenance, loadConfig, repoRoot, srcRoot, validateAllConfigs } from '../../config/loader.js';
+import { requireCompletedMigration } from '../../config/mrms-migration.js';
 
 // package.json is the sole owner of the version. This was a literal default,
 // which agreed with the manifest only until one of the two was bumped.
@@ -66,9 +67,71 @@ function parseOrigins(value) {
   return Object.freeze([...new Set(origins)]);
 }
 
+// proxy-addr masks a configured trust subnet to its prefix. A subnet whose
+// masked network is all-zero therefore matches every peer: `::ffff:10.0.0.0/8`
+// (the correct spelling is /104) and `::/1` both compile to `::`. Express then
+// believes any client's X-Forwarded-For, which defeats rate limiting and audit
+// logging. Fail at startup instead of silently trusting the internet as a proxy.
+function ipv6Words(address) {
+  let text = address.toLowerCase();
+  if (!/^[0-9a-f:.]+$/.test(text)) return null;
+  let embedded = [];
+  if (text.includes('.')) {
+    const lastColon = text.lastIndexOf(':');
+    if (lastColon === -1) return null; // plain IPv4 is handled by proxy-addr
+    const octets = text.slice(lastColon + 1).split('.').map(Number);
+    if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return null;
+    embedded = [(octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]];
+    text = `${text.slice(0, lastColon + 1)}0:0`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const parse = (part) => (part ? part.split(':') : []);
+  const before = parse(halves[0]);
+  const after = halves.length === 2 ? parse(halves[1]) : [];
+  const missing = 8 - before.length - after.length;
+  if (halves.length === 2 && missing < 1) return null;
+  const groups = halves.length === 2
+    ? [...before, ...Array(missing).fill('0'), ...after]
+    : [...before, ...after];
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+  const words = groups.map((group) => parseInt(group, 16));
+  if (embedded.length) {
+    words[6] = embedded[0];
+    words[7] = embedded[1];
+  }
+  return words;
+}
+
+function networkIsZero(words, prefix) {
+  return words.every((word, index) => {
+    const bits = Math.min(16, Math.max(0, prefix - index * 16));
+    const mask = bits === 0 ? 0 : (0xffff << (16 - bits)) & 0xffff;
+    return (word & mask) === 0;
+  });
+}
+
+function validateTrustSubnet(entry) {
+  if (typeof entry !== 'string' || !entry.includes(':') || !entry.includes('/')) return;
+  const [address, prefixText, ...rest] = entry.split('/');
+  if (rest.length) throw new Error(`Invalid TRUST_PROXY subnet: ${entry}`);
+  const prefix = prefixText === '' ? 128 : Number(prefixText);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 128) throw new Error(`Invalid TRUST_PROXY subnet: ${entry}`);
+  const words = ipv6Words(address);
+  if (words && prefix < 128 && networkIsZero(words, prefix)) {
+    throw new Error(`Invalid TRUST_PROXY subnet ${entry}: it masks to :: and would trust every client; use plain IPv4 notation (for example 10.0.0.0/8) or a specific IPv6 subnet`);
+  }
+}
+
+function validateTrustEntries(entries) {
+  for (const entry of entries) validateTrustSubnet(entry);
+  return entries;
+}
+
 export function parseTrustProxy(value, env = {}) {
   if (value === false || value === undefined || value === '') return false;
-  if (Number.isInteger(value) || Array.isArray(value)) return value;
+  if (Number.isInteger(value)) return value;
+  if (Array.isArray(value)) return validateTrustEntries(value);
   if (value === true || typeof value === 'string') {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : 'true';
     if (normalized === '' || normalized === 'false') return false;
@@ -81,7 +144,7 @@ export function parseTrustProxy(value, env = {}) {
       if (Number.isSafeInteger(hops) && hops >= 0 && hops <= 8) return hops;
       throw new Error('Invalid TRUST_PROXY hop count');
     }
-    return Object.freeze(value.split(',').map((entry) => entry.trim()).filter(Boolean));
+    return Object.freeze(validateTrustEntries(value.split(',').map((entry) => entry.trim()).filter(Boolean)));
   }
   throw new Error('Invalid TRUST_PROXY');
 }
@@ -107,15 +170,12 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
   const configDirCli = oneValue(readFlag(argv, ['--config-dir']), '--config-dir');
   const configDirEnv = env.EDGEWARN_CONFIG_DIR;
   const selectedConfigDir = configDirCli || configDirEnv;
+  requireCompletedMigration(configRoot(selectedConfigDir));
   validateAllConfigs({ configDir: selectedConfigDir });
   const api = loadConfig('api', { configDir: selectedConfigDir });
   const filesystem = loadConfig('filesystem', { configDir: selectedConfigDir });
-  // The API serves WPC surface analyses out of a directory the ingest side names,
-  // so it reads that file's naming keys rather than restating them here.
-  const wpc = loadConfig('wpc', { configDir: selectedConfigDir }).wpc;
   const resolvedConfigRoot = configRoot(selectedConfigDir);
   const apiProvenance = getProvenance('api', { configDir: selectedConfigDir });
-  const wpcProvenance = getProvenance('wpc', { configDir: selectedConfigDir });
   const canonicalCli = oneValue(readFlag(argv, ['--base-dir']), '--base-dir');
   const deprecatedCli = oneValue(readFlag(argv, ['--base_dir']), '--base_dir');
   const canonicalEnv = env.EDGEWARN_BASE_DIR;
@@ -147,9 +207,6 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
       file: apiProvenance.path,
       schemaVersion: apiProvenance.schema_version,
       root: resolvedConfigRoot,
-      // ancillary.js derives the surface-analysis filenames from wpc.yaml, making it
-      // a second effective source that /health/live would otherwise not name.
-      wpc: Object.freeze({ file: wpcProvenance.path, schemaVersion: wpcProvenance.schema_version }),
     }),
     overrides: Object.freeze(activeOverrides),
     restartRequired: true,
@@ -159,7 +216,6 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
       requestTimeoutMs,
       rateLimits: Object.freeze({ perSecond: rateLimitMaxSec, perMinute: rateLimitMaxMin }),
       allowedOriginCount: env.ALLOWED_ORIGINS === undefined ? api.security.allowed_origins.length : parseOrigins(env.ALLOWED_ORIGINS).length,
-      renderProductCount: api.product_catalog.entries,
       radarProductCount: api.validation.radar_products.length,
     }),
   });
@@ -167,12 +223,10 @@ export function createConfig({ env = defaultEnvironment(), argv = process.argv.s
     baseDir,
     dataDir: path.join(baseDir, 'data'),
     guiDir: path.join(baseDir, 'gui'),
-    wpcDir: path.join(baseDir, 'wpc'),
     configDir: resolvedConfigRoot,
     repoDir: repoRoot(selectedConfigDir),
     openApiPath: resolveSourcePath(api.server.openapi_spec, 'openapi_spec'),
     api,
-    wpc,
     diagnostics,
     port, packageVersion, isProduction: env.NODE_ENV === 'production', requestTimeoutMs,
     allowedOrigins: parseOrigins(env.ALLOWED_ORIGINS === undefined ? api.security.allowed_origins : env.ALLOWED_ORIGINS),

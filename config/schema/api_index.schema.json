@@ -9,7 +9,7 @@
     "api_index": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["remove_old_cells", "initialize_at_startup", "inactive_cell_max_age_minutes"],
+      "required": ["remove_old_cells", "initialize_at_startup", "inactive_cell_max_age_minutes", "stormprob_inactive_cell_max_age_minutes"],
       "properties": {
         "remove_old_cells": {
           "type": "object",
@@ -29,7 +29,8 @@
             "historical": { "type": "boolean" }
           }
         },
-        "inactive_cell_max_age_minutes": { "type": "integer", "exclusiveMinimum": 0 }
+        "inactive_cell_max_age_minutes": { "type": "integer", "exclusiveMinimum": 0 },
+        "stormprob_inactive_cell_max_age_minutes": { "type": "integer", "exclusiveMinimum": 0 }
       }
     }
   }

@@ -352,7 +352,7 @@ class TestKalmanFilterWithCell:
             'modules': {
                 'StormProb': {
                     'status': 'success',
-                    'leads': [{'lead_minutes': 15, 'east_km': 13.5,
+                    'leads': [{'lead_minutes': 15, 'status': 'ok', 'east_km': 13.5,
                                'north_km': 9.0}]
                 }
             }
@@ -369,3 +369,12 @@ class TestKalmanFilterWithCell:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+@pytest.mark.parametrize("u,v", [(10.0, 0.0), (0.0, 10.0)])
+def test_velocity_axes_match_east_and_north(u, v):
+    kf = KalmanFilter()
+    kf.initialize(35.0, 265.0, u, v)
+    predicted = kf.predict(60)
+    assert predicted.lat == pytest.approx(35.0 + v * 60 / 111000)
+    assert predicted.lon == pytest.approx(265.0 + u * 60 / (111000 * np.cos(np.radians(35.0))))

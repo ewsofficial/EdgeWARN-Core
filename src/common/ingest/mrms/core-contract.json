@@ -1,0 +1,38 @@
+{
+  "contract_version": 1,
+  "products": [
+    {
+      "adapter": "conus_grib2",
+      "configured_id": "MRMS_MergedReflectivityQCComposite_00.50",
+      "core_phase": "detection",
+      "discovery": true,
+      "path_name": "MRMS_MergedReflectivityQCComposite",
+      "product_id": "MergedReflectivityQCComposite_00.50",
+      "region": "CONUS",
+      "required": true,
+      "source_modifier": "MergedReflectivityQCComposite_00.50"
+    },
+    {
+      "adapter": "conus_grib2",
+      "configured_id": "MRMS_PrecipFlag_00.00",
+      "core_phase": "detection",
+      "discovery": true,
+      "path_name": "MRMS_PrecipFlag",
+      "product_id": "PrecipFlag_00.00",
+      "region": "CONUS",
+      "required": true,
+      "source_modifier": "PrecipFlag_00.00"
+    },
+    {
+      "adapter": "probsevere_json",
+      "configured_id": "MRMS_ProbSevere",
+      "core_phase": "detection",
+      "discovery": true,
+      "path_name": "MRMS_ProbSevere",
+      "product_id": "ProbSevere",
+      "region": "ProbSevere",
+      "required": true,
+      "source_modifier": null
+    }
+  ]
+}

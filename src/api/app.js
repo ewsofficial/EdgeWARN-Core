@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createConfig } from './config/index.js';
+import { requireCompletedMigration } from '../config/mrms-migration.js';
 import { createCors } from './middleware/cors.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { createRateLimiters } from './middleware/rateLimit.js';
@@ -11,7 +12,6 @@ import { createAccessLog } from './middleware/logging.js';
 import { requestTimeout, securityMiddleware } from './middleware/security.js';
 import { ArtifactRepository } from './repositories/artifactRepository.js';
 import { createAnalysisService } from './services/analysis.js';
-import { createRenderService } from './services/renders.js';
 import { createAncillaryServices } from './services/ancillary.js';
 import { createServiceRegistry } from './services/serviceRegistry.js';
 import { createModulesService } from './services/modules.js';
@@ -21,10 +21,11 @@ export async function createApp(options = {}) {
   const apiDirectory = path.dirname(fileURLToPath(import.meta.url));
   const packageManifest = JSON.parse(await fs.readFile(path.join(apiDirectory, '..', '..', 'package.json'), 'utf8'));
   const config = options.config || createConfig({ ...options, packageVersion: packageManifest.version });
+  requireCompletedMigration(config.configDir);
   const openApi = await fs.readFile(config.openApiPath, 'utf8');
   const routeTemplates = Object.keys(JSON.parse(openApi).paths);
   const repository = new ArtifactRepository(
-    { data: config.dataDir, gui: config.guiDir, wpc: config.wpcDir },
+    { data: config.dataDir, gui: config.guiDir },
     config.api.artifacts.size_limits_bytes,
     config.api.artifacts.json_cache,
     config.api.artifacts.list_limit,
@@ -37,20 +38,21 @@ export async function createApp(options = {}) {
   app.use(...securityMiddleware(config.api.security), createCors(config.allowedOrigins, config.api.security.cors), ...createRateLimiters(config.rateLimits), requestTimeout(config.requestTimeoutMs));
   app.get('/', (req, res) => res.json({ service: 'EdgeWARN Unified API', version: exposedVersion, links: { api: '/api/v3', openapi: '/api/v3/openapi.json' } }));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send("# No clankers\nUser-agent: *\nDisallow: /\n"));
-  app.get('/health/live', (req, res) => res.json({ status: 'ok', requestId: req.requestId, config: config.diagnostics }));
-  app.get('/health/ready', async (req, res) => {
-    const checks = await Promise.all([config.dataDir, config.guiDir, config.wpcDir].map(async (dir) => { try { return (await fs.stat(dir)).isDirectory(); } catch { return false; } }));
-    // Diagnostic only (decomposition Phase 3): readiness keeps its
-    // directory-based contract and never flips on an optional disabled or
-    // stale service.
-    res.status(checks.every(Boolean) ? 200 : 503).json({
-      status: checks.every(Boolean) ? 'ready' : 'not-ready',
+  app.get('/health/live', (req, res) => res.json({ status: 'ok', requestId: req.requestId }));
+  app.get('/health/ready', async (req, res, next) => {
+    try {
+    const checks = await Promise.all([config.dataDir, config.guiDir].map(async (dir) => { try { return (await fs.stat(dir)).isDirectory(); } catch { return false; } }));
+    const services = await servicesSummary();
+    const healthy = config.api.server.enabled_services.every((name) => ['active', 'degraded'].includes(services[name]?.state));
+    const ready = checks.every(Boolean) && healthy;
+    res.status(ready ? 200 : 503).json({
+      status: ready ? 'ready' : 'not-ready',
       requestId: req.requestId,
-      config: config.diagnostics,
-      services: await servicesSummary(),
+      services,
     });
+    } catch (error) { next(error); }
   });
-  const analysis = createAnalysisService(repository); const renders = createRenderService(repository, config.api.render_defaults, config.api.artifacts.chunk_length_slack_bytes); const ancillary = createAncillaryServices(repository, { validation: config.api.validation, wpc: config.wpc });
+  const analysis = createAnalysisService(repository); const ancillary = createAncillaryServices(repository, { validation: config.api.validation });
   const modules = createModulesService(repository);
   // Service-state visibility (decomposition Phase 3): the scanner classifies
   // the canonical heartbeats under <baseDir>/state/realtime/services/. The
@@ -58,6 +60,7 @@ export async function createApp(options = {}) {
   const serviceRegistry = createServiceRegistry({
     baseDir: config.baseDir,
     staleAfterSeconds: config.api.server.service_stale_after_seconds,
+    progressStaleAfterSeconds: config.api.server.service_progress_stale_after_seconds,
   });
   const servicesSummary = async () => Object.fromEntries(Object.entries(await serviceRegistry.states()).map(([name, entry]) => [name, {
     state: entry.state,
@@ -65,7 +68,7 @@ export async function createApp(options = {}) {
     lastSeen: entry.heartbeat ? entry.heartbeat.updatedAt.toISOString() : null,
     degradedChildren: entry.heartbeat?.degradedChildren ?? [],
   }]));
-  app.use('/api/v3', createV3Router({ analysis, renders, ancillary, modules, openApi, apiConfig: config.api, serviceRegistry }));
+  app.use('/api/v3', createV3Router({ analysis, ancillary, modules, openApi, apiConfig: config.api, serviceRegistry }));
   app.use(notFound); app.use(errorHandler);
   return { app, config };
 }

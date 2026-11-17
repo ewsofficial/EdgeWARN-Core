@@ -1,0 +1,664 @@
+"""Independent ingest contracts across source commit, restart and consumers."""
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+
+import pytest
+
+from common.ingest.inventory import InputInventory
+from common.ingest.manifest import StagedInput
+from common.ingest.mrms.core_contract import IngestDependencies
+from common.ingest.objects import CommittedInput
+from common.pipeline.readiness import evaluate_scan
+from util.runtime.handoff import canonical_cycle_id
+from util.runtime.ingest_handoff import IngestHandoff, IngestRecordError
+
+T = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def dependencies():
+    return IngestDependencies(('A', 'B', 'ProbSevere'), ('A', 'ProbSevere'), ('I',),
+        ('Late',), (), ('A', 'ProbSevere'), ('Late',), False, False, 30, 'b' * 64, auxiliary_settings_json='{' + '"rap":{"max_age_minutes":180}' + '}')
+
+
+@pytest.fixture
+def inventory(tmp_path, dependencies):
+    return InputInventory(tmp_path, fingerprint=dependencies.fingerprint, run_id='first')
+
+
+def completion(root, product='A', at=T, *, body=b'validated payload', family='mrms', suffix='grib2'):
+    path = root / 'data' / product / f'MRMS_{product}_{at:%Y%m%d-%H%M%S}.{suffix}'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+    staged = StagedInput(product, str(path), at, 's3', family)
+    return CommittedInput(staged, hashlib.sha256(body).hexdigest(), 's3://bucket/key')
+
+
+def add(inventory, product='A', at=T):
+    committed = completion(inventory.base_dir, product, at)
+    inventory.commit_input(committed)
+    return committed
+
+
+def checks(inventory):
+    return [add(inventory, p) for p in ('A', 'B', 'ProbSevere')]
+
+
+
+
+def test_recover_file_inventory_commit_crash_windows(inventory, dependencies):
+    committed = completion(inventory.base_dir)
+    with pytest.raises(IngestRecordError, match='validator'):
+        inventory.reconcile([committed.record.path])
+    adopted = inventory.reconcile([committed.record.path], revalidate=lambda path: committed)
+    assert adopted['adopted'] == (committed.input_id,)
+    # Restart has no source acquisition and uses the same committed bytes/identity.
+    restarted = InputInventory(inventory.base_dir, fingerprint=dependencies.fingerprint, run_id='restart')
+    assert restarted.commit_input(replace(committed, source_locator='https://mirror', reused=True)).run_id == 'first'
+    assert restarted.reconcile()['adopted'] == ()
+    assert restarted.handoff.read('input', committed.input_id)
+    assert restarted.reconcile()['adopted'] == ()
+
+
+
+
+@pytest.mark.parametrize('missing', ['A', 'B', 'ProbSevere'])
+def test_each_missing_check_blocks_start(inventory, dependencies, missing):
+    for product in ('A', 'B', 'ProbSevere', 'I', 'Late'):
+        if product != missing:
+            add(inventory, product)
+    result = inventory.publish_scan(T, dependencies, at=T)
+    assert result.start is None and result.integration is None
+    assert result.missing_check == (missing,)
+    assert inventory.handoff.read('core-start-ready', canonical_cycle_id(T)) is None
+
+
+def test_previous_and_other_scan_inputs_do_not_satisfy_current_checks(inventory, dependencies):
+    for product in dependencies.check:
+        add(inventory, product, T - timedelta(minutes=2))
+    assert evaluate_scan(T, inventory.valid_inputs(), dependencies).start is None
+    # Check B cannot borrow the next scan within the manifest tolerance.
+    add(inventory, 'A'); add(inventory, 'ProbSevere'); add(inventory, 'B', T + timedelta(minutes=2))
+    assert evaluate_scan(T, inventory.valid_inputs(), dependencies).missing_check == ('B',)
+
+
+def test_start_integration_final_pin_identical_detection_and_history(inventory, dependencies):
+    previous = add(inventory, 'A', T - timedelta(minutes=2))
+    current = checks(inventory)
+    first = inventory.publish_scan(T, dependencies, at=T)
+    assert first.start is not None and first.integration is None
+    assert first.missing_integration == ('I',)
+    key = canonical_cycle_id(T)
+    start = inventory.handoff.read('core-start-ready', key)
+    assert previous.input_id in start.data['input_ids']
+    assert start.to_manifest().records_for_product('A')[0].role == 'previous'
+    # New history cannot change an already published start selection.
+    add(inventory, 'A', T - timedelta(seconds=30))
+    add(inventory, 'I')
+    second = inventory.publish_scan(T, dependencies, at=T + timedelta(seconds=10))
+    assert second.integration is not None and second.final is None
+    integration = inventory.handoff.read('core-integration-ready', key)
+    assert integration.data['input_ids'][:len(start.data['input_ids'])] == start.data['input_ids']
+    restarted = InputInventory(inventory.base_dir, fingerprint=dependencies.fingerprint, run_id='restart')
+    third = restarted.publish_scan(T, dependencies, at=T + timedelta(seconds=30))
+    assert third.final is not None and third.optional_dispositions == {'Late': 'expired'}
+    frozen = restarted.handoff.read('core-final-ready', key)
+    late = add(restarted, 'Late')
+    restarted.publish_scan(T, dependencies, at=T + timedelta(seconds=40))
+    assert restarted.handoff.read('core-final-ready', key).data == frozen.data
+    assert restarted.handoff.read('input', late.input_id)
+    assert current[0].input_id in frozen.data['input_ids']
+
+
+
+
+def test_optional_success_and_failure_snapshot(inventory, dependencies):
+    checks(inventory); add(inventory, 'I')
+    failed = inventory.publish_scan(T, dependencies, at=T, optional_failures=['Late'])
+    assert failed.final and failed.optional_dispositions == {'Late': 'failed'}
+
+
+def test_auxiliary_gates_and_rap_reuse(tmp_path, dependencies):
+    deps = replace(dependencies, rap_enabled=True, glm_enabled=True)
+    inventory = InputInventory(tmp_path, fingerprint=deps.fingerprint, run_id='run')
+    checks(inventory); add(inventory, 'I'); add(inventory, 'Late')
+    assert inventory.publish_scan(T, deps, at=T).missing_integration == ('RAP', 'GLM')
+    # Use the source's established filename parser.
+    from common.ingest.synoptic.main import parse_rap_analysis_time
+    path = tmp_path / 'data/rap/RAP.20260930-12z.awp130pgrbf00.grib2'
+    path.parent.mkdir(parents=True); path.write_bytes(b'rap')
+    assert parse_rap_analysis_time(path) == T
+    rap = CommittedInput(StagedInput('RAP', str(path), T, 'synoptic', 'rap'),
+                         hashlib.sha256(b'rap').hexdigest(), str(path))
+    inventory.commit_input(rap)
+    glm = tmp_path / 'data/glm/OR_GLM-L2-LCFA_G16_s20262731200000.nc'
+    glm.parent.mkdir(parents=True); glm.write_bytes(b'glm')
+    inventory.commit_input(CommittedInput(StagedInput('GLM-L2-LCFA', str(glm), T, 's3', 'goes'),
+        hashlib.sha256(b'glm').hexdigest(), str(glm)))
+    assert inventory.publish_scan(T, deps, at=T).integration is not None
+    inventory.commit_input(replace(rap, reused=True))
+    inventory.reconcile()
+    assert len([r for r in inventory.handoff.records('input') if r.data['input']['family'] == 'rap']) == 1
+
+
+@pytest.mark.parametrize('failure', ['timestamp', 'digest', 'outside', 'unvalidated'])
+def test_invalid_completion_never_enters_inventory(inventory, tmp_path, failure):
+    item = completion(inventory.base_dir)
+    if failure == 'timestamp':
+        item = replace(item, record=replace(item.record, analysis_time=T + timedelta(minutes=2)))
+    elif failure == 'digest':
+        item = replace(item, sha256='0' * 64)
+    elif failure == 'outside':
+        item = replace(item, record=replace(item.record, path=str(tmp_path.parent / 'escape')))
+    else:
+        item = replace(item, record=replace(item.record, validated=False))
+    with pytest.raises(IngestRecordError):
+        inventory.commit_input(item)
+    assert inventory.handoff.records('input') == ()
+
+
+def test_corrected_content_does_not_overwrite_inventory(inventory):
+    first = add(inventory)
+    # A corrected mirror has another local path; it must not revise product/time.
+    second = completion(inventory.base_dir, body=b'corrected')
+    with pytest.raises(IngestRecordError, match='Conflicting'):
+        inventory.commit_input(second)
+    assert inventory.handoff.read('input', first.input_id).data['sha256'] == first.sha256
+    with pytest.raises(IngestRecordError, match='changed'):
+        inventory.valid_inputs(strict=True)
+
+
+@pytest.mark.parametrize('mutation', ['schema', 'fingerprint', 'key', 'path', 'evidence', 'boolean', 'time', 'extra'])
+def test_strict_reader_rejects_incompatible_records(inventory, mutation):
+    item = add(inventory)
+    path = inventory.handoff.path('input', item.input_id)
+    raw = json.loads(path.read_text())
+    if mutation == 'schema': raw['schema_version'] = 2
+    elif mutation == 'fingerprint': raw['fingerprint'] = 'f' * 64
+    elif mutation == 'key': raw['key'] = '0' * 64
+    elif mutation == 'path': raw['data']['input']['path'] = '/tmp/escape'
+    elif mutation == 'evidence': raw['data']['validation'] = {}
+    elif mutation == 'boolean': raw['data']['input']['validated'] = 'true'
+    elif mutation == 'time': raw['data']['input']['analysis_time'] = '2026-09-30T12:00:00'
+    else: raw['unknown'] = 'field'
+    path.write_text(json.dumps(raw))
+    with pytest.raises(IngestRecordError):
+        inventory.handoff.read('input', item.input_id)
+    with pytest.raises(IngestRecordError):
+        inventory.commit_input(item)
+
+
+def test_symlink_state_escape_is_rejected(inventory, tmp_path):
+    outside = tmp_path / 'outside'; outside.mkdir()
+    # A namespace symlink must stay inside the resolved runtime root.
+    inventory.handoff.root.parent.mkdir(parents=True)
+    inventory.handoff.root.symlink_to('/tmp')
+    with pytest.raises(IngestRecordError, match='escapes'):
+        inventory.handoff.read('input', '0' * 64)
+
+
+def test_phase_republication_refuses_changed_selection(inventory, dependencies):
+    checks(inventory)
+    evaluation = inventory.publish_scan(T, dependencies, at=T)
+    extra = add(inventory, 'Extra')
+    manifest = evaluation.start.with_inputs([extra.record])
+    with pytest.raises(IngestRecordError, match='Incompatible'):
+        inventory.handoff.publish_phase('core-start-ready', manifest, (*evaluation.start_ids, extra.input_id))
+    with pytest.raises(IngestRecordError, match='identities'):
+        inventory.handoff.publish_phase('core-start-ready', evaluation.start, [])
+
+
+
+
+def test_expiry_terminal_and_core_consumption_are_durable(inventory, dependencies):
+    checks(inventory)
+    inventory.publish_scan(T, dependencies, at=T)
+    key = canonical_cycle_id(T)
+    with pytest.raises(IngestRecordError, match='reason'):
+        inventory.handoff.disposition('terminal', key, status='expired')
+    inventory.handoff.disposition('terminal', key, status='expired', reason='Missing I')
+    inventory.handoff.disposition('core-state', key, status='abandoned', reason='Missing I')
+    with pytest.raises(IngestRecordError, match='terminal'):
+        inventory.handoff.disposition('core-state', key, status='success')
+    add(inventory, 'I')
+    with pytest.raises(IngestRecordError, match='terminal'):
+        inventory.publish_scan(T, dependencies, at=T + timedelta(minutes=2))
+    assert inventory.handoff.records('input')
+
+
+def test_retention_protects_pins_and_shared_replay_lock(inventory, monkeypatch):
+    item = add(inventory)
+    add(inventory, 'A', T + timedelta(minutes=2))
+    h = inventory.handoff
+    h.pin('history', [item.input_id])
+    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
+    h.release_pin('history')
+    # Cleanup and selection use the same OS lock. A foreign holder (another
+    # process, modelled by a separate descriptor) makes both wait a bounded
+    # time and then fail without touching anything.
+    from common.ingest import replay
+    from util.runtime.handoff import InputLockTimeout, _AdvisoryFileLock
+    monkeypatch.setattr(replay, '_lock_timeouts', lambda: (0.2, 60.0))
+    with _AdvisoryFileLock(replay.input_lock_path(inventory.base_dir)):
+        with pytest.raises(InputLockTimeout):
+            inventory.cleanup(before=T + timedelta(days=1))
+        with pytest.raises(OSError):
+            h.pin('new-selection', [item.input_id])
+    assert inventory.cleanup(before=T + timedelta(days=1)) == (item.input_id,)
+    assert not item.record.local_path.exists()
+    assert h.read('retired-input', item.input_id)
+    assert inventory.reconcile()['adopted'] == ()
+
+
+def test_pending_core_phase_protects_inputs(inventory, dependencies):
+    items = checks(inventory)
+    inventory.publish_scan(T, dependencies, at=T)
+    for product in ('A', 'B', 'ProbSevere'):
+        add(inventory, product, T + timedelta(minutes=2))
+    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
+    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
+    inventory.handoff.disposition('core-state', canonical_cycle_id(T), status='success')
+    assert inventory.cleanup(before=T + timedelta(days=1)) == (items[1].input_id,)
+    # Detection history remains pinned between sequential scans.
+    assert items[0].record.local_path.exists()
+    inventory.handoff.release_pin('core-history')
+    assert set(inventory.cleanup(before=T + timedelta(days=1))) == {items[0].input_id, items[2].input_id}
+
+
+def test_restart_finishes_interrupted_retention(inventory, monkeypatch):
+    item = add(inventory)
+    add(inventory, 'A', T + timedelta(minutes=2))
+    original = type(item.record.local_path).unlink
+    def crash(path, *args, **kwargs):
+        if path == item.record.local_path:
+            raise OSError('crash after tombstone')
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(type(item.record.local_path), 'unlink', crash)
+    with pytest.raises(OSError):
+        inventory.cleanup(before=T + timedelta(days=1))
+    monkeypatch.setattr(type(item.record.local_path), 'unlink', original)
+    assert inventory.reconcile()['adopted'] == ()
+    assert not item.record.local_path.exists()
+
+
+def test_poll_status_and_corruption_are_visible(inventory):
+    inventory.handoff.publish_poll_status({'pending': 2}, ['missing B'])
+    assert inventory.handoff.read('poll-status', 'poll-status').data['counts']['pending'] == 2
+    inventory.handoff.path('poll-status', 'poll-status').write_text('{partial')
+    with pytest.raises(IngestRecordError, match='Cannot read'):
+        inventory.handoff.read('poll-status', 'poll-status')
+
+
+def test_evaluation_is_pure_after_loading_inventory(inventory, dependencies, monkeypatch):
+    from pathlib import Path
+    checks(inventory); add(inventory, 'I'); add(inventory, 'Late')
+    records = inventory.valid_inputs()
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Pure evaluation touched the filesystem')
+    monkeypatch.setattr(Path, 'resolve', forbidden)
+    monkeypatch.setattr(Path, 'is_file', forbidden)
+    monkeypatch.setattr(Path, 'open', forbidden)
+    assert evaluate_scan(T, records, dependencies, at=T, optional_started_at=T).final
+
+
+def test_pinned_phase_missing_check_cannot_pass_consumer_preflight(inventory, dependencies):
+    from common.pipeline.readiness import validate_phase_dependencies
+    item = add(inventory, 'A')
+    from common.ingest.manifest import CycleInputManifest
+    record = inventory.handoff.publish_phase('core-start-ready', CycleInputManifest(T, (item.record,)), [item.input_id])
+    with pytest.raises(IngestRecordError, match='check'):
+        validate_phase_dependencies(record, dependencies)
+    with pytest.raises(IngestRecordError, match='check'):
+        evaluate_scan(T, inventory.valid_inputs(), dependencies, start_record=record)
+
+
+def test_history_is_strictly_earlier_than_pinned_actual_observation(inventory, dependencies):
+    previous = add(inventory, 'A', T + timedelta(seconds=10))
+    current = add(inventory, 'A', T + timedelta(seconds=40))
+    add(inventory, 'B'); add(inventory, 'ProbSevere')
+    result = inventory.publish_scan(T, dependencies, at=T)
+    assert current.input_id in result.start_ids and previous.input_id in result.start_ids
+    assert result.start.records_for_product('A')[0].role == 'previous'
+
+
+def test_fingerprint_mismatch_never_consumes_inventory(inventory, dependencies):
+    checks(inventory)
+    incompatible = replace(dependencies, glm_enabled=True)
+    with pytest.raises(IngestRecordError, match='fingerprint'):
+        evaluate_scan(T, inventory.valid_inputs(), incompatible)
+    with pytest.raises(IngestRecordError, match='agreement'):
+        inventory.publish_scan(T, incompatible, at=T)
+
+
+@pytest.mark.parametrize('change', ['timestamp', 'validated', 'tolerance', 'schema'])
+def test_phase_strict_reader_rejects_corruption(inventory, dependencies, change):
+    checks(inventory)
+    inventory.publish_scan(T, dependencies, at=T)
+    key = canonical_cycle_id(T)
+    path = inventory.handoff.path('core-start-ready', key)
+    raw = json.loads(path.read_text())
+    if change == 'timestamp': raw['data']['manifest']['cycle_time'] = (T + timedelta(minutes=2)).isoformat()
+    elif change == 'validated': raw['data']['manifest']['inputs'][0]['validated'] = 'true'
+    elif change == 'tolerance': raw['data']['manifest']['tolerances']['rap_max_age_seconds'] = float('nan')
+    else: raw['data']['manifest']['extra'] = 1
+    path.write_text(json.dumps(raw))
+    with pytest.raises(IngestRecordError):
+        inventory.handoff.read('core-start-ready', key)
+
+
+def test_failed_payload_adoption_never_publishes(inventory):
+    item = completion(inventory.base_dir, body=b'partial')
+    def reject(path):
+        raise ValueError('Corrupt payload')
+    with pytest.raises(ValueError, match='Corrupt'):
+        inventory.reconcile([item.record.path], revalidate=reject)
+    assert inventory.handoff.records('input') == inventory.handoff.records('input') == ()
+
+
+def test_cleanup_racing_pin_defers_then_observes_reference(inventory, monkeypatch):
+    import threading
+    item = add(inventory)
+    acquired = threading.Event()
+    release = threading.Event()
+    failures = []
+    write = inventory.handoff._write
+    def pause(kind, *args, **kwargs):
+        if kind == 'pin':
+            acquired.set()
+            if not release.wait(2):
+                raise AssertionError('Pin publication timed out')
+        return write(kind, *args, **kwargs)
+    monkeypatch.setattr(inventory.handoff, '_write', pause)
+    def pin():
+        try:
+            inventory.handoff.pin('active-worker', [item.input_id])
+        except BaseException as exc:
+            failures.append(exc)
+    worker = threading.Thread(target=pin)
+    worker.start()
+    try:
+        assert acquired.wait(2)
+        # Cleanup now waits for the in-progress pin instead of failing, and
+        # then observes the reference the pin published.
+        threading.Timer(0.2, release.set).start()
+        assert inventory.cleanup(before=T + timedelta(days=1)) == ()
+    finally:
+        release.set()
+        worker.join(2)
+    assert not failures and not worker.is_alive()
+    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
+    assert item.record.local_path.exists()
+
+
+
+
+def test_disabled_auxiliary_sources_do_not_create_missing_requirements(inventory, dependencies):
+    checks(inventory); add(inventory, 'I'); add(inventory, 'Late')
+    result = inventory.publish_scan(T, dependencies, at=T)
+    assert result.integration and result.final and result.missing_integration == ()
+    assert all(r.family == 'mrms' for r in result.final.inputs)
+
+
+def test_protected_history_and_rap_pin_yield_to_active_references(inventory):
+    older = add(inventory, 'A', T - timedelta(minutes=2))
+    newer = add(inventory, 'A')
+    assert inventory.cleanup(before=T + timedelta(days=1), protected_products=['A']) == (older.input_id,)
+    assert newer.record.local_path.exists()
+
+
+def test_newest_input_survives_until_a_newer_one_exists(inventory):
+    only = add(inventory, 'A', T - timedelta(hours=5))
+    assert inventory.cleanup(before=T) == ()
+    assert only.record.local_path.exists()
+    newer = add(inventory, 'A', T - timedelta(hours=4))
+    assert inventory.cleanup(before=T) == (only.input_id,)
+    assert newer.record.local_path.exists()
+
+
+def test_file_verification_cache_invalidates_on_same_size_replacement(inventory):
+    item = add(inventory)
+    inventory.valid_inputs()
+    item.record.local_path.write_bytes(b'x' * len(b'validated payload'))
+    with pytest.raises(IngestRecordError, match='changed'):
+        inventory.valid_inputs(strict=True)
+
+
+def test_active_core_keeps_phase_inputs_after_scan_expiry(inventory, dependencies):
+    items = checks(inventory)
+    inventory.publish_scan(T, dependencies, at=T)
+    key = canonical_cycle_id(T)
+    active = inventory.handoff.disposition('core-state', key, status='active')
+    assert set(active.data['input_ids']) == {item.input_id for item in items}
+    inventory.handoff.disposition('terminal', key, status='expired', reason='Missing I')
+    inventory.handoff.release_pin('core-history')
+    for product in ('A', 'B', 'ProbSevere'):
+        add(inventory, product, T + timedelta(minutes=2))
+    assert inventory.cleanup(before=T + timedelta(days=1)) == ()
+    inventory.handoff.disposition('core-state', key, status='abandoned', reason='Worker stopped')
+    assert set(inventory.cleanup(before=T + timedelta(days=1))) == {item.input_id for item in items}
+
+
+def test_consumer_revalidates_phase_identity_and_bytes(inventory, dependencies):
+    items = checks(inventory)
+    inventory.publish_scan(T, dependencies, at=T)
+    record = inventory.handoff.read('core-start-ready', canonical_cycle_id(T))
+    assert inventory.handoff.validate_phase_inputs(record) is record
+    items[0].record.local_path.write_bytes(b'changed')
+    with pytest.raises(IngestRecordError, match='changed'):
+        inventory.handoff.validate_phase_inputs(record)
+
+
+def test_conflicting_integration_selection_is_not_overwritten(inventory, dependencies):
+    checks(inventory); add(inventory, 'I')
+    result = inventory.publish_scan(T, dependencies, at=T)
+    ids = list(result.integration_ids)
+    records = list(result.integration.inputs)
+    other = add(inventory, 'A', T + timedelta(seconds=40))
+    index = next(i for i, r in enumerate(records) if r.product == 'A' and r.role == 'current')
+    ids[index], records[index] = other.input_id, other.record
+    manifest = replace(result.integration, inputs=tuple(records))
+    with pytest.raises(IngestRecordError, match='pinned'):
+        inventory.handoff.publish_phase('core-integration-ready', manifest, ids)
+
+
+def test_reused_rap_is_pinned_by_two_active_scans(tmp_path, dependencies):
+    deps = replace(dependencies, rap_enabled=True)
+    inventory = InputInventory(tmp_path, fingerprint=deps.fingerprint, run_id='run')
+    path = tmp_path / 'data/rap/RAP.20260930-12z.awp130pgrbf00.grib2'
+    path.parent.mkdir(parents=True); path.write_bytes(b'rap')
+    rap = CommittedInput(StagedInput('RAP', str(path), T, 'synoptic', 'rap'),
+                         hashlib.sha256(b'rap').hexdigest(), str(path))
+    inventory.commit_input(rap)
+    for scan in (T, T + timedelta(minutes=2)):
+        for product in (*deps.check, 'I'):
+            add(inventory, product, scan)
+        result = inventory.publish_scan(scan, deps, at=scan)
+        assert rap.input_id in result.integration_ids
+        inventory.handoff.disposition('core-state', canonical_cycle_id(scan), status='active')
+    inventory.handoff.disposition('core-state', canonical_cycle_id(T), status='success')
+    inventory.cleanup(before=T + timedelta(days=1))
+    assert path.exists()
+    inventory.handoff.disposition('core-state', canonical_cycle_id(T + timedelta(minutes=2)), status='success')
+    newer_path = tmp_path / 'data/rap/RAP.20260930-13z.awp130pgrbf00.grib2'
+    newer_path.write_bytes(b'rap2')
+    inventory.commit_input(CommittedInput(StagedInput('RAP', str(newer_path), T + timedelta(hours=1), 'synoptic', 'rap'),
+                                          hashlib.sha256(b'rap2').hexdigest(), str(newer_path)))
+    assert rap.input_id in inventory.cleanup(before=T + timedelta(days=1))
+    assert not path.exists()
+
+
+def _stormprob_dependencies(base, *, gate):
+    from common.config.loader import load_config
+    from common.ingest.mrms.core_contract import resolve_dependencies
+    from common.ingest.mrms.registry import _plain, build_registry
+
+    registry = build_registry(_plain(load_config('ingest')['mrms']), base)
+    return resolve_dependencies(registry, include_rap=False, include_glm=False,
+                                auxiliary_settings={'rap': {'max_age_minutes': 180}},
+                                require_stormprob_inputs=gate)
+
+
+def test_integration_waits_for_every_stormprob_source(tmp_path):
+    """test-run-1001 released integration with only AzShear present."""
+    from common.ingest.mrms.core_contract import STORMPROB_INTEGRATION_PRODUCTS
+
+    dependencies = _stormprob_dependencies(tmp_path, gate=True)
+    inventory = InputInventory(tmp_path, fingerprint=dependencies.fingerprint, run_id='first')
+    # Realistic MRMS stamps land ~38 s after the even-minute scan time.
+    stamp = T + timedelta(seconds=38)
+    for product in dependencies.check:
+        add(inventory, product, stamp)
+    *present, missing = STORMPROB_INTEGRATION_PRODUCTS
+    for product in present:
+        add(inventory, product, stamp)
+    key = canonical_cycle_id(T)
+
+    waiting = inventory.publish_scan(T, dependencies, at=T)
+    assert waiting.start is not None and waiting.integration is None
+    assert waiting.missing_integration == (missing,)
+    assert inventory.handoff.read('core-integration-ready', key) is None
+
+    add(inventory, missing, stamp)
+    inventory.publish_scan(T, dependencies, at=T + timedelta(seconds=5))
+    released = inventory.handoff.read('core-integration-ready', key)
+    assert released is not None
+    selected = {r.product for r in released.to_manifest().current_inputs() if r.family == 'mrms'}
+    assert set(STORMPROB_INTEGRATION_PRODUCTS) <= selected
+
+
+def test_without_stormprob_the_integration_gate_is_unchanged(tmp_path):
+    dependencies = _stormprob_dependencies(tmp_path, gate=False)
+    assert dependencies.mandatory_integration == ()
+    inventory = InputInventory(tmp_path, fingerprint=dependencies.fingerprint, run_id='first')
+    for product in dependencies.check:
+        add(inventory, product, T + timedelta(seconds=38))
+    result = inventory.publish_scan(T, dependencies, at=T)
+    assert result.integration is not None
+    assert inventory.handoff.read('core-integration-ready', canonical_cycle_id(T)) is not None
+
+
+def test_cached_records_follow_rewrites_and_deletions(inventory):
+    """Parsed records are reused only while the file version is unchanged."""
+    item = add(inventory)
+    handoff = inventory.handoff
+    key = hashlib.sha256(b'owner').hexdigest()
+    handoff.pin('owner', [item.input_id])
+    first = handoff.read('pin', key)
+    assert handoff.read('pin', key) is first
+    handoff.pin('owner', [])
+    assert handoff.read('pin', key).data['input_ids'] == []
+    handoff.release_pin('owner')
+    assert handoff.read('pin', key) is None
+    assert all(record.key != key for record in handoff.records('pin'))
+    # Another process's view (a fresh handoff) agrees with the cached one.
+    fresh = IngestHandoff(inventory.base_dir, fingerprint=handoff.fingerprint, run_id='other')
+    assert [r.key for r in fresh.records('input')] == [r.key for r in handoff.records('input')]
+
+
+def test_stale_fingerprint_state_is_quarantined_not_read(inventory):
+    item = add(inventory)
+    path = inventory.handoff.path('input', item.input_id)
+    raw = json.loads(path.read_text())
+    raw['fingerprint'] = 'f' * 64
+    path.write_text(json.dumps(raw))
+    with pytest.raises(IngestRecordError):
+        inventory.handoff.read('input', item.input_id)
+    moved = inventory.handoff.quarantine_stale()
+    assert len(moved) == 1 and moved[0].is_dir()
+    assert inventory.handoff.records('input') == ()
+    assert inventory.handoff.quarantine_stale() == ()
+    assert item.record.local_path.exists()
+
+
+@pytest.mark.parametrize('kind', ['input', 'core-state'])
+def test_quarantine_handles_each_state_tree_and_repeated_upgrades(inventory, kind, monkeypatch):
+    from common.ingest.replay import input_lock
+    from util.runtime import ingest_handoff
+
+    monkeypatch.setattr(ingest_handoff, 'now', lambda: T)
+    old = IngestHandoff(inventory.base_dir, fingerprint='f' * 64, run_id='old')
+
+    def seed():
+        if kind == 'input':
+            item = add(InputInventory(inventory.base_dir,
+                                     fingerprint=old.fingerprint, run_id='old'))
+            return old.path(kind, item.input_id)
+        if kind == 'core-state':
+            key = canonical_cycle_id(T)
+            old.disposition(kind, key, status='success')
+            return old.path(kind, key)
+        raise AssertionError("unknown state kind")
+
+    archives = []
+    for _ in range(2):
+        path = seed()
+        with input_lock(inventory.base_dir):
+            moved = inventory.handoff.quarantine_stale()
+        assert len(moved) == 1 and not path.exists()
+        archived = moved[0] / 'inputs' / path.name if kind == 'input' else moved[0] / path.name
+        assert archived.is_file()
+        archives.extend(moved)
+    assert archives[0] != archives[1] and all(p.is_dir() for p in archives)
+    assert inventory.handoff.quarantine_stale() == ()
+
+
+def test_matching_state_is_reused_and_corruption_is_not_quarantined(inventory):
+    item = add(inventory)
+    assert inventory.handoff.quarantine_stale() == ()
+    assert inventory.handoff.read('input', item.input_id)
+    path = inventory.handoff.path('input', item.input_id)
+    path.write_text('{partial')
+    assert inventory.handoff.quarantine_stale() == ()
+    with pytest.raises(IngestRecordError, match='Cannot read'):
+        inventory.handoff.read('input', item.input_id)
+
+
+def test_record_enumeration_isolates_corruption_and_disappearance(inventory, monkeypatch):
+    first = add(inventory, "A")
+    second = add(inventory, "B")
+    inventory.handoff.path("input", first.input_id).write_text("invalid json")
+    assert [r.key for r in inventory.handoff.records("input")] == [second.input_id]
+    assert list(inventory.handoff.path("input", first.input_id).parent.glob("*.corrupt-*"))
+    original = inventory.handoff.read
+    def disappearing(kind, key):
+        if kind == "input":
+            inventory.handoff.path(kind, key).unlink(missing_ok=True)
+        return original(kind, key)
+    monkeypatch.setattr(inventory.handoff, "read", disappearing)
+    assert inventory.handoff.records("input") == ()
+
+
+def test_missing_input_does_not_block_new_scan(inventory, dependencies):
+    missing = add(inventory, 'Old', T - timedelta(minutes=2))
+    missing.record.local_path.unlink()
+    checks(inventory)
+    assert inventory.publish_scan(T, dependencies, at=T).start is not None
+    assert inventory.handoff.read('input', missing.input_id) is None
+
+
+
+
+def test_compaction_bounds_a_day_of_terminal_scans_and_caches(inventory, dependencies):
+    from util.runtime.handoff import canonical_cycle_id
+    for step in range(720):
+        stamp = T + timedelta(minutes=2 * step)
+        key = canonical_cycle_id(stamp)
+        inventory.handoff._write('scan-state', key, {
+            'first_seen_at': stamp.isoformat(), 'optional_started_at': stamp.isoformat()})
+        inventory.handoff.disposition('terminal', key, status='expired', reason='simulated expiry')
+    cutoff = T + timedelta(hours=23)
+    assert len(inventory.compact(before=cutoff)) == 690
+    assert len(inventory.handoff.records('scan-state')) == 30
+    assert len(inventory.handoff.records('terminal')) == 30
+    assert len(inventory.handoff._parsed) <= 60
+
+
+def test_compaction_preserves_active_core_state(inventory, dependencies):
+    checks(inventory)
+    inventory.publish_scan(T, dependencies, at=T)
+    key = canonical_cycle_id(T)
+    inventory.handoff.disposition('core-state', key, status='active')
+    assert inventory.compact(before=T + timedelta(days=1)) == ()
+    assert inventory.handoff.read('core-start-ready', key) is not None

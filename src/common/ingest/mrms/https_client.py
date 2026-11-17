@@ -24,6 +24,8 @@ except ImportError:
 
 from common.ingest.mrms.config import (
     ncep_base_url,
+    _catalog,
+    _source,
     ncep_directory_map,
     ncep_directory_split_token,
     ncep_download_chunk_size_bytes,
@@ -38,7 +40,10 @@ from common.ingest.mrms.config import (
 
 
 class HttpsFileFinder:
-    def __init__(self, dt, io_manager_instance=None):
+    def __init__(self, dt, io_manager_instance=None, *, raise_errors=False, source=None, timeout_seconds=None):
+        self.raise_errors = raise_errors
+        self.source = source
+        self.timeout_seconds = timeout_seconds
         self.dt = dt
         self.io_manager = io_manager_instance or io_manager
         self.session = None
@@ -63,6 +68,9 @@ class HttpsFileFinder:
         if modifier is None: # ProbSevere
             return "ProbSevere" # The actual URL is /data/ProbSevere, handled in construct_url
 
+        if _catalog()["schema_version"] == 2:
+            return _source(modifier).https_directory
+
         mapping = ncep_directory_map()
         if modifier in mapping:
             return mapping[modifier]
@@ -76,6 +84,8 @@ class HttpsFileFinder:
 
     def construct_url(self, region, modifier):
         """Constructs the NCEP URL. Note: MRMS 2D data on NCEP is flat, not organized by date folders like S3."""
+        if self.source is not None:
+            return self.source.https_url
         prod_name = self._get_product_url_name(modifier)
 
         if modifier is None: # ProbSevere
@@ -96,15 +106,19 @@ class HttpsFileFinder:
         self.io_manager.write_debug(f"Scanning {url} for {target_ts_str}...")
         
         # Standard SSL verification is now used as testing confirmed support
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=(self.timeout_seconds if self.timeout_seconds is not None else ncep_sync_timeout_seconds()))) as session:
             try:
                 async with session.get(url) as response:
                     if response.status != 200:
+                        if self.raise_errors:
+                            response.raise_for_status()
                         self.io_manager.write_warning(f"Failed to access {url}: HTTP {response.status}")
                         return []
                     
                     html = await response.text()
             except Exception as e:
+                if self.raise_errors:
+                    raise
                 self.io_manager.write_error(f"Error scraping {url}: {e}")
                 return []
 
@@ -114,7 +128,7 @@ class HttpsFileFinder:
         valid_files = []
         for link in links:
             href = link.get('href')
-            if not href.endswith('.gz') and not href.endswith('.json'):
+            if not href or '/' in href or chr(92) in href or (not href.endswith('.gz') and not href.endswith('.json')):
                 continue
                 
             # Name format: MRMS_{Product}_{Level}_{YYYYMMDD-HHMMSS}.grib2.gz
@@ -142,12 +156,16 @@ class HttpsFileFinder:
             self.io_manager.write_debug(f"Scanning (Sync) {url} for {target_ts_str}...")
         
         try:
-            response = requests.get(url, timeout=ncep_sync_timeout_seconds())
+            response = requests.get(url, timeout=(self.timeout_seconds if self.timeout_seconds is not None else ncep_sync_timeout_seconds()))
             if response.status_code != 200:
+                if self.raise_errors:
+                    response.raise_for_status()
                 self.io_manager.write_warning(f"Failed to access {url}: HTTP {response.status_code}")
                 return []
             html = response.text
         except Exception as e:
+            if self.raise_errors:
+                raise
             self.io_manager.write_error(f"Error scraping {url}: {e}")
             return []
 
@@ -157,7 +175,7 @@ class HttpsFileFinder:
         valid_files = []
         for link in links:
             href = link.get('href')
-            if not href.endswith('.gz') and not href.endswith('.json'):
+            if not href or '/' in href or chr(92) in href or (not href.endswith('.gz') and not href.endswith('.json')):
                 continue
 
             if self.dt.strftime("%Y%m%d") in href:
@@ -192,7 +210,7 @@ class HttpsFileDownloader:
 
         self.io_manager.write_info(f"Downloading (HTTPS Fallback): {filename}")
         
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ncep_sync_timeout_seconds())) as session:
             try:
                 async with session.get(match) as response:
                     if response.status == 200:
@@ -228,17 +246,17 @@ class HttpsFileDownloader:
     def _select_matching_url(self, file_urls):
         """Apply the same exact-minute/limited-offset rule to both transports."""
         target_ts = self.dt.strftime("%Y%m%d-%H%M")
-        for url in file_urls:
-            if target_ts in url.replace(":", ""):
+        for url in sorted(set(file_urls)):
+            if target_ts in url.replace(":", "").replace("_", "-"):
                 return url
         matches = []
         target_dt = self.dt if self.dt.tzinfo else self.dt.replace(tzinfo=timezone.utc)
-        for url in file_urls:
-            found = re.search(r'(\d{8}-\d{6})', url)
+        for url in sorted(set(file_urls)):
+            found = re.search(r'(\d{8}[-_]\d{6})', url)
             if found is None:
                 continue
             try:
-                file_dt = datetime.strptime(found.group(1), "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
+                file_dt = datetime.strptime(found.group(1).replace("_", "-"), "%Y%m%d-%H%M%S").replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
             diff = abs((file_dt - target_dt).total_seconds())

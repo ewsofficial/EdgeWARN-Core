@@ -1,14 +1,33 @@
 """Atomic publication regression tests for shared source/state writers.
 
-Phase 0 prerequisite (plans/realtime-runner-decomposition-plan.md): every
+Phase 0 prerequisite (retired plans/realtime-runner-decomposition-plan.md): every
 writer whose final filename is observable by an independent process must
 commit through a sibling temporary file and ``os.replace``. A failed write
 must never leave truncated content visible under the real name.
 """
 
 import json
+import os
+import stat
 
 import pytest
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission contract")
+@pytest.mark.parametrize("mask, expected", [(0o022, 0o644), (0o027, 0o640), (0o077, 0o600)])
+def test_atomic_publication_honors_umask_on_creation_and_replacement(tmp_path, mask, expected):
+    from util.atomic import atomic_write_json
+
+    target = tmp_path / "heartbeat.json"
+    old_mask = os.umask(mask)
+    try:
+        for value in (1, 2):
+            atomic_write_json(target, {"value": value})
+            assert stat.S_IMODE(target.stat().st_mode) == expected
+            assert json.loads(target.read_text()) == {"value": value}
+        assert list(tmp_path.iterdir()) == [target]
+    finally:
+        os.umask(old_mask)
 
 
 class TestNexradManifestWriter:
@@ -68,27 +87,3 @@ class TestNexradScanStateWriter:
             nexrad_service._write_text_if_changed(path, '{"new": true}')
         assert json.loads(path.read_text(encoding="utf-8")) == {"kept": True}
         assert list(tmp_path.iterdir()) == [path]
-
-
-class TestOverlayManifestWriter:
-    def test_save_to_json_writes_parseable_layers(self, tmp_path):
-        from EWMRS.render.tools import OverlayManifestUtils
-
-        utils = OverlayManifestUtils()
-        utils.layers = [{"name": "MRMS_EchoTop18", "opacity": 1}]
-        target = tmp_path / "overlay_manifest.json"
-        utils.save_to_json(str(target))
-        assert json.loads(target.read_text(encoding="utf-8")) == utils.layers
-        assert list(tmp_path.iterdir()) == [target]
-
-    def test_serialization_failure_never_touches_destination(self, tmp_path):
-        from EWMRS.render.tools import OverlayManifestUtils
-
-        utils = OverlayManifestUtils()
-        utils.layers = [{"bad": object()}]  # not JSON-serializable
-        target = tmp_path / "overlay_manifest.json"
-        target.write_text("[]", encoding="utf-8")
-        with pytest.raises(TypeError):
-            utils.save_to_json(str(target))
-        assert target.read_text(encoding="utf-8") == "[]"
-        assert list(tmp_path.iterdir()) == [target]

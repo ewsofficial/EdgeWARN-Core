@@ -18,14 +18,7 @@ const TIMESTAMP = '20260317-200000';
 
 // [fixture-relative source, runtime-tree destination]
 const COPIES = [
-  ['RAP/CAPE/index.json', 'gui/RAP/CAPE/index.json'],
-  ['RAP/CAPE/20260317-200000/metadata.json', 'gui/RAP/CAPE/20260317-200000/metadata.json'],
-  ['RAP/CAPE/20260317-200000/data.u16', 'gui/RAP/CAPE/20260317-200000/data.u16'],
-  ['render/MRMS_MergedReflectivityQC/index.json', 'gui/MRMS_MergedReflectivityQC/index.json'],
-  ['render/MRMS_MergedReflectivityQC/20260317-200000/index.json', 'gui/MRMS_MergedReflectivityQC/20260317-200000/index.json'],
-  ['render/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz', 'gui/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz'],
   ['nexrad/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz', 'gui/NEXRAD/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz'],
-  ['wpc/surface_analysis/wpc_sfc_20260317-200000.geojson', 'wpc/surface_analysis/wpc_sfc_20260317-200000.geojson'],
 ];
 
 const fixtureBytes = (relative) => fs.readFile(new URL(relative, FIXTURES));
@@ -55,10 +48,9 @@ describe('binary producer/consumer contracts through the real API', () => {
       await fs.copyFile(new URL(source, FIXTURES), target);
     }
     // v3 owner gates require an active heartbeat per service (decomposition
-    // phases 3-5); without them the ewmrs/nexrad routes return 503.
+    // phases 3-5); without them the nexrad routes return 503.
     const heartbeat = (service) => JSON.stringify({ schema_version: 1, service, pid: 1, run_id: 'test-run', updated_at: new Date().toISOString(), phase: 'supervising', degraded_children: [] });
     await fs.mkdir(path.join(baseDir, 'state', 'realtime', 'services'), { recursive: true });
-    await fs.writeFile(path.join(baseDir, 'state', 'realtime', 'services', 'ewmrs.json'), heartbeat('ewmrs'));
     await fs.writeFile(path.join(baseDir, 'state', 'realtime', 'services', 'nexrad.json'), heartbeat('nexrad'));
     ({ app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir, RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] }));
   });
@@ -67,75 +59,11 @@ describe('binary producer/consumer contracts through the real API', () => {
     if (baseDir) await fs.rm(baseDir, { recursive: true, force: true });
   });
 
-  it('serves RAP uint16 bytes with the derived metadata headers and passes them through untouched', async () => {
-    const reference = await fixtureBytes('RAP/CAPE/20260317-200000/data.u16');
-    const metadata = await fixtureJson('RAP/CAPE/20260317-200000/metadata.json');
+  
 
-    const dataUrl = `/api/v3/models/rap/layers/CAPE/snapshots/${TIMESTAMP}/data`;
-    const response = await request(app).get(dataUrl).expect(200).expect('Content-Type', /application\/octet-stream/);
-    expect(response.headers['x-data-type']).toBe('uint16');
-    expect(response.headers['x-byte-order']).toBe('little_endian');
-    expect(response.headers['x-missing-value']).toBe(String(metadata.missing_value));
-    expect(response.headers['x-grid-ni']).toBe('3');
-    expect(response.headers['x-grid-nj']).toBe('2');
-    expect(response.headers['x-scale-min']).toBe('0');
-    expect(response.headers['x-scale-max']).toBe('100');
-    expect(response.headers['x-units']).toBe('J/kg');
-    expect(response.headers['content-length']).toBe(String(reference.length));
-    expect(Buffer.compare(Buffer.from(response.body), reference)).toBe(0);
+  
 
-    // Independent little-endian struct read: shape [2,3] from the metadata,
-    // scale maps 0..100 to 0..65535, NaN reserves 65535.
-    const grid = Buffer.from(response.body);
-    expect(metadata.shape).toEqual([2, 3]);
-    expect(metadata.dtype).toBe('uint16');
-    expect(metadata.byte_order).toBe('little_endian');
-    expect(grid.readUInt16LE(0)).toBe(0); // 0.0 -> scale min
-    // 100.0 saturates at valid_max (65534); 65535 is reserved for nodata --
-    // see the `uint16` block in config/ewmrs_pipeline.yaml.
-    expect(grid.readUInt16LE(4)).toBe(65534); // 100.0 -> scale max
-    expect(grid.readUInt16LE(6)).toBe(65535); // NaN -> nodata
-    expect(grid.length).toBe(2 * 3 * 2);
-
-  });
-
-  it('serves RAP JSON metadata as the envelope and honors the metadata route contract', async () => {
-    const metadata = await fixtureJson('RAP/CAPE/20260317-200000/metadata.json');
-    const response = await request(app)
-      .get(`/api/v3/models/rap/layers/CAPE/snapshots/${TIMESTAMP}/metadata`)
-      .expect(200)
-      .expect('Content-Type', /application\/json/);
-    expect(response.body.data).toEqual(metadata);
-    expect(response.body.data.grid).toEqual({ ni: 3, nj: 2, point_count: 6 });
-  });
-
-  it('serves the float16 chunk gzip payload with float16/no-data headers', async () => {
-    const reference = await fixtureBytes('render/MRMS_MergedReflectivityQC/20260317-200000/chunks/chunk_0_0.f16.gz');
-    const response = await request(app)
-      .get(`/api/v3/render-products/MRMS_MergedReflectivityQC/snapshots/${TIMESTAMP}/chunks/0/0`)
-      .expect(200)
-      .expect('Content-Type', /application\/octet-stream/);
-    expect(response.headers['x-data-type']).toBe('float16');
-    expect(response.headers['x-value-kind']).toBe('scalar');
-    expect(response.headers['x-channel-count']).toBe('1');
-    expect(response.headers['x-no-data']).toBe('nan');
-    expect(response.headers['x-chunk-width']).toBe('2');
-    expect(response.headers['x-chunk-height']).toBe('2');
-    expect(response.headers['content-encoding']).toBe('gzip');
-    // superagent transparently gunzips (content-encoding: gzip), so the
-    // passthrough check compares against the decompressed reference bytes.
-    expect(Buffer.compare(Buffer.from(response.body), zlib.gunzipSync(reference))).toBe(0);
-
-    // Independent decode: headerless tight float16 payload, NaN as nodata.
-    // Decoded at the half-word level (IEEE-754 binary16 bit patterns), not
-    // with float32 reads, so a width mismatch cannot hide here.
-    const payload = zlib.gunzipSync(reference);
-    expect(payload.length).toBe(2 * 2 * 2); // no header, 2 bytes per component
-    expect(payload.readUInt16LE(0)).toBe(0x4920); // 10.25
-    expect(payload.readUInt16LE(2)).toBe(0x7e00); // NaN nodata
-    expect(payload.readUInt16LE(4)).toBe(0x3c00); // 1.0
-    expect(payload.readUInt16LE(6)).toBe(0x4000); // 2.0
-  });
+  
 
   it('serves the NEXRAD variable bin gzip bytes and decodes its documented layout', async () => {
     const reference = await fixtureBytes('nexrad/KTLH/0.5/KTLH_DBZH_0.5_20260317-200000.bin.gz');
@@ -163,18 +91,5 @@ describe('binary producer/consumer contracts through the real API', () => {
 
   });
 
-  it('serves the WPC GeoJSON generated by the Python parser and converter', async () => {
-    const reference = await fixtureJson('wpc/surface_analysis/wpc_sfc_20260317-200000.geojson');
-    const response = await request(app)
-      .get(`/api/v3/analyses/wpc/surface/${TIMESTAMP}`)
-      .expect(200)
-      .expect('Content-Type', /geo\+json/);
-    expect(response.body).toEqual(reference);
-    expect(response.body.type).toBe('FeatureCollection');
-    expect(response.body.properties.valid_time).toBe('2026-03-17T20:00:00+00:00');
-    const types = response.body.features.map((feature) => feature.geometry.type);
-    expect(types.filter((type) => type === 'LineString')).toHaveLength(5);
-    expect(types.filter((type) => type === 'Point')).toHaveLength(3);
-
-  });
+  
 });

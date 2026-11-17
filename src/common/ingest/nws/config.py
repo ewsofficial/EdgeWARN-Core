@@ -1,8 +1,8 @@
 """Accessors for ``nws.yaml``.
 
 Every function reads the catalog per call. None of them memoize and none of them
-are evaluated at import: ``src/run.py`` imports this package well before
-``get_args()`` publishes the config root, so a value bound at module scope would
+are evaluated at import: the entrypoints import this package well before
+the config root is published, so a value bound at module scope would
 freeze the repo default and put ``--config-dir`` out of reach.
 """
 
@@ -18,6 +18,11 @@ def _section(name: str):
 def registry_ttl_hours() -> float:
     """How long an alert survives after it stops appearing upstream."""
     return _section("nws")["registry_ttl_hours"]
+
+
+def edgewarn_alert_retention_minutes() -> int:
+    """Age after which EdgeWARN alert files and timestamp snapshots are deleted."""
+    return _section("nws")["edgewarn_alert_retention_minutes"]
 
 
 def dropped_events() -> frozenset[str]:

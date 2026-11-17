@@ -1,9 +1,6 @@
 {
   "products": [
     {
-      "filter": {
-        "typeOfLevel": "isobaricInhPa"
-      },
       "var": "u",
       "var_aliases": [
         "u",
@@ -11,6 +8,9 @@
         "u-component_of_wind_isobaric",
         "wind_u"
       ],
+      "filter": {
+        "typeOfLevel": "isobaricInhPa"
+      },
       "levels": [
         1000,
         975,
@@ -53,9 +53,6 @@
       "key_template": "wind_field.u{level}"
     },
     {
-      "filter": {
-        "typeOfLevel": "isobaricInhPa"
-      },
       "var": "v",
       "var_aliases": [
         "v",
@@ -63,6 +60,9 @@
         "v-component_of_wind_isobaric",
         "wind_v"
       ],
+      "filter": {
+        "typeOfLevel": "isobaricInhPa"
+      },
       "levels": [
         1000,
         975,
@@ -105,75 +105,75 @@
       "key_template": "wind_field.v{level}"
     },
     {
-      "filter": {
-        "typeOfLevel": "heightAboveGround",
-        "level": 10
-      },
       "var": "u10",
       "var_aliases": [
         "u10",
         "10u",
         "u"
       ],
-      "key": "u10m"
-    },
-    {
       "filter": {
         "typeOfLevel": "heightAboveGround",
         "level": 10
       },
+      "key": "u10m"
+    },
+    {
       "var": "v10",
       "var_aliases": [
         "v10",
         "10v",
         "v"
       ],
+      "filter": {
+        "typeOfLevel": "heightAboveGround",
+        "level": 10
+      },
       "key": "v10m"
     },
     {
-      "filter": {
-        "typeOfLevel": "heightAboveGround",
-        "level": 2
-      },
       "var": "t2m",
       "var_aliases": [
         "t2m",
         "2t",
         "t"
       ],
-      "key": "temp_2m",
-      "transform": "kelvin_to_celsius"
-    },
-    {
       "filter": {
         "typeOfLevel": "heightAboveGround",
         "level": 2
       },
+      "key": "temp_2m",
+      "transform": "kelvin_to_celsius"
+    },
+    {
       "var": "d2m",
       "var_aliases": [
         "d2m",
         "2d",
         "dpt"
       ],
+      "filter": {
+        "typeOfLevel": "heightAboveGround",
+        "level": 2
+      },
       "key": "dewpoint_2m",
       "transform": "kelvin_to_celsius"
     },
     {
+      "var": "gh",
       "filter": {
         "typeOfLevel": "isothermZero"
       },
-      "var": "gh",
       "key": "freezing_level_m"
     }
   ],
   "derived": [
     {
-      "formula": "temp_2m - dewpoint_2m",
-      "key": "dewpoint_depression"
+      "key": "dewpoint_depression",
+      "formula": "temp_2m - dewpoint_2m"
     },
     {
-      "formula": "freezing_level_m / 1000",
-      "key": "freezing_level_height"
+      "key": "freezing_level_height",
+      "formula": "freezing_level_m / 1000"
     }
   ]
 }

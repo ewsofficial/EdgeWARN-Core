@@ -174,7 +174,7 @@ class CycleInputManifest:
         return tuple(records)
 
     def latest_for_product(self, product: str) -> StagedInput | None:
-        records = self.records_for_product(product)
+        records = tuple(r for r in self.records_for_product(product) if r.role == "current")
         return records[-1] if records else None
 
     def latest_for_directory(self, directory: str | Path) -> StagedInput | None:
@@ -182,7 +182,7 @@ class CycleInputManifest:
         records = [
             record
             for record in self.inputs
-            if record.local_path.parent.resolve() == target
+            if record.role == "current" and record.local_path.parent.resolve() == target
         ]
         if not records:
             return None

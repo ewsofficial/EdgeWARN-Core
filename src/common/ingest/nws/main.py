@@ -6,7 +6,7 @@ filters them by event type, applies GeoMapper for zone-to-polygon mapping,
 and stores them in a deduplicated registry.
 
 Architecture:
-    - Downloads from nws.yaml's active_alerts_url every 2 minutes
+    - Downloads from nws.yaml's active_alerts_url at the nws_seconds cadence in runtime.yaml (background_intervals)
     - Filters out non-severe event types (nws.yaml dropped_events blocklist)
     - Applies GeoMapper to map UGC zone codes to actual polygons
     - Stores unique alerts in alerts_registry.json with deduplication
@@ -55,64 +55,68 @@ def _get_registry() -> AlertRegistry:
     return get_registry(fs.MRMS_NWS_DIR, ttl_hours=registry_ttl_hours())
 
 
+def _prepare(dt: datetime):
+    """Create the output directory, load the registry and prune old snapshots."""
+    fs.MRMS_NWS_DIR.mkdir(parents=True, exist_ok=True)
+    registry = _get_registry()
+    current_time = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    registry.cleanup_old_timestamps(current_time)
+    return registry, current_time
+
+
+def _apply_download(temp_path: str, registry: AlertRegistry, current_time: datetime, label: str) -> None:
+    """Fold a downloaded feed into the registry, reconcile and persist it."""
+    new_count, updated_count, seen_ids, complete = _process_nws_file_with_registry(
+        temp_path, registry, current_time)
+
+    # An empty ID set from a fully parsed feed means no active alerts upstream,
+    # so reconcile to empty. Only features whose IDs could not be recovered make
+    # the set untrustworthy, and then the registry is left to the TTL.
+    reconciled_removed_count = (
+        registry.reconcile_with_active_ids(seen_ids, current_time) if complete else 0
+    )
+    removed_count = registry.cleanup_expired(current_time)
+    registry.save()
+
+    io_manager.write_info(
+        f"Registry updated{label}: "
+        f"new={new_count}, updated={updated_count}, "
+        f"reconciled={reconciled_removed_count}, expired_removed={removed_count}, "
+        f"total_active={registry.alert_count}"
+    )
+
+
+def _remove_quietly(path: Optional[str]) -> None:
+    if path is not None:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def download_alerts(dt: datetime):
     """
-    Download active NWS alerts, filter them by event type, Apply GeoMapper,
+    Download active NWS alerts, filter them by event type, apply GeoMapper,
     and update the alerts registry with deduplication.
-    
+
     Args:
         dt: Current datetime (used for timestamp tracking)
     """
-    url = active_alerts_url()
+    registry, current_time = _prepare(dt)
+    io_manager.write_info("Downloading active alerts for registry update...")
 
-    # Ensure output directory exists
-    if not fs.MRMS_NWS_DIR.exists():
-        fs.MRMS_NWS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Get the registry
-    registry = _get_registry()
-
-    io_manager.write_info(f"Downloading active alerts for registry update...")
-
-    # Cleanup old timestamp snapshot files before download
-    current_time = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    registry.cleanup_old_timestamps(current_time)
-
-    headers = weather_api_headers()
-
-    req = urllib.request.Request(url, headers=headers)
-
+    req = urllib.request.Request(active_alerts_url(), headers=weather_api_headers())
     temp_path = None
     try:
-        with urllib.request.urlopen(req) as response:
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(response.read())
-                temp_path = tmp.name
-
-        current_time = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        new_count, updated_count, seen_ids = _process_nws_file_with_registry(temp_path, registry, current_time)
-
-        reconciled_removed_count = registry.reconcile_with_active_ids(seen_ids, current_time)
-        removed_count = registry.cleanup_expired(current_time)
-        registry.save()
-
-        total_active = registry.alert_count
-        io_manager.write_info(
-            "Registry updated: "
-            f"new={new_count}, updated={updated_count}, "
-            f"reconciled={reconciled_removed_count}, expired_removed={removed_count}, "
-            f"total_active={total_active}"
-        )
-
+        fd, temp_path = tempfile.mkstemp()
+        with os.fdopen(fd, 'wb') as tmp, urllib.request.urlopen(req) as response:
+            tmp.write(response.read())
+        _apply_download(temp_path, registry, current_time, "")
     except Exception as e:
         io_manager.write_error(f"Failed to download/process NWS alerts: {e}")
-        raise e
+        raise
     finally:
-        if temp_path is not None:
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+        _remove_quietly(temp_path)
 
 
 async def download_alerts_async(dt: datetime):
@@ -120,27 +124,13 @@ async def download_alerts_async(dt: datetime):
     Async version of download_alerts.
     Downloads active NWS alerts using aiohttp, processes with deduplication,
     and updates the alerts registry.
-    
+
     Args:
         dt: Current datetime (used for timestamp tracking)
     """
-    url = active_alerts_url()
+    registry, current_time = _prepare(dt)
+    io_manager.write_info("Downloading active alerts (async) for registry update...")
 
-    # Ensure output directory exists
-    if not fs.MRMS_NWS_DIR.exists():
-        fs.MRMS_NWS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Get the registry
-    registry = _get_registry()
-
-    io_manager.write_info(f"Downloading active alerts (async) for registry update...")
-
-    # Cleanup old timestamp snapshot files before download
-    current_time = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    registry.cleanup_old_timestamps(current_time)
-
-    headers = weather_api_headers()
-    # Resolved once, not per chunk.
     chunk_size = download_chunk_size_bytes()
 
     temp_path = None
@@ -148,52 +138,29 @@ async def download_alerts_async(dt: datetime):
         fd, temp_path = tempfile.mkstemp()
         os.close(fd)
 
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url) as response:
+        async with aiohttp.ClientSession(headers=weather_api_headers()) as session:
+            async with session.get(active_alerts_url()) as response:
                 response.raise_for_status()
                 with open(temp_path, 'wb') as f:
                     async for chunk in response.content.iter_chunked(chunk_size):
                         f.write(chunk)
 
-        current_time = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
+        # Parsing and registry work are blocking, so keep them off the loop.
         loop = asyncio.get_running_loop()
-        new_count, updated_count, seen_ids = await loop.run_in_executor(
-            None,
-            _process_nws_file_with_registry,
-            temp_path,
-            registry,
-            current_time,
-        )
-
-        reconciled_removed_count = registry.reconcile_with_active_ids(seen_ids, current_time)
-        removed_count = registry.cleanup_expired(current_time)
-        registry.save()
-
-        total_active = registry.alert_count
-        io_manager.write_info(
-            "Registry updated (async): "
-            f"new={new_count}, updated={updated_count}, "
-            f"reconciled={reconciled_removed_count}, expired_removed={removed_count}, "
-            f"total_active={total_active}"
-        )
-
+        await loop.run_in_executor(
+            None, _apply_download, temp_path, registry, current_time, " (async)")
     except Exception as e:
         io_manager.write_error(f"Failed to download/process NWS alerts (async): {e}")
-        raise e
+        raise
     finally:
-        if temp_path is not None:
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+        _remove_quietly(temp_path)
 
 
 def _process_nws_file_with_registry(
     input_path: str, 
     registry: AlertRegistry, 
     current_time: datetime
-) -> Tuple[int, int, Set[str]]:
+) -> Tuple[int, int, Set[str], bool]:
     """
     Process the raw NWS JSON file and update the registry.
     
@@ -205,48 +172,55 @@ def _process_nws_file_with_registry(
         current_time: Current timestamp for tracking
         
     Returns:
-        Tuple of (new_count, updated_count, seen_ids)
+        Tuple of (new_count, updated_count, seen_ids, complete); ``complete`` is
+        False when a malformed feature had no recoverable ID
     """
     new_count = 0
     updated_count = 0
     seen_ids: Set[str] = set()
+    complete = True
     # Read once per file rather than per feature: the blocklist cannot change
     # mid-file, and a feed carries tens of thousands of features.
     dropped = dropped_events()
 
     try:
         with open(input_path, 'r', encoding='utf-8') as infile:
-            # Stream parsing
+            # Validate the entire stream before mutating the singleton.
+            for _ in ijson.parse(infile):
+                pass
+            infile.seek(0)
             features = ijson.items(infile, 'features.item')
 
             for feature in features:
-                props = feature.get('properties', {})
-                event = props.get('event')
-
-                if event in dropped:
+                if not isinstance(feature, dict) or not isinstance(feature.get('properties'), dict):
+                    io_manager.write_warning("Skipping malformed NWS feature")
+                    if isinstance(feature, dict) and isinstance(feature.get('id'), str):
+                        seen_ids.add(feature['id'])
+                    else:
+                        complete = False
                     continue
-
-                # Apply GeoMapper Logic
-                processed_feature = process_warning(feature)
-                
-                # Process through registry (handles deduplication)
-                is_new, alert_id = registry.process_alert(processed_feature, current_time)
-                
+                props = feature['properties']
+                if props.get('event') in dropped:
+                    continue
+                try:
+                    processed_feature = process_warning(feature)
+                    is_new, alert_id = registry.process_alert(processed_feature, current_time)
+                except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                    io_manager.write_warning(f"Skipping malformed NWS feature: {exc}")
+                    alert_id = props.get('id') or feature.get('id')
+                    if isinstance(alert_id, str):
+                        seen_ids.add(alert_id)
+                    else:
+                        complete = False
+                    continue
                 if alert_id:
                     seen_ids.add(alert_id)
                     if is_new:
                         new_count += 1
                     else:
                         updated_count += 1
-        
-        return new_count, updated_count, seen_ids
-        
+
+        return new_count, updated_count, seen_ids, complete
     except Exception as e:
         raise e
 
-
-if __name__ == "__main__":
-    # Test block
-    fs.initialize_filesystem()
-    import asyncio
-    asyncio.run(download_alerts_async(datetime.now(timezone.utc)))

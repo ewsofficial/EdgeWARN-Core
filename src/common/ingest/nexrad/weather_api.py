@@ -1,4 +1,5 @@
 import threading
+import logging
 import time
 
 import requests
@@ -101,6 +102,27 @@ class RadarStationCatalog:
         return weather_api_headers(user_agent=self.user_agent)
 
     def fetch_radar_station_vcps(self, *, session=None) -> dict[str, RadarStationVcp]:
+        now = time.time()
+        with self._cache_lock:
+            if self._station_cache and now < self._station_cache_expires_at:
+                return dict(self._station_cache)
+        try:
+            stations = self._fetch_radar_station_vcps(session=session)
+            if not stations:
+                raise requests.RequestException("empty radar station catalog")
+        except requests.RequestException as exc:
+            with self._cache_lock:
+                if not self._station_cache:
+                    raise
+                logging.getLogger(__name__).warning("Using cached radar stations after feed failure: %s", exc)
+                self._station_cache_expires_at = now + self.cache_ttl_seconds
+                return dict(self._station_cache)
+        with self._cache_lock:
+            self._station_cache = dict(stations)
+            self._station_cache_expires_at = now + self.cache_ttl_seconds
+        return stations
+
+    def _fetch_radar_station_vcps(self, *, session=None) -> dict[str, RadarStationVcp]:
         headers = self._headers()
         timeout = self.timeout_seconds
         if session is None:

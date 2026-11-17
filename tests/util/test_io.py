@@ -199,25 +199,6 @@ class TestIOManager:
 
             assert args.base_dir == '/custom/path'
 
-    def test_get_args_disable_component_flags(self):
-        """Test disable flags for optional runtime components."""
-        io = IOManager("[Test]")
-
-        with patch.object(sys, 'argv', [
-            'script',
-            '--disable-ewmrs',
-            '--disable-nws',
-            '--disable-metar',
-            '--disable-goes',
-            '--disable-nexrad',
-        ]):
-            args = io.get_args()
-
-            assert args.disable_ewmrs is True
-            assert args.disable_nws is True
-            assert args.disable_metar is True
-            assert args.disable_goes is True
-            assert args.disable_nexrad is True
 
     def test_get_args_invalid_lat_limits_count(self):
         """Test validation of lat_limits count"""

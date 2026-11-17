@@ -40,6 +40,13 @@ describe('unified API configuration', () => {
     expect(parseTrustProxy('2')).toBe(2);
     expect(parseTrustProxy('false')).toBe(false);
     expect(parseTrustProxy('loopback, 10.0.0.1')).toEqual(['loopback', '10.0.0.1']);
+    expect(parseTrustProxy('::ffff:10.0.0.0/104')).toEqual(['::ffff:10.0.0.0/104']);
+    expect(parseTrustProxy('2001:db8::/32')).toEqual(['2001:db8::/32']);
+    // A subnet that masks to :: matches every peer, so Express would believe
+    // any client's X-Forwarded-For and rate limiting would stop working.
+    expect(() => parseTrustProxy('::ffff:10.0.0.0/8')).toThrow('would trust every client');
+    expect(() => parseTrustProxy('::/1')).toThrow('would trust every client');
+    expect(() => parseTrustProxy(['loopback', '::/0'])).toThrow('would trust every client');
     expect(() => parseTrustProxy(true, { NODE_ENV: 'production' })).toThrow('TRUST_PROXY=true');
     expect(() => parseTrustProxy('9')).toThrow('Invalid TRUST_PROXY hop count');
     expect(createConfig({ env: { TRUST_PROXY_IPS: '' }, argv: [] }).diagnostics.overrides).not.toContain('TRUST_PROXY_IPS');

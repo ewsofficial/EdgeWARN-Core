@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .database import StormProbRepository, _time
@@ -53,11 +52,6 @@ def migrate(base_dir: Path | str, *, dry_run: bool = False) -> dict:
     if dry_run:
         return report
     repo = StormProbRepository(base_dir)
-    if repo.path.exists():
-        backup_dir = repo.path.parent / "backups"
-        backup = backup_dir / f"stormprob-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}.sqlite3"
-        report["backup"] = str(repo.backup(backup))
-        repo.prune_backups(backup_dir)
     imported = []
     for path, expected in zip(files, inspected):
         result = repo.import_legacy_file(path)

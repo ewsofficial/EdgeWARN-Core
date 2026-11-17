@@ -3,7 +3,7 @@ import copy
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
@@ -34,9 +34,22 @@ def _run_step(step_name, action):
         raise
 
 
-def _selected_input_path(filepath, input_manifest):
+def _selected_input_path(filepath, input_manifest, product=None):
+    from common.ingest.mrms.config import get_registry
+    registry = get_registry()
+    if product is None:
+        from common.ingest.mrms.core_contract import LEGACY_ALIASES
+        product = next((identity for alias, identity in LEGACY_ALIASES.items()
+                        if getattr(fs, alias, None) == filepath), None)
+    if product is not None and registry is not None and not registry.is_enabled(product):
+        return None
     if input_manifest is not None:
-        record = input_manifest.latest_for_directory(filepath)
+        if product is not None:
+            records = [r for r in input_manifest.current_inputs(family="mrms")
+                       if r.product == product and r.validated]
+            record = max(records, key=lambda r: r.analysis_time, default=None)
+        else:
+            record = input_manifest.latest_for_directory(filepath)
         return record.local_path if record is not None else None
 
     latest_files = fs.latest_files(filepath, 1)
@@ -59,7 +72,7 @@ def _integrate_dataset_groups(integrator, cells, input_manifest=None):
         name_str = ", ".join(name_list)
 
         try:
-            selected_file = _selected_input_path(filepath, input_manifest)
+            selected_file = _selected_input_path(filepath, input_manifest, group_list[0].get("product"))
             if selected_file is None:
                 io_manager.write_warning(f"No files found for {name_str} at {filepath}, skipping")
                 continue
@@ -77,7 +90,7 @@ def _integrate_dataset_groups(integrator, cells, input_manifest=None):
                 f"Integration - {name_str}",
                 lambda: integrator.integrate_multi_stats(
                     str(selected_file),
-                    result_cells,
+                    copy.deepcopy(result_cells),
                     group_list,
                     cell_contexts=cell_contexts,
                 ),
@@ -96,8 +109,15 @@ def _integrate_azshear(integrator, cells, input_manifest=None):
         return cells
 
     try:
-        low_file = _selected_input_path(fs.MRMS_AZSHEARLOW_DIR, input_manifest)
-        mid_file = _selected_input_path(fs.MRMS_AZSHEARMID_DIR, input_manifest)
+        from common.ingest.mrms.config import get_registry
+        registry = get_registry()
+        low = "MergedAzShear_0-2kmAGL_00.50"
+        mid = "MergedAzShear_3-6kmAGL_00.50"
+        if registry is not None and not all(registry.is_enabled(p) for p in (low, mid)):
+            io_manager.write_warning("AzShear support inputs disabled by ingestion configuration")
+            return cells
+        low_file = _selected_input_path(fs.MRMS_AZSHEARLOW_DIR, input_manifest, low)
+        mid_file = _selected_input_path(fs.MRMS_AZSHEARMID_DIR, input_manifest, mid)
         if low_file and mid_file:
             io_manager.write_info(f"Integrating AzShear support features for {len(cells)} cells")
             return _run_step(
@@ -121,6 +141,7 @@ def _integrate_probsevere(integrator, cells, input_manifest=None):
         selected_file = _selected_input_path(
             fs.MRMS_PROBSEVERE_DIR,
             input_manifest,
+            "ProbSevere",
         )
         if selected_file is None:
             io_manager.write_warning("No ProbSevere files found, skipping ProbSevere integration")
@@ -433,7 +454,8 @@ def _attach_stormprob_inputs(cells, timestamp, input_manifest=None):
     return cells
 
 
-def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_manifest=None, disable_ctam_modules=False):
+def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_manifest=None,
+                         disable_ctam_modules=False, disable_stormprob=False, frozen_discovery=None):
     if disable_ctam:
         io_manager.write_info("CTAM module execution disabled via command-line flag")
         return cells, None
@@ -455,11 +477,16 @@ def _run_ctam_if_enabled(cells, timestamp, disable_ctam, json_path=None, input_m
                 json_path=json_path,
                 input_manifest=input_manifest,
                 disable_ctam_modules=disable_ctam_modules,
+                disable_stormprob=disable_stormprob,
+                frozen_discovery=frozen_discovery,
             ),
         )
         cells = ctam_result.cells
         io_manager.write_debug("CTAM module execution completed successfully")
     except Exception as e:
+        from EdgeWARN.ctam.preflight import StormProbDependencyError
+        if isinstance(e, StormProbDependencyError):
+            raise
         io_manager.write_error(f"Failed to run CTAM modules: {e}")
 
         ctam_result = None
@@ -509,7 +536,8 @@ def _public_route_payloads(timestamp, ctam_result):
     return payloads
 
 
-def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None, ctam_result=None):
+def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input_manifest=None,
+                   ctam_result=None, *, disable_stormprob=False):
     """Commit StormProb inputs, then publish derived JSON and indexes."""
     from EdgeWARN.ctam.publication import CTAMPublicationCoordinator
     from EdgeWARN.stormprob.database import StormProbRepository, clean_public_projection
@@ -540,7 +568,9 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
     sqlite_started = time.perf_counter()
     repository.commit_cycle(str(timestamp), timestamp, cells, manifest_record,
                             projection_cells=projected_cells, projection_path=json_path,
-                            forecasts=forecasts or None)
+                            forecasts=forecasts or None,
+                            forecast_policy="preserve" if disable_stormprob else "invalidate",
+                            write_pending_forecasts=not disable_stormprob)
     sqlite_seconds = time.perf_counter() - sqlite_started
     coordinator = CTAMPublicationCoordinator(fs.DATA_DIR / "ctam" / "transactions")
     coordinator.recover()
@@ -560,19 +590,34 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
     filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
     repository.mark_projection_published(str(timestamp))
-    backup_started = time.perf_counter()
-    try:
-        repository.backup_if_due()
-    except Exception as exc:
-        io_manager.write_warning(f"StormProb daily backup failed: {exc}")
-    backup_seconds = time.perf_counter() - backup_started
+    from EdgeWARN.api_integration.config import (
+        remove_old_cells_realtime,
+        stormprob_inactive_cell_max_age_minutes,
+    )
+    prune_inactive = remove_old_cells_realtime() if remove_old_cells is None else remove_old_cells
+    if prune_inactive and not disable_stormprob:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=stormprob_inactive_cell_max_age_minutes())
+        try:
+            (
+                forecasts_removed,
+                observations_removed,
+                projections_scrubbed,
+                cycles_removed,
+            ) = repository.prune_inactive_cells(cutoff)
+            if forecasts_removed or observations_removed or projections_scrubbed or cycles_removed:
+                io_manager.write_info(
+                    "Pruned inactive StormProb data "
+                    f"forecasts={forecasts_removed} observations={observations_removed} "
+                    f"cycle_projections={projections_scrubbed} cycles={cycles_removed}"
+                )
+        except Exception as exc:
+            io_manager.write_warning(f"Failed to prune inactive StormProb data: {exc}")
     io_manager.write_info(
         "Publication phases "
         f"cycle_id={timestamp} cells={len(projected_cells)} "
         f"sqlite_transaction_seconds={sqlite_seconds:.6f} "
         f"filesystem_publication_seconds={filesystem_seconds:.6f} "
         f"api_index_seconds={index_seconds:.6f} "
-        f"backup_seconds={backup_seconds:.6f} "
         f"total_seconds={time.perf_counter() - publication_started:.6f}"
     )
 
@@ -626,8 +671,11 @@ def main(
     remove_old_cells=None,
     disable_ctam=False,
     disable_ctam_modules=False,
+    disable_stormprob=False,
+    frozen_discovery=None,
     mrms_core_only=False,
     input_manifest: CycleInputManifest | None = None,
+    final_input_provider=None,
 ):
     handler = StatFileHandler(io_manager)
     integrator = StormCellIntegrator(io_manager)
@@ -645,16 +693,34 @@ def main(
         include_rap=not mrms_core_only,
         input_manifest=input_manifest,
     )
-    result_cells = _run_step(
-        "Integration - StormProb Inputs",
-        lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),
-    )
+    if final_input_provider is not None:
+        final_manifest = final_input_provider()
+        if final_manifest is None:
+            raise RuntimeError("Final optional-input snapshot was not published")
+        initial = set(input_manifest.inputs) if input_manifest is not None else set()
+        added = tuple(record for record in final_manifest.current_inputs()
+                      if record not in initial)
+        if added:
+            result_cells = _run_parallel_enrichment(
+                integrator, result_cells, include_glm=False, include_rap=False,
+                input_manifest=CycleInputManifest(cycle_time=final_manifest.cycle_time, inputs=added),
+            )
+        input_manifest = final_manifest
+    if not disable_ctam and not disable_stormprob:
+        result_cells = _run_step(
+            "Integration - StormProb Inputs",
+            lambda: _attach_stormprob_inputs(result_cells, timestamp, input_manifest),
+        )
+        from EdgeWARN.ctam.preflight import validate_stormprob_cycle
+        validate_stormprob_cycle(result_cells, input_manifest)
     # Forecast inference reads only committed database rows. Commit the input
     # side of this cycle before CTAM; publication below upgrades the pending
     # four-lead rows and publishes the derived projections afterward.
     try:
         from EdgeWARN.stormprob.database import StormProbRepository
-        StormProbRepository().commit_cycle(str(timestamp), timestamp, result_cells)
+        StormProbRepository().commit_cycle(
+            str(timestamp), timestamp, result_cells,
+            forecast_policy="preserve", write_pending_forecasts=False)
     except Exception as exc:
         io_manager.write_warning(f"StormProb input commit failed before CTAM: {exc}")
     ctam_output = _run_ctam_if_enabled(
@@ -664,6 +730,8 @@ def main(
         json_path=json_path,
         input_manifest=input_manifest,
         disable_ctam_modules=disable_ctam_modules,
+        disable_stormprob=disable_stormprob,
+        frozen_discovery=frozen_discovery,
     )
     # Preserve compatibility with tests and integrations that replace the
     # historical helper and return only the cell list.
@@ -673,7 +741,10 @@ def main(
         result_cells, ctam_result = ctam_output, None
 
     try:
-        _run_step("Integration - Publication", lambda: _publish_cycle(handler, timestamp, result_cells, json_path, remove_old_cells, input_manifest, ctam_result))
+        _run_step("Integration - Publication", lambda: _publish_cycle(
+            handler, timestamp, result_cells, json_path, remove_old_cells,
+            input_manifest, ctam_result,
+            disable_stormprob=disable_ctam or disable_stormprob))
     except Exception as exc:
         io_manager.write_error(f"Failed to save integrated stormcells to {json_path}: {exc}")
         raise

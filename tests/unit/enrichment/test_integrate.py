@@ -164,6 +164,9 @@ def test_datasets_config_includes_p90_echotop30():
 
     assert {
         "name": "EchoTop30 (90th)",
+        "product": "EchoTop_30_00.50",
+        "active": True,
+        "reason": None,
         "filepath": fs.MRMS_ECHOTOP30_DIR,
         "key": "p90EchoTop30",
         "method": "percentile",
@@ -176,12 +179,34 @@ def test_datasets_config_includes_p90_echotop50_only():
 
     assert {
         "name": "EchoTop50 (90th)",
+        "product": "EchoTop_50_00.50",
+        "active": True,
+        "reason": None,
         "filepath": fs.MRMS_ECHOTOP50_DIR,
         "key": "p90EchoTop50",
         "method": "percentile",
         "percentile": 90,
     } in configs
     assert not any(conf.get("key") == "maxEchoTop50" for conf in configs)
+
+
+def test_v2_disabled_statistic_is_skipped_before_path_resolution(tmp_path, monkeypatch):
+    import EdgeWARN.process.integrate.config as integrate_config
+    from common.ingest.mrms.registry import build_registry
+
+    registry = build_registry({"products": []}, tmp_path.resolve())
+    monkeypatch.setattr(fs, "MRMS_REGISTRY", registry)
+    monkeypatch.setattr(integrate_config, "load_config",
+                        lambda name, **_kwargs: {"schema_version": 2})
+    monkeypatch.setattr(integrate_config, "section", lambda _name: (
+        {"name": "disabled", "product": "EchoTop_18_00.50",
+         "key": "maxEchoTop18", "method": "max"},
+        {"name": "protected", "product": "MergedReflectivityQCComposite_00.50",
+         "key": "reflectivity", "method": "max"},
+    ))
+    monkeypatch.setattr(integrate_config, "_resolve_dir",
+                        lambda _name: pytest.fail("disabled path was resolved"))
+    assert [item["name"] for item in integrate_config.get_datasets_config()] == ["protected"]
 
 
 def test_integrate_ds_via_max_rounds_to_two_decimals(integrator, tmp_path):

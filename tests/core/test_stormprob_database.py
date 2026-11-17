@@ -44,6 +44,18 @@ def test_commit_cycle_is_atomic_idempotent_and_read_only(tmp_path):
     assert "stormprob" not in repo.legacy_history(101)[0]
 
 
+def test_disabled_stormprob_keeps_shared_history_without_new_forecast_rows(tmp_path):
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    repo.commit_cycle(
+        "cycle1", cell["timestamp"], [cell],
+        forecast_policy="preserve", write_pending_forecasts=False,
+    )
+    assert len(repo.feature_history(101)) == 1
+    with repo.reader() as db:
+        assert db.execute("SELECT count(*) FROM forecasts").fetchone()[0] == 0
+
+
 def test_version_one_migration_adds_projection_indexes_idempotently(tmp_path):
     repo = StormProbRepository(tmp_path)
     with repo.writer():
@@ -128,6 +140,28 @@ def test_history_model_inputs_and_reprocessing(tmp_path):
     assert repo.legacy_history(101)[-1]["properties"]["revision"] == 2
 
 
+def test_model_history_recovers_after_predicted_only_scan(tmp_path):
+    from EdgeWARN.stormprob.geometry import attach_stormprob_geometry
+
+    repo = StormProbRepository(tmp_path)
+    first = _cell("2026-10-02T17:22:41")
+    predicted = _cell("2026-10-02T17:24:41")
+    predicted["tracking_mode"] = "predicted"
+    attach_stormprob_geometry(predicted, None, None)
+    predicted["stormprob"]["observation"] = build_observation_record(predicted)
+    recovered = _cell("2026-10-02T17:26:41")
+    for cell in (first, predicted, recovered):
+        repo.commit_cycle(cell["timestamp"], cell["timestamp"], [cell])
+    assert len(repo.legacy_history(101)) == 3
+    assert len(repo.feature_history(101)) == 3
+    assert not repo.feature_history(101)[1]["inference_ready"]
+    inputs = repo.model_inputs(101)
+    assert sum(inputs["history_mask"]) == 2
+    assert sum(inputs["trajectory_mask"]) == 2
+    assert inputs["current"][-2:] == [240.0, 2.0]
+    assert len(repo.model_inputs(101, through=predicted["timestamp"])["current"]) == 135
+
+
 def test_batch_legacy_histories_match_individual_reads(tmp_path):
     repo = StormProbRepository(tmp_path)
     for minute in (0, 5, 10):
@@ -140,7 +174,7 @@ def test_batch_legacy_histories_match_individual_reads(tmp_path):
     assert histories["999"] == []
 
 
-def test_legacy_import_hash_validation_and_backup(tmp_path):
+def test_legacy_import_hash_validation(tmp_path):
     repo = StormProbRepository(tmp_path)
     legacy = tmp_path / "data" / "cells" / "101.json"
     legacy.parent.mkdir(parents=True)
@@ -149,8 +183,6 @@ def test_legacy_import_hash_validation_and_backup(tmp_path):
     assert report["imported"] == 1
     assert repo.import_legacy_file(legacy)["skipped"] is True
     assert len(repo.feature_history(101)) == 1
-    backup = repo.backup(tmp_path / "data" / "stormprob" / "backups" / "stormprob-1.sqlite3")
-    assert backup.exists()
     legacy.write_text("[]")
     with pytest.raises(ValueError, match="changed"):
         repo.import_legacy_file(legacy)
@@ -227,6 +259,24 @@ def test_integration_publication_commits_db_before_json_index(tmp_path, monkeypa
     assert "20240501-120000" in json.loads((fs.STORMCELL_DIR / "stormcell_index.json").read_text())["timestamps"]
     assert StormProbRepository(tmp_path).pending_projection_cycles() == []
     assert StormProbRepository(tmp_path).index_projection()[0] == ["20240501-120000"]
+
+
+@pytest.mark.parametrize("disable_stormprob, retained", [(False, False), (True, True)])
+def test_publication_prunes_inactive_stormprob_only_when_enabled(
+        tmp_path, monkeypatch, disable_stormprob, retained):
+    import util.file as fs
+    from EdgeWARN.process.integrate import pipeline
+
+    monkeypatch.setattr(fs, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(fs, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(fs, "CELL_DIR", tmp_path / "data" / "cells")
+    monkeypatch.setattr(fs, "STORMCELL_DIR", tmp_path / "data" / "stormcells")
+    monkeypatch.setattr(pipeline, "_update_api_indexes", lambda *args: None)
+    snapshot = fs.STORMCELL_DIR / "stormcells_20240501-120000.json"
+    cell = _cell()
+    pipeline._publish_cycle(None, cell["timestamp"], [cell], snapshot, True,
+                            disable_stormprob=disable_stormprob)
+    assert bool(StormProbRepository(tmp_path).feature_history(101)) is retained
 
 
 def test_pending_recovery_projection_lists_only_restored_files(tmp_path, monkeypatch):
@@ -370,13 +420,3 @@ def test_model_inputs_long_track_preserves_age_and_30_row_window(tmp_path):
     assert all(inputs["history_mask"])
     assert inputs["current"][-2:] == [31 * 300.0, 30.0]
     assert inputs["trajectory_sequence"][-1][-2] == pytest.approx(31 * 5 / 60)
-
-
-def test_daily_backup_is_idempotent(tmp_path):
-    repo = StormProbRepository(tmp_path)
-    cell = _cell()
-    repo.commit_cycle("cycle1", cell["timestamp"], [cell])
-    day = datetime(2024, 5, 1)
-    backup = repo.backup_if_due(now=day)
-    assert backup is not None and backup.exists()
-    assert repo.backup_if_due(now=day) is None

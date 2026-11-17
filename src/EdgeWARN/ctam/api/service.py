@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +49,12 @@ class CTAMReadService:
         self.ctam_ready = bool(ctam_ready)
         self.deadline = deadline
         self._history_cache: dict[str, list[dict[str, Any]]] = {}
+        self._violation_lock = threading.Lock()
+        self._contract_violations: dict[str, set[str]] = {}
+
+    def contract_violations(self, module_id: str) -> tuple[str, ...]:
+        with self._violation_lock:
+            return tuple(sorted(self._contract_violations.get(module_id, ())))
 
     def _manifest(self, module_id: str) -> ModuleManifest:
         try:
@@ -65,15 +72,15 @@ class CTAMReadService:
     def _require_admitted(self, module_id: str, file_id: str) -> None:
         """Require a manifest selector before exposing any artifact content.
 
-        Catalog metadata is intentionally global to the cycle, but stormcell
-        snapshots and history JSON are content just like a staged GRIB file.
         Keeping this check in the transport-independent service ensures the
         HTTP routes and future in-process adapters cannot diverge.
         """
         if file_id not in self._admitted_ids(module_id):
+            with self._violation_lock:
+                self._contract_violations.setdefault(module_id, set()).add(file_id)
             raise APIError(
-                "file_unavailable",
-                "file content is not declared by this module",
+                "requirement_unmet",
+                "input is not declared by this module; add its selector to [[requires]] and restart",
                 403,
                 file_id,
             )
@@ -97,20 +104,23 @@ class CTAMReadService:
         }
         return result
 
-    def files(self) -> dict[str, Any]:
-        return {"files": list(self.catalog.as_dicts())}
+    def files(self, module_id: str) -> dict[str, Any]:
+        admitted = self._admitted_ids(module_id)
+        return {"files": [entry for entry in self.catalog.as_dicts()
+                          if entry["file_id"] in admitted]}
 
-    def descriptor(self, file_id: str) -> dict[str, Any]:
+    def descriptor(self, module_id: str, file_id: str) -> dict[str, Any]:
+        self._require_admitted(module_id, file_id)
         entry = self.catalog.descriptor(file_id)
         if entry is None:
             raise APIError("not_found", "catalog file was not found", 404, file_id)
         return entry.as_dict()
 
     def content(self, module_id: str, file_id: str) -> tuple[Path, str, int]:
+        self._require_admitted(module_id, file_id)
         entry = self.catalog.descriptor(file_id)
         if entry is None:
             raise APIError("not_found", "catalog file was not found", 404, file_id)
-        self._require_admitted(module_id, file_id)
         if not entry.available or not entry.validated or entry.readiness != READY or entry.path is None:
             raise APIError("file_unavailable", "catalogued artifact is not readable for this cycle", 409, file_id)
         try:
@@ -160,6 +170,12 @@ class CTAMReadService:
 
     def commit_transaction(self, module_id: str, *, idempotency_key: str | None) -> dict[str, Any]:
         if self.transactions is None: raise APIError("unavailable", "mutations are not enabled for this cycle", 409)
+        if self.contract_violations(module_id):
+            raise APIError(
+                "requirement_unmet",
+                "module attempted undeclared input access; add its selector to [[requires]] and restart",
+                403,
+            )
         return self.transactions.commit(module_id, idempotency_key=idempotency_key)
 
     def stage_alert(self, module_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:

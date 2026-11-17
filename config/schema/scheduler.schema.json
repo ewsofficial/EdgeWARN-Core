@@ -9,11 +9,12 @@
     "scheduler": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["modifier_lookup_max_entries", "s3_lookback_hours", "slow_check_log_threshold_ms"],
+      "required": ["modifier_lookup_max_entries", "s3_lookback_hours", "slow_check_log_threshold_ms", "ingest_poll_seconds"],
       "properties": {
         "modifier_lookup_max_entries": { "type": "integer", "minimum": 1 },
         "s3_lookback_hours": { "type": "number", "exclusiveMinimum": 0 },
-        "slow_check_log_threshold_ms": { "type": "number", "minimum": 0 }
+        "slow_check_log_threshold_ms": { "type": "number", "minimum": 0 },
+        "ingest_poll_seconds": { "type": "integer", "minimum": 1, "maximum": 300, "description": "Discovery scheduling cadence in seconds; independent of download duration." }
       }
     }
   }

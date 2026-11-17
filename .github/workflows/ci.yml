@@ -55,6 +55,15 @@ jobs:
           environment-file: environment.yml
           python-version: '3.13'
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Verify native scientific imports
         shell: bash -el {0}
         run: python -c "import netCDF4, pyproj, rasterio"
@@ -182,7 +191,7 @@ jobs:
           cp -R "${GITHUB_WORKSPACE}/config" "${smoke_dir}"
           cd "${RUNNER_TEMP}"
           edgewarn --help
-           test "$(edgewarn --version)" = "edgewarn 3.0.1"
+           test "$(edgewarn --version)" = "edgewarn 3.1.0"
           edgewarn configure --config-path "${smoke_dir}" \
             runtime.run.disable_nexrad true
 

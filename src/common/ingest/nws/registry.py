@@ -38,7 +38,7 @@ class AlertRegistry:
     Features:
     - Stores alerts by unique ID (extracted from feature['id'])
     - Tracks first_seen and last_seen timestamps
-    - Removes alerts not seen within configurable TTL (default 2 hours)
+    - Removes alerts not seen within configurable TTL (default 6 hours)
     
     Note: This class is not thread-safe. For async usage, ensure only one
     coroutine accesses the registry at a time, or use external synchronization.

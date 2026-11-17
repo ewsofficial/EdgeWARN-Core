@@ -1,8 +1,8 @@
 # Test execution lanes
 
 The default `python -m pytest` command remains the complete deterministic,
-offline correctness suite. It excludes top-level `benchmarks/` and the Jest API
-tree through `pytest.ini`, and every test receives a disposable runtime base
+offline correctness suite. It excludes the Jest API tree through
+`pytest.ini`, and every test receives a disposable runtime base
 directory from the root fixture.
 
 CI also splits that suite into independently reportable lanes:

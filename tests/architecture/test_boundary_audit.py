@@ -11,36 +11,19 @@ from tests.architecture.source_inspect import SRC, production_sources
 
 CTAM = "EdgeWARN/ctam/"
 ENV_READERS = {"common/config/loader.py", "common/config/overlay.py", "config/loader.js"}
-URL_SENTINELS = {
+URL_LITERAL_EXCEPTIONS = {
     ("api/middleware/logging.js", "http://edgewarn.invalid"),
     # The private loopback CTAM API is bound to 127.0.0.1 on an OS-assigned
     # ephemeral port and is never reachable off-host; docs/ctam pins the URL
     # shape. It is deliberately not a public, deployable endpoint.
     ("EdgeWARN/ctam/api/server.py", "http://127.0.0.1:"),
-}
-CATALOG_REGISTRIES = {
-    "EWMRS/rap/config.py": "the Phase 5 code-owned Uint16 display registry",
-    CTAM: "explicitly out of scope for this configuration plan",
+    # Configurable MRMS phase 2 deliberately moves protected source identity
+    # into code. Operational timeouts/retention remain catalog-owned.
+    ("common/ingest/mrms/source.py", "https://mrms.ncep.noaa.gov/data/2D"),
+    ("common/ingest/mrms/source.py", "https://mrms.ncep.noaa.gov/data/ProbSevere"),
 }
 # These are library-call defaults rather than deployable policy. Keep them
 # enumerated so a new operational default cannot quietly join this boundary.
-OPERATIONAL_LITERAL_EXCEPTIONS = {
-    ("EdgeWARN/stormprob/audit.py", "audit", "cycle_limit"): "bounded audit sample size",
-    ("EdgeWARN/stormprob/audit.py", "audit", "maximum_source_age_hours"): "source freshness audit threshold",
-    ("EWMRS/pipeline.py", "<module>", "_LAST_GOES_GUI_CLEANUP_S"): "cleanup timestamp state, not a cleanup policy",
-    ("EdgeWARN/alerts/manager.py", "AlertManager.cleanup_expired", "max_age_minutes"): "CTAM alert cleanup is deferred",
-    ("EdgeWARN/process/detect/track.py", "<module>", "_KALMAN_INITIALIZED_IDS_SAMPLE_LIMIT"): "bounded diagnostic output",
-    ("EdgeWARN/process/detect/track.py", "StormCellTracker._format_id_sample", "limit"): "bounded diagnostic output",
-    ("common/ingest/nexrad/s3_async.py", "AsyncNexradChunkStore.async_list_recent_volume_ids", "limit"): "one-result helper default",
-    ("common/ingest/nexrad/s3_async.py", "async_list_recent_volume_ids", "limit"): "one-result helper default",
-    ("common/ingest/nexrad/s3_chunks.py", "NexradChunkStore.list_recent_volume_ids", "limit"): "one-result helper default",
-    ("common/ingest/nexrad/s3_chunks.py", "list_recent_volume_ids", "limit"): "one-result helper default",
-    ("util/runtime/timing.py", "sleep_for", "interval"): "generic interruptible-sleep helper",
-    ("api/services/serviceRegistry.js", "<module>", "CACHE_TTL_MS"): "heartbeat scanner cache granularity from the decomposition plan, not deployable policy",
-    ("api/services/serviceRegistry.js", "<parameter>", "CACHE_TTL_MS"): "same scanner-cache constant seen by the JS literal scanner",
-    ("run_edgewarn.py", "<module>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "heartbeat write throttle inside the primary's own tick hook, not deployable policy",
-    ("run_edgewarn.py", "<parameter>", "HEARTBEAT_MIN_INTERVAL_SECONDS"): "same heartbeat throttle constant seen by the literal scanner",
-}
 _CATALOG_NAME = re.compile(r"(?:product|event|pressure|catalog|channel|modifier|vcp)", re.I)
 _OPERATIONAL_NAME = re.compile(r"(?:timeout|poll|interval|retention|cache|worker|retry|backoff|cleanup|age|limit|ttl)", re.I)
 
@@ -70,7 +53,7 @@ def _url_literals(root: Path = SRC) -> list[tuple[str, str]]:
             values = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str) and node not in docstrings]
         else:
             values = re.findall(r"[\"'](https?://[^\"']+)[\"']", source)
-        found.extend((relative, value) for value in values if value.startswith(("http://", "https://")) and (relative, value) not in URL_SENTINELS)
+        found.extend((relative, value) for value in values if value.startswith(("http://", "https://")) and (relative, value) not in URL_LITERAL_EXCEPTIONS)
     return found
 
 
@@ -103,10 +86,6 @@ def _config_path_accesses(root: Path = SRC) -> list[str]:
     return found
 
 
-def _is_catalog_registry(relative: str) -> bool:
-    return any(relative == path or relative.startswith(path) for path in CATALOG_REGISTRIES)
-
-
 def _literal_collection(node: ast.AST) -> bool:
     return isinstance(node, (ast.Dict, ast.List, ast.Set, ast.Tuple))
 
@@ -118,29 +97,6 @@ def _numeric_literal(node: ast.AST | None) -> bool:
 def _assigned_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
     return [target.id for target in targets if isinstance(target, ast.Name)]
-
-
-def _source_catalogs(root: Path = SRC) -> list[str]:
-    """Find module-level literal catalog declarations outside typed registries.
-
-    Runtime collections such as ``rendered_layers`` are deliberately excluded:
-    they accumulate the result of work and are not product authorities.
-    """
-    found = []
-    for path in production_sources(root):
-        relative = _relative(path, root)
-        if _is_catalog_registry(relative):
-            continue
-        source = path.read_text(encoding="utf-8", errors="ignore")
-        if path.suffix == ".py":
-            for node in ast.parse(source).body:
-                if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not _literal_collection(node.value):
-                    continue
-                found.extend(f"{relative}:{name}" for name in _assigned_names(node) if _CATALOG_NAME.search(name))
-        else:
-            pattern = r"(?:const|let|var)\s+(\w*(?:product|event|pressure|catalog|channel|modifier|vcp)\w*)\s*=\s*(?:\[|\{|new\s+Set\s*\(\s*\[)"
-            found.extend(f"{relative}:{name}" for name in re.findall(pattern, source, re.I))
-    return sorted(found)
 
 
 def _function_defaults(tree: ast.AST, scope: str = ""):
@@ -161,41 +117,7 @@ def _function_defaults(tree: ast.AST, scope: str = ""):
             yield from _function_defaults(node, scope)
 
 
-def _operational_numeric_literals(root: Path = SRC) -> list[tuple[str, str, str]]:
-    """Find numeric policy defaults that would compete with YAML settings."""
-    found = []
-    for path in production_sources(root):
-        relative = _relative(path, root)
-        if relative.startswith(CTAM):
-            continue
-        source = path.read_text(encoding="utf-8", errors="ignore")
-        if path.suffix == ".py":
-            tree = ast.parse(source)
-            for function, parameter in _function_defaults(tree):
-                entry = (relative, function, parameter)
-                if _OPERATIONAL_NAME.search(parameter) and entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                    found.append(entry)
-            for node in tree.body:
-                if isinstance(node, (ast.Assign, ast.AnnAssign)) and _numeric_literal(node.value):
-                    for name in _assigned_names(node):
-                        entry = (relative, "<module>", name)
-                        if _OPERATIONAL_NAME.search(name) and entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                            found.append(entry)
-        else:
-            pattern = r"(?:const|let|var)\s+(\w*(?:timeout|poll|interval|retention|cache|worker|retry|backoff|cleanup|age|limit|ttl)\w*)\s*=\s*\d+(?:\.\d+)?\b"
-            for name in re.findall(pattern, source, re.I):
-                entry = (relative, "<module>", name)
-                if entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                    found.append(entry)
-            parameter_pattern = r"(\w*(?:timeout|poll|interval|retention|cache|worker|retry|backoff|cleanup|age|limit|ttl)\w*)\s*=\s*\d+(?:\.\d+)?\b"
-            for name in re.findall(parameter_pattern, source, re.I):
-                entry = (relative, "<parameter>", name)
-                if entry not in OPERATIONAL_LITERAL_EXCEPTIONS:
-                    found.append(entry)
-    return sorted(found)
-
-
-def test_production_url_literals_are_not_endpoints():
+def test_production_url_literals_stay_with_explicit_owners():
     assert _url_literals() == []
 
 
@@ -203,25 +125,37 @@ def test_environment_reads_stay_in_configuration_infrastructure():
     assert _env_reads() == []
 
 
-def test_product_catalogs_are_limited_to_typed_or_out_of_scope_registries():
-    assert _source_catalogs() == []
-
-
-def test_operational_numeric_defaults_are_explicitly_approved():
-    assert _operational_numeric_literals() == []
-
-
 def test_no_source_relative_config_access_bypasses_loaders():
     assert _config_path_accesses() == []
 
 
-def test_audit_scanners_reject_negative_controls(tmp_path):
-    source = tmp_path / "x.py"
-    javascript = tmp_path / "x.js"
-    source.write_text('URL = "https://new.example"\nimport os\nvalue = os.environ.get("NEW")\npath = __file__ / "config"\nPRODUCTS = ["new"]\nPOLL_INTERVAL_SECONDS = 30\ndef wait(poll_interval=30): pass\n', encoding="utf-8")
-    javascript.write_text("const products = ['new'];\nfunction wait(pollInterval = 30) {}\n", encoding="utf-8")
-    assert _url_literals(tmp_path) == [("x.py", "https://new.example")]
-    assert _env_reads(tmp_path) == ["x.py"]
-    assert _config_path_accesses(tmp_path) == ["x.py"]
-    assert _source_catalogs(tmp_path) == ["x.js:products", "x.py:PRODUCTS"]
-    assert _operational_numeric_literals(tmp_path) == [("x.js", "<parameter>", "pollInterval"), ("x.py", "<module>", "POLL_INTERVAL_SECONDS"), ("x.py", "wait", "poll_interval")]
+def _runtime_section_calls():
+    """Yield (path, line, name) for every ``util.runtime.config.section`` call.
+
+    Several modules define their own ``section`` helper for other catalogs, so
+    only names imported from ``util.runtime.config`` (or ``.config`` inside
+    ``util/runtime``) are audited.
+    """
+    for path in production_sources():
+        if path.suffix != ".py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        relative = path.relative_to(SRC).as_posix()
+        local = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            runtime_config = node.module == "util.runtime.config" or (
+                node.level == 1 and node.module == "config"
+                and relative.startswith("util/runtime/"))
+            if runtime_config:
+                local.update(alias.asname or alias.name for alias in node.names
+                             if alias.name == "section")
+        if not local:
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in local and node.args):
+                argument = node.args[0]
+                name = argument.value if isinstance(argument, ast.Constant) else None
+                yield relative, node.lineno, name

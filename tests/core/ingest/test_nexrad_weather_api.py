@@ -1,3 +1,4 @@
+import pytest
 from common.ingest.nexrad import weather_api
 
 
@@ -96,3 +97,22 @@ def test_get_station_vcp_uses_short_ttl_cache():
     assert first.vcp == 215
     assert second.vcp == 215
     assert session.calls == 1
+
+
+@pytest.fixture(autouse=True)
+def reset_catalog_cache():
+    weather_api.reset_station_vcp_cache()
+    yield
+    weather_api.reset_station_vcp_cache()
+
+
+def test_station_catalog_uses_last_known_good_after_transient_failure(monkeypatch):
+    import requests
+    catalog = weather_api.RadarStationCatalog(cache_ttl_seconds=30)
+    now = [0.0]
+    monkeypatch.setattr(weather_api.time, "time", lambda: now[0])
+    session = _Session({"features": [{"properties": {"id": "KTLH"}}]})
+    assert "KTLH" in catalog.fetch_radar_station_vcps(session=session)
+    now[0] = 31
+    monkeypatch.setattr(session, "get", lambda *a, **kw: (_ for _ in ()).throw(requests.RequestException("503")))
+    assert "KTLH" in catalog.fetch_radar_station_vcps(session=session)

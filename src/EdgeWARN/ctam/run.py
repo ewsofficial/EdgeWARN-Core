@@ -38,6 +38,7 @@ def _run_phase1_discovery_dry_run(
     timestamp: str,
     json_path: Optional[str],
     input_manifest: Optional[CycleInputManifest],
+    frozen_discovery=None,
 ) -> None:
     """Discover external modules and record per-cycle readiness. Launches nothing.
 
@@ -52,7 +53,7 @@ def _run_phase1_discovery_dry_run(
             stormcell_path=json_path,
             input_manifest=input_manifest,
         )
-        discovery_result = discovery.discover_modules()
+        discovery_result = frozen_discovery or discovery.discover_modules()
 
         evaluations = {}
         for module in discovery_result.modules:
@@ -80,7 +81,7 @@ def _run_phase1_discovery_dry_run(
         print(f"[CTAM] Discovery/readiness pass failed: {e}")
 
 
-def _run_external_modules(cells, timestamp, json_path, input_manifest, *, disabled=False):
+def _run_external_modules(cells, timestamp, json_path, input_manifest, *, frozen_discovery=None):
     """Execute only already-discovered manifests; legacy built-ins stay separate."""
     if not timestamp:
         return cells, (), (), {}
@@ -88,9 +89,9 @@ def _run_external_modules(cells, timestamp, json_path, input_manifest, *, disabl
     try:
         from .runner import ExternalModuleRunner
         catalog = readiness.build_catalog(cells=cells, timestamp=timestamp, stormcell_path=json_path, input_manifest=input_manifest)
-        discovered = discovery.discover_modules()
+        discovered = frozen_discovery or discovery.discover_modules()
         manifests = {item.module_id: item.manifest for item in discovered.runnable if item.manifest is not None}
-        if not manifests or disabled:
+        if not manifests:
             return cells, tuple(manifests.values()), (), {}
         runner = ExternalModuleRunner(catalog=catalog, cells=cells, manifests=manifests)
         results = runner.run()
@@ -120,7 +121,7 @@ def _run_external_modules(cells, timestamp, json_path, input_manifest, *, disabl
         return cells, tuple(manifests.values()), (), {}
 
 
-def _run_builtin_stormprob(cells):
+def _run_builtin_stormprob(cells, input_manifest=None):
     """Run the reserved built-in before any discovered external module.
 
     StormProb is deliberately not obtained from the import-time registry here:
@@ -128,8 +129,45 @@ def _run_builtin_stormprob(cells):
     crosses the same narrow host-service boundary.
     """
     from .builtins import BuiltinStormProbAdapter, StormProbCycleService
+    from .preflight import StormProbScanUnavailable, validate_stormprob_cycle
+    from EdgeWARN.stormprob.features import UNIVERSAL_PROPERTY_FEATURES
     from EdgeWARN.stormprob.onnx_runtime import BATCH_SIZE
     service = StormProbCycleService()
+    validate_stormprob_cycle(cells, input_manifest)
+    from .builtins.stormprob import BuiltinStormProbAdapter as FailureAdapter, InputNotReady
+
+    candidates = []
+    # Validate every candidate's committed feature/history row before the
+    # first batch can infer or publish. Padded history slots remain permitted.
+    for cell in cells:
+        if cell.get("tracking_mode") == "predicted":
+            candidates.append(cell)
+            continue
+        try:
+            if cell.get("stormprob", {}).get("status") == "unavailable":
+                raise InputNotReady(cell["stormprob"]["reason"])
+            inputs = service.repository.model_inputs(cell.get("id"), through=cell.get("timestamp"))
+            history = service.repository.feature_history(
+                cell.get("id"), limit=30, through=cell.get("timestamp"))
+            if not history or not inputs["history_mask"][-1]:
+                raise ValueError("current committed history row is absent")
+            for observation in history:
+                if observation.get("lineage", {}).get("tracking_mode") == "predicted":
+                    continue
+                if not observation.get("inference_ready") or observation.get("geometry_status") != "ok":
+                    raise ValueError(f"history row {observation['analysis_time']} is invalid")
+                bad = [name for name in UNIVERSAL_PROPERTY_FEATURES
+                       if observation.get("quality", {}).get(name) != "ok"]
+                if bad:
+                    raise ValueError(
+                        f"history row {observation['analysis_time']} has missing features "
+                        + ", ".join(bad[:8]))
+        except Exception as exc:
+            cell.setdefault("stormprob", {}).update(status="unavailable", reason=str(exc))
+            FailureAdapter._record_failure(cell, InputNotReady(str(exc)), time.perf_counter())
+            print(f"[StormProb] Skipped cell {cell.get('id')}: {exc}")
+        else:
+            candidates.append(cell)
     alert_lookup_started = time.perf_counter()
     service.preload_previous_alerts(cell.get("id") for cell in cells)
     alert_lookup_seconds = time.perf_counter() - alert_lookup_started
@@ -145,37 +183,38 @@ def _run_builtin_stormprob(cells):
         "inference_seconds": 0.0,
         "postprocess_seconds": 0.0,
     }
-    for batch_start in range(0, len(cells), BATCH_SIZE):
-        batch = cells[batch_start:batch_start + BATCH_SIZE]
+    for batch_start in range(0, len(candidates), BATCH_SIZE):
+        batch = candidates[batch_start:batch_start + BATCH_SIZE]
         forecast_started = time.perf_counter()
-        try:
-            adapter.run_batch(batch)
-        except Exception as exc:
-            for cell in batch:
-                cell.setdefault("modules", {})[adapter.name] = {
-                    "status": "error", "error": str(exc)}
+        adapter.run_batch(batch)
         batch_timing = getattr(adapter, "last_batch_timing", {})
         for name in forecast_parts:
             forecast_parts[name] += batch_timing.get(name, 0.0)
         forecast_seconds += time.perf_counter() - forecast_started
-        alerts_started = time.perf_counter()
-        for cell_idx, cell in enumerate(batch, batch_start):
-            success_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") == "success")
-            error_count += int(cell.get("modules", {}).get(adapter.name, {}).get("status") != "success")
-            publish_started = time.perf_counter()
-            published = 0
-            try:
-                published = adapter.publish_alerts(adapter.alerts(cell))
-                alert_count += published
-            except Exception as exc:
-                print(f"[CTAM]   Cell {cell_idx + 1}/{len(cells)}: StormProb alerts FAILED: {exc}")
-            finally:
-                print(
-                    "[StormProb] publish_alerts "
-                    f"cell_id={cell.get('id')!r} count={published} "
-                    f"elapsed={time.perf_counter() - publish_started:.3f}s"
-                )
-        alert_seconds += time.perf_counter() - alerts_started
+    failed = [cell for cell in cells
+              if cell.get("modules", {}).get(adapter.name, {}).get("status") not in {"success", "partial"}
+              and not (cell.get("tracking_mode") == "predicted"
+                       and cell.get("modules", {}).get(adapter.name, {}).get("status") == "skipped")]
+    error_count = len(failed)
+    for cell in failed:
+        cell.setdefault("stormprob", {}).update(
+            status="unavailable", reason=cell.get("modules", {}).get(adapter.name, {}).get("error", "inference failed"))
+    print(f"[StormProb] unavailable_cells={error_count} total_cells={len(cells)}")
+    success_count = sum(cell.get("modules", {}).get(adapter.name, {}).get("status") in {"success", "partial"}
+                        for cell in cells)
+    alerts_started = time.perf_counter()
+    for cell_idx, cell in enumerate(cells):
+        if cell.get("modules", {}).get(adapter.name, {}).get("status") not in {"success", "partial"}:
+            continue
+        publish_started = time.perf_counter()
+        published = adapter.publish_alerts(adapter.alerts(cell))
+        alert_count += published
+        print(
+            "[StormProb] publish_alerts "
+            f"cell_id={cell.get('id')!r} count={published} "
+            f"elapsed={time.perf_counter() - publish_started:.3f}s"
+        )
+    alert_seconds += time.perf_counter() - alerts_started
     print(
         "[CTAM] StormProb timing: "
         f"forecast={forecast_seconds:.3f}s, "
@@ -195,6 +234,8 @@ def run_ctam_result(
     json_path: Optional[str] = None,
     input_manifest: Optional[CycleInputManifest] = None,
     disable_ctam_modules: bool = False,
+    disable_stormprob: bool = False,
+    frozen_discovery=None,
 ) -> CTAMRunResult:
     """
     Run CTAM on the provided storm cells.
@@ -215,8 +256,8 @@ def run_ctam_result(
         The list of cells with 'modules' populated by each completed module.
     """
     start_time = time.time()
-    if timestamp:
-        _run_phase1_discovery_dry_run(cells, timestamp, json_path, input_manifest)
+    if timestamp and not disable_ctam_modules:
+        _run_phase1_discovery_dry_run(cells, timestamp, json_path, input_manifest, frozen_discovery)
 
     # Clean up expired alerts before running modules
     # This prevents expired alerts from piling up on disk
@@ -226,12 +267,15 @@ def run_ctam_result(
         print(f"[CTAM] Failed to clean up expired alerts: {e}")
     
     print("[CTAM] Starting CTAM pipeline...")
-    print("[CTAM] Built-in modules: ['StormProb']")
+    print(f"[CTAM] Built-in modules: {[] if disable_stormprob else ['StormProb']}")
     print(f"[CTAM] Processing {len(cells)} storm cell(s)...")
     
     # Step 1: Run cell-based modules
     
-    cell_success_count, cell_error_count, builtin_alert_count = _run_builtin_stormprob(cells)
+    if disable_stormprob:
+        cell_success_count = cell_error_count = builtin_alert_count = 0
+    else:
+        cell_success_count, cell_error_count, builtin_alert_count = _run_builtin_stormprob(cells, input_manifest)
     
     stormprob_status_counts = {}
     stormprob_alert_eligibility_counts = {
@@ -293,13 +337,13 @@ def run_ctam_result(
     print(f"[CTAM] Pipeline complete: {cell_success_count} built-in success, {cell_error_count} built-in error(s), {builtin_alert_count} alert(s) in {total_elapsed:.3f}s")
     
     # Generate timestamp snapshot of active alerts if provided
-    cells, manifests, module_results, committed_routes = _run_external_modules(
-        cells,
-        timestamp,
-        json_path,
-        input_manifest,
-        disabled=disable_ctam_modules,
-    )
+    if disable_ctam_modules:
+        manifests, module_results, committed_routes = (), (), {}
+    else:
+        cells, manifests, module_results, committed_routes = _run_external_modules(
+            cells, timestamp, json_path, input_manifest,
+            frozen_discovery=frozen_discovery,
+        )
 
     if timestamp:
         try:
@@ -317,6 +361,8 @@ def run_ctam(
     json_path: Optional[str] = None,
     input_manifest: Optional[CycleInputManifest] = None,
     disable_ctam_modules: bool = False,
+    disable_stormprob: bool = False,
+    frozen_discovery=None,
 ) -> List[Dict[str, Any]]:
     """Compatibility wrapper returning only the updated storm cells."""
     return run_ctam_result(
@@ -325,4 +371,6 @@ def run_ctam(
         json_path=json_path,
         input_manifest=input_manifest,
         disable_ctam_modules=disable_ctam_modules,
+        disable_stormprob=disable_stormprob,
+        frozen_discovery=frozen_discovery,
     ).cells

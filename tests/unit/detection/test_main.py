@@ -39,7 +39,10 @@ def test_detect_main_cleans_stormcell_dir_when_cleanup_enabled(tmp_path):
     fs.STORMCELL_DIR.mkdir(parents=True, exist_ok=True)
     stormcell_file.write_text("{}")
 
-    old_time = datetime.now() - timedelta(hours=3)
+    detection_config = DetectionConfig.from_yaml()
+    old_time = datetime.now() - timedelta(
+        minutes=detection_config.stormcell_cleanup_max_age_minutes + 60
+    )
     os.utime(stormcell_file, (old_time.timestamp(), old_time.timestamp()))
 
     detect_main.main(
@@ -51,7 +54,7 @@ def test_detect_main_cleans_stormcell_dir_when_cleanup_enabled(tmp_path):
         None,
         (20, 55),
         (-130, -60),
-        DetectionConfig.from_yaml(),
+        detection_config,
         cleanup_stormcells=True,
     )
 

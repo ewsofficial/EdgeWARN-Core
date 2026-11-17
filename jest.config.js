@@ -3,6 +3,8 @@
  */
 
 export default {
+    // Keep nested checkouts/worktrees out of repository test discovery.
+    roots: ['<rootDir>/tests/api'],
     // Test environment
     testEnvironment: 'node',
 

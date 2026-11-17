@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-from EdgeWARN.ingest.nws.registry import (
+from common.ingest.nws.registry import (
     AlertRegistry,
     get_registry,
     reset_registry,

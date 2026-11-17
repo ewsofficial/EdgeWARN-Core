@@ -3,9 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 
 def sleep_for(total_seconds, interval=1.0):
-    end_time = time.time() + total_seconds
-    while time.time() < end_time:
-        time.sleep(min(interval, max(0.0, end_time - time.time())))
+    end_time = time.monotonic() + total_seconds
+    while time.monotonic() < end_time:
+        time.sleep(min(interval, max(0.0, end_time - time.monotonic())))
 
 
 def sleep_until_boundary(minutes, interval):

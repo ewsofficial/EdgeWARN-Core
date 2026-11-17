@@ -84,8 +84,8 @@ class TestM2LongitudeCorrection:
         kf.initialize(0.0, -97.0)
 
         F = kf._build_transition_matrix(120.0)
-        lat_scale = F[0, 2]  # lat row, velocity column
-        lon_scale = F[1, 3]  # lon row, velocity column
+        lat_scale = F[0, 3]  # lat row, velocity column
+        lon_scale = F[1, 2]  # lon row, velocity column
 
         np.testing.assert_almost_equal(lat_scale, lon_scale, decimal=6,
             err_msg="At equator, lat and lon scales should be equal")
@@ -96,8 +96,8 @@ class TestM2LongitudeCorrection:
         kf.initialize(60.0, -97.0)
 
         F = kf._build_transition_matrix(120.0)
-        lat_scale = F[0, 2]
-        lon_scale = F[1, 3]
+        lat_scale = F[0, 3]
+        lon_scale = F[1, 2]
 
         # cos(60°) = 0.5, so lon_scale ≈ lat_scale / 0.5 = 2 * lat_scale
         ratio = lon_scale / lat_scale
@@ -111,8 +111,8 @@ class TestM2LongitudeCorrection:
         kf.initialize(35.0, -97.0)
 
         F = kf._build_transition_matrix(120.0)
-        lat_scale = F[0, 2]
-        lon_scale = F[1, 3]
+        lat_scale = F[0, 3]
+        lon_scale = F[1, 2]
 
         # cos(35°) ≈ 0.819, so lon_scale should be > lat_scale
         assert lon_scale > lat_scale, (

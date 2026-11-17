@@ -4,12 +4,30 @@ from pathlib import Path
 
 import util.file as fs
 from common.config.loader import ConfigError, load_config
+from common.config.mrms_products import parse_product_id
+from common.ingest.mrms import source
+from common.ingest.mrms.registry import build_registry
 
 _CONFIG_NAME = "ingest"
 
 
 def _catalog():
-    return load_config(_CONFIG_NAME)
+    return load_config(_CONFIG_NAME, config_dir=fs.MRMS_CONFIG_DIR)
+
+
+def get_registry():
+    """Resolve v2 explicitly; v1 remains available until the coordinated release."""
+    catalog = _catalog()
+    if catalog["schema_version"] != 2:
+        return None
+    registry = build_registry(catalog["mrms"], fs.BASE_DIR.expanduser().resolve())
+    if fs.MRMS_REGISTRY is None or fs.MRMS_REGISTRY.fingerprint != registry.fingerprint:
+        fs.bind_mrms_paths(registry)
+    return registry
+
+
+def _source(modifier):
+    return source.source_for(parse_product_id("MRMS_" + (modifier or "ProbSevere")))
 
 
 def _resolve_outdir(attribute_name):
@@ -31,6 +49,8 @@ def _resolve_outdir(attribute_name):
 
 def mrms_bucket() -> str:
     """The S3 bucket MRMS products are read from."""
+    if _catalog()["schema_version"] == 2:
+        return source.MRMS_BUCKET
     return _catalog()["mrms"]["bucket"]
 
 
@@ -82,6 +102,8 @@ def mrms_s3_prefix(dt, region, modifier) -> str:
     substituting empty would yield a doubled slash, which S3 treats as a
     different prefix and would silently match nothing.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(modifier).s3_prefix(dt)
     patterns = _path_patterns()
     if modifier is None:
         return _format_path_pattern(patterns["s3_prefix_no_modifier"], dt, region=region)
@@ -94,6 +116,8 @@ def mrms_filename_prefix(dt, modifier) -> str:
     This is the whole reason the standard products need no ``StartAfter`` marker:
     S3 prefix filtering already excludes every other hour.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(modifier).filename_prefix(dt)
     return _format_path_pattern(_path_patterns()["filename_prefix"], dt, modifier=modifier)
 
 
@@ -112,6 +136,8 @@ def mrms_probsevere_start_after(dt, *, lookback_hours=None) -> str:
     scheduler overrides it because its window is its own tunable, and passes 0
     when it has already shifted ``dt`` itself.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(None).filename_start_after(dt, lookback_hours=1 if lookback_hours is None else lookback_hours, minute=False)
     patterns = _path_patterns()
     if lookback_hours is None:
         lookback_hours = patterns["probsevere_start_after_lookback_hours"]
@@ -127,6 +153,8 @@ def mrms_filename_start_after(dt, modifier) -> str:
     resumes from a known file has to carry the minute or it would re-list the
     whole hour.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(modifier).filename_start_after(dt)
     return _format_path_pattern(
         _path_patterns()["filename_start_after_minute"], dt, modifier=modifier
     )
@@ -139,6 +167,8 @@ def mrms_probsevere_start_after_minute(dt) -> str:
     like :func:`mrms_filename_start_after` it applies no lookback -- the caller
     already has the exact timestamp it wants to resume after.
     """
+    if _catalog()["schema_version"] == 2:
+        return _source(None).filename_start_after(dt)
     return _format_path_pattern(_path_patterns()["probsevere_start_after_minute"], dt)
 
 
@@ -160,6 +190,8 @@ def ncep_base_url() -> str:
     MRMS package before ``get_args()`` exports ``EDGEWARN_CONFIG_DIR``, so a
     module-scope binding put this out of reach of ``--config-dir``.
     """
+    if _catalog()["schema_version"] == 2:
+        return source.NCEP_BASE_URL
     return _ncep_https()["base_url"]
 
 
@@ -170,6 +202,8 @@ def ncep_probsevere_url() -> str:
     a product directory inside it, so this is a separate key and not a suffix
     appended to the base URL.
     """
+    if _catalog()["schema_version"] == 2:
+        return source.NCEP_PROBSEVERE_URL
     return _ncep_https()["probsevere_url"]
 
 
@@ -202,6 +236,8 @@ def ncep_directory_split_token() -> str:
 
 def ncep_directory_map():
     """S3 modifier to NCEP directory name, for the names that do not derive."""
+    if _catalog()["schema_version"] == 2:
+        return source.HTTPS_DIRECTORY_EXCEPTIONS
     return _ncep_https()["directory_map"]
 
 
@@ -225,21 +261,10 @@ def goes_hour_lookback() -> int:
     return _catalog()["goes"]["hour_lookback"]
 
 
-def abi_radc_product() -> str:
-    """The ABI product every RadC channel spec is built against."""
-    return _catalog()["goes"]["abi_product"]
 
 
-def _abi_channel_definitions():
-    return tuple(
-        (channel["id"], channel["name"], channel["outdir"])
-        for channel in _catalog()["goes"]["abi_channels"]
-    )
 
 
-def default_abi_radc_channel_ids() -> tuple:
-    """Every ABI channel id in the catalog, in catalog order."""
-    return tuple(channel_id for channel_id, _, _ in _abi_channel_definitions())
 
 
 def goes_max_files_per_spec() -> int:
@@ -286,11 +311,17 @@ def _catalog_triples(key):
 
 def get_mrms_modifiers():
     """The full MRMS ingest catalog as (region, product, outdir) triples."""
+    registry = get_registry()
+    if registry is not None:
+        return list(registry.get_mrms_modifiers())
     return _catalog_triples("products")
 
 
 def get_check_modifiers():
     """The readiness-check subset of :func:`get_mrms_modifiers`."""
+    registry = get_registry()
+    if registry is not None:
+        return list(registry.get_check_modifiers())
     return _catalog_triples("check_products")
 
 
@@ -298,7 +329,6 @@ def get_goes_modifiers():
     goes = _catalog()["goes"]
     return [
         GoesIngestSpec(goes["glm_product"], _resolve_outdir(goes["glm_outdir"])),
-        *get_abi_radc_channel_specs(),
     ]
 
 
@@ -307,34 +337,6 @@ def get_goes_max_entries():
     return _catalog()["goes"]["max_entries"]
 
 
-def get_abi_radc_channel_specs(channel_ids=None):
-    """Build a spec per ABI channel, optionally restricted to ``channel_ids``.
-
-    ``None`` means every channel in the catalog. It used to mean that indirectly,
-    via a signature default of ``DEFAULT_ABI_RADC_CHANNEL_IDS`` -- which selected
-    every catalog channel and so produced the same result, but bound the channel
-    list at import time and put it out of reach of ``--config-dir``.
-    """
-    selected_channel_ids = set(channel_ids) if channel_ids is not None else None
-    specs = []
-    product = abi_radc_product()
-    matcher_template = _catalog()["goes"]["filename_matcher_template"]
-
-    for channel_id, channel_name, outdir_attr in _abi_channel_definitions():
-        if selected_channel_ids is not None and channel_id not in selected_channel_ids:
-            continue
-
-        specs.append(
-            GoesIngestSpec(
-                product=product,
-                outdir=_resolve_outdir(outdir_attr),
-                channel_id=channel_id,
-                channel_name=channel_name,
-                filename_matcher=matcher_template.format(channel_id=channel_id),
-            )
-        )
-
-    return specs
 
 
 def normalize_goes_modifier(spec):
@@ -346,3 +348,60 @@ def normalize_goes_modifier(spec):
         return GoesIngestSpec(product=product, outdir=outdir)
 
     raise TypeError(f"Unsupported GOES modifier specification: {spec!r}")
+
+
+def get_ingest_dependencies(*, include_rap=True, include_glm=True,
+                            mrms_core_only=False, disable_glm=False,
+                            disable_ctam=False, disable_stormprob=False):
+    """Freeze the effective catalog/overlay agreement before starting workers.
+
+    ``disable_ctam``/``disable_stormprob`` are dependency-shared like
+    ``disable_glm``: with both false, every StormProb MRMS source is a
+    mandatory integration input, and producer and consumers must pass the same
+    values or their fingerprints disagree.
+    """
+    from common.ingest.mrms.core_contract import resolve_dependencies
+    registry = get_registry()
+    if registry is None:
+        raise ValueError("Independent ingest requires the v2 MRMS registry")
+    datasets = load_config("integration", config_dir=fs.MRMS_CONFIG_DIR)["stats_datasets"]
+    enrichment = {entry["product"] for entry in datasets
+                  if entry.get("product") and registry.is_enabled(entry["product"])}
+    return resolve_dependencies(registry, enrichment=enrichment, include_rap=include_rap,
+                                include_glm=include_glm, mrms_core_only=mrms_core_only,
+                                disable_glm=disable_glm,
+                                auxiliary_settings=ingest_auxiliary_settings(config_dir=fs.MRMS_CONFIG_DIR),
+                                require_stormprob_inputs=not (disable_ctam or disable_stormprob))
+
+
+def get_ingest_settings(*, config_dir=None):
+    """Resolve inherited limits once; no service-side resource constants."""
+    config_dir = config_dir or fs.MRMS_CONFIG_DIR
+    result = dict(load_config("runtime", config_dir=config_dir)["ingest"])
+    mrms = load_config("ingest", config_dir=config_dir)["mrms"]
+    rap = load_config("synoptic_rap", config_dir=config_dir)["rap"]
+    inherited = {
+        "listing_concurrency": mrms["downloads"]["max_concurrency"],
+        "download_concurrency": mrms["downloads"]["max_concurrency"],
+        "listing_timeout_seconds": mrms["ncep_https"]["sync_timeout_seconds"],
+        "download_timeout_seconds": 4 * mrms["ncep_https"]["sync_timeout_seconds"],
+        "auxiliary_timeout_seconds": 4 * rap["nomads_timeout_seconds"],
+        "retention_minutes": mrms["cleanup_max_age_minutes"],
+    }
+    for key, value in inherited.items():
+        if result[key] is None:
+            result[key] = value
+    result["decode_concurrency"] = min(result["decode_concurrency"], result["download_concurrency"])
+    return result
+
+
+def ingest_auxiliary_settings(*, config_dir=None):
+    """Source/freshness settings that must agree across producer and consumers."""
+    from common.ingest.mrms.registry import _plain
+    config_dir = config_dir or fs.MRMS_CONFIG_DIR
+    goes = load_config('ingest', config_dir=config_dir)['goes']
+    return {
+        'rap': _plain(load_config('synoptic_rap', config_dir=config_dir)['rap']),
+        'glm': {key: _plain(goes[key]) for key in
+                ('bucket', 'glm_product', 'glm_outdir', 'max_entries', 'hour_lookback', 'bucket_path_pattern')},
+    }

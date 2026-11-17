@@ -17,7 +17,14 @@ export function createAnalysisService(repository) {
       return repository.readJson('data', ['cells', `${cellId}.json`]);
     },
     async listStormSnapshots() {
-      try { return (await repository.readJson('data', ['stormcells', 'stormcell_index.json'])).timestamps || []; } catch (error) { if (error.code === 'NOT_FOUND') return []; throw error; }
+      try {
+        const fromIndex = (await repository.readJson('data', ['stormcells', 'stormcell_index.json'])).timestamps || [];
+        // Descending by the YYYYMMDD-HHMMSS index key, matching alert-snapshots ordering
+        // (the index builds it ascending). slice copies so the index stays the source of truth.
+        return fromIndex.slice().sort().reverse();
+      } catch (error) {
+        if (error.code === 'NOT_FOUND') return []; throw error;
+      }
     },
     async getStormSnapshot(value) {
       if (!timestamp(value)) throw new ArtifactError('INVALID_PATH', 'Invalid timestamp');
@@ -39,17 +46,5 @@ export function createAnalysisService(repository) {
       const result = await repository.readJson('data', alertSegments(source, 'ids', `${alertId.replaceAll(':', '_')}.json`));
       return result.feature || result;
     },
-    async listMetarHours() {
-      try {
-        const entries = await repository.list('data', ['METAR']);
-        return entries.map((entry) => entry.name.match(/^METAR_(\d{8}-\d{2})z\.json$/)?.[1]).filter(Boolean).map((value) => `${value}0000`).sort().reverse();
-      } catch (error) { if (error.code === 'NOT_FOUND') return []; throw error; }
-    },
-    async getMetar(value) {
-      if (!timestamp(value)) throw new ArtifactError('INVALID_PATH', 'Invalid timestamp');
-      const observationTimestamp = `${value.slice(0, 11)}0000`;
-      const observations = await repository.readJson('data', ['METAR', `METAR_${value.slice(0, 11)}z.json`]);
-      return { requestedTimestamp: value, observationTimestamp, observations };
-    }
   };
 }

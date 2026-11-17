@@ -572,7 +572,8 @@ def _describe_stormcells(
     if not isinstance(payload, dict) or "features" not in payload:
         # The snapshot is a flat dict with `source, product, version,
         # latest_timestamp, features` -- not a GeoJSON FeatureCollection, and it
-        # has no `type` key. See plans/modular-ctam-phase0-findings.md finding 3.
+        # has no `type` key. See the retired Phase 0 findings, finding 3
+        # (`git show 93bbcc0e^:plans/modular-ctam-phase0-findings.md`).
         return replace(
             descriptor,
             validated=False,
@@ -989,7 +990,7 @@ def _one_line(text: str) -> str:
 
     ``\\S``-patterned schema fields are matched with ``re.search``, and Python's
     ``$``-style anchoring accepts a trailing newline
-    (plans/modular-ctam-phase0-findings.md finding 9), so newlines are removed
+    (retired Phase 0 findings, finding 9: ``git show 93bbcc0e^:plans/modular-ctam-phase0-findings.md``), so newlines are removed
     at the point of writing rather than trusted to a pattern.
     """
     return " ".join(str(text).split())

@@ -1,4 +1,4 @@
-# AGENTS Guide for `tests/core/ingest/`
+# Acquisition tests
 
-## Purpose
-Tests for ingest code and EWMRS render helpers that support ingest/render flows.
+Cover MRMS, RAP, scan-time GLM, and radar source handling. Preserve source
+timestamp, payload validation, and fallback contracts without live network I/O.

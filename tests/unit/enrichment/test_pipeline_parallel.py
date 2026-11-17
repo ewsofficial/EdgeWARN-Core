@@ -161,3 +161,70 @@ def test_stat_file_handler_write_json_replaces_target_atomically(tmp_path):
     handler.write_json(updated, target)
 
     assert json.loads(target.read_text()) == updated
+
+
+@pytest.mark.parametrize("disable_ctam", [False, True])
+def test_final_optional_enrichment_precedes_observation_and_single_publication(
+    monkeypatch, tmp_path, sample_cells, disable_ctam,
+):
+    from datetime import datetime, timezone
+    from common.ingest.manifest import CycleInputManifest, staged_input_from_path
+    from EdgeWARN.stormprob.database import StormProbRepository
+    dt = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    base = CycleInputManifest(dt)
+    from EdgeWARN.ctam.preflight import STORMPROB_MRMS_SOURCES
+    from EdgeWARN.stormprob.features import UNIVERSAL_PROPERTY_FEATURES
+    # Final readiness includes every required source. The observation double
+    # supplies complete feature quality so the real dependency gate still runs.
+    records = []
+    for source in STORMPROB_MRMS_SOURCES:
+        source_path = tmp_path / f"MRMS_{source.product}_20240101-000000.grib2"
+        source_path.touch()
+        records.append(staged_input_from_path(
+            source.product, source_path, source="test", family="mrms"))
+    rap_path = tmp_path / "RAP_20240101-000000.grib2"
+    rap_path.touch()
+    records.append(staged_input_from_path("RAP", rap_path, source="test", family="rap"))
+    final = base.with_inputs(tuple(records))
+    order = []
+    handler = MagicMock()
+    handler.load_json.return_value = (copy.deepcopy(sample_cells), dt.isoformat())
+    monkeypatch.setattr(pipeline, "StatFileHandler", lambda _: handler)
+    monkeypatch.setattr(pipeline, "StormCellIntegrator", lambda _: object())
+    def enrich(_integrator, cells, **kwargs):
+        if kwargs["input_manifest"].inputs:
+            order.append("final-enrichment")
+            assert not kwargs["include_glm"] and not kwargs["include_rap"]
+            cells[0]["properties"]["Ref0"] = 42
+        else:
+            order.append("base-enrichment")
+        return cells
+    def final_input():
+        order.append("optional-complete")
+        return final
+    def observe(cells, timestamp, manifest):
+        assert cells[0]["properties"]["Ref0"] == 42
+        assert manifest is final
+        for cell in cells:
+            cell["stormprob"] = {"observation": {
+                "inference_ready": True,
+                "quality": {name: "ok" for name in UNIVERSAL_PROPERTY_FEATURES},
+            }}
+        order.append("observation")
+        return cells
+    def ctam(cells, timestamp, disabled, **kwargs):
+        assert disabled == disable_ctam
+        assert kwargs["input_manifest"] is final
+        order.append("ctam")
+        return cells, None
+    monkeypatch.setattr(pipeline, "_run_parallel_enrichment", enrich)
+    monkeypatch.setattr(pipeline, "_attach_stormprob_inputs", observe)
+    monkeypatch.setattr(pipeline, "_run_ctam_if_enabled", ctam)
+    monkeypatch.setattr(pipeline, "_publish_cycle", lambda *args, **kwargs: order.append("publish"))
+    monkeypatch.setattr(StormProbRepository, "commit_cycle", lambda *args, **kwargs: order.append("commit"))
+    pipeline.main(json_path=tmp_path / "cells.json", input_manifest=base,
+                  disable_ctam=disable_ctam, final_input_provider=final_input)
+    expected = ["base-enrichment", "optional-complete", "final-enrichment"]
+    if not disable_ctam:
+        expected.append("observation")
+    assert order == expected + ["commit", "ctam", "publish"]

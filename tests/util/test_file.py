@@ -11,33 +11,6 @@ from unittest.mock import patch, MagicMock
 import util.file as fs
 
 
-class TestDefinePaths:
-    """Tests for path definition functions"""
-
-    def test_define_paths_creates_all_directories(self, tmp_path):
-        """Test that _define_paths creates all expected directory paths"""
-        fs._define_paths(tmp_path)
-        
-        # Check that BASE_DIR is set correctly
-        assert fs.BASE_DIR == tmp_path
-        
-        # Check that DATA_DIR is created
-        assert fs.DATA_DIR == tmp_path / "data"
-        
-        # Check various MRMS directories
-        assert fs.MRMS_RALA_DIR == tmp_path / "data" / "MRMS_ReflectivityAtLowestAltitude"
-        assert fs.MRMS_PROBSEVERE_DIR == tmp_path / "data" / "MRMS_ProbSevere"
-        assert fs.MRMS_COMPOSITE_DIR == tmp_path / "data" / "MRMS_MergedReflectivityQC"
-        
-        # Check output directories
-        assert fs.STORMCELL_DIR == tmp_path / "data" / "stormcells"
-        assert fs.CELL_DIR == tmp_path / "data" / "cells"
-        assert fs.METAR_DIR == tmp_path / "data" / "METAR"
-        assert fs.GUI_DIR == tmp_path / "gui"
-        assert fs.GUI_RALA_DIR == tmp_path / "gui" / "MRMS_ReflectivityAtLowestAltitude"
-        assert fs.WPC_SFC_DIR == tmp_path / "wpc" / "surface_analysis"
-
-
 class TestInitializeFilesystem:
     """Tests for initialize_filesystem function"""
 
@@ -232,6 +205,22 @@ class TestCleanOldFiles:
         assert files[2].exists()
         assert files[3].exists()
         assert files[4].exists()
+
+    def test_lone_expired_file_is_kept_until_a_newer_one_exists(self, tmp_path):
+        fs._define_paths(tmp_path)
+        old = tmp_path / "old.txt"
+        old.write_text("a")
+        stamp = (datetime.now() - timedelta(hours=5)).timestamp()
+        os.utime(old, (stamp, stamp))
+
+        fs.clean_old_files(tmp_path, max_age_minutes=10, max_files=None)
+        assert old.exists()
+
+        newer = tmp_path / "newer.txt"
+        newer.write_text("b")
+        fs.clean_old_files(tmp_path, max_age_minutes=10, max_files=None)
+        assert not old.exists()
+        assert newer.exists()
 
     def test_keeps_all_files_when_under_limit(self, tmp_path):
         """Test that all files are kept when under limit"""

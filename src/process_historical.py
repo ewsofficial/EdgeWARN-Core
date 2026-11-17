@@ -6,7 +6,7 @@ import time
 
 import common.ingest.mrms.config as mrms_config
 from EdgeWARN import historical_pipeline, initialize_runtime, parse_utc_time
-from EdgeWARN.stormprob.assets import validate_assets
+from EdgeWARN.ctam.preflight import PreflightError, StormProbDependencyError, check_core_startup
 from EdgeWARN.api_integration.config import initialize_at_startup_historical
 from EdgeWARN.historical_config import (
     historical_step_minutes,
@@ -40,19 +40,34 @@ def _validated_historical_output(path: Path, requested_time: datetime) -> bool:
 def main():
     """Historical scheduler: iterate through time range and process each available timestamp."""
     args = io_manager.get_historical_args()
+    from util.runtime.mrms_migration import require_completed_migration
+    require_completed_migration(args.config_dir)
 
+    # Historical artifacts and raw caches have a separate runtime namespace.
+    # A replay must never replace a realtime cell, database, index, or handoff.
+    import util.file as fs
+    base = Path(args.base_dir or fs.BASE_DIR).expanduser().resolve()
+    historical_base = base / "historical"
+    if not historical_base.resolve().is_relative_to(base):
+        raise ValueError("Historical runtime escapes the configured base directory")
     try:
-        validate_assets()
-    except (FileNotFoundError, RuntimeError) as exc:
-        io_manager.write_error(f"StormProb startup validation failed: {exc}")
+        frozen_discovery = check_core_startup(
+            config_dir=args.config_dir, base_dir=historical_base,
+            module_root=args.ctam_module_dir, disable_ctam=args.disable_ctam,
+            disable_ctam_modules=args.disable_ctam_modules,
+            disable_stormprob=args.disable_stormprob,
+        )
+    except PreflightError as exc:
+        io_manager.write_error(str(exc))
         sys.exit(1)
-
-    # Initialize custom filesystem if provided
     initialize_runtime(
-        base_dir=args.base_dir,
+        base_dir=historical_base,
         io_manager=io_manager,
         initialize_indexes=initialize_at_startup_historical(),
     )
+    registry = mrms_config.get_registry()
+    if registry is not None:
+        fs.ensure_mrms_directories(registry)
 
     try:
         start_time = parse_utc_time(args.start)
@@ -130,6 +145,8 @@ def main():
                 io_manager=io_manager,
                 disable_ctam=args.disable_ctam,
                 disable_ctam_modules=getattr(args, "disable_ctam_modules", False),
+                disable_stormprob=args.disable_stormprob,
+                frozen_discovery=frozen_discovery,
                 disable_tracking=args.disable_tracking,
                 disable_polygon_expansion=args.disable_polygon_expansion,
                 detection_config=detection_config,
@@ -147,6 +164,8 @@ def main():
             last_processed_timestamp = latest_common
             io_manager.write_info(f"✓ Output saved to {generated_path}")
                 
+        except StormProbDependencyError:
+            raise
         except Exception as e:
             io_manager.write_error(f"Pipeline failed for {latest_common}: {e}")
             io_manager.write_warning(

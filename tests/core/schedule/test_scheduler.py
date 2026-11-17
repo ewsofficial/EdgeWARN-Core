@@ -90,7 +90,7 @@ def test_source_seconds_do_not_shift_scheduler_cycle(
     monkeypatch.setattr(scheduler_module, "FileFinder", Finder)
     monkeypatch.setattr(scheduler_module, "parse_mrms_bucket_path", lambda *_: "MRMS/")
     actual = update_checker._get_modifier_times(
-        ("CONUS", "MergedReflectivityQCComposite", "unused"),
+        ("CONUS", "MergedReflectivityQCComposite_00.50", "unused"),
         cursor.replace(minute=44),
         last_processed=cursor,
         s3_bucket="unused",

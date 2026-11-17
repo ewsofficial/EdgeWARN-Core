@@ -15,9 +15,9 @@ a silently-unenforced constraint, so a schema author who reaches for
 ``oneOf``/``$ref``/``format`` finds out immediately instead of shipping a
 schema that looks stricter than it is.
 
-``jsonschema`` is deliberately not used, which is a departure from
-``plans/source-configuration-extraction-plan.md`` as originally written; that
-document has been corrected. Three reasons, in order of weight. ``src/config/
+``jsonschema`` is deliberately not used, which is a departure from the retired
+``plans/source-configuration-extraction-plan.md`` as originally written
+(``git show 93bbcc0e^:plans/source-configuration-extraction-plan.md``). Three reasons, in order of weight. ``src/config/
 loader.js`` implements the same walker over the same keyword set, and
 cross-language parity is a requirement -- adopting a full validator here alone
 would mean Python quietly accepting ``$ref``/``oneOf``/``format`` schemas that
@@ -66,11 +66,7 @@ CONFIG_NAMES: tuple[str, ...] = (
     "ingest",
     "nexrad",
     "synoptic_rap",
-    "wpc",
-    "metar",
     "nws",
-    "ewmrs_render",
-    "ewmrs_pipeline",
     "api",
     "kalman",
 )
@@ -129,6 +125,11 @@ def _find_config_root_by_walking_up() -> Path:
         "could not locate a config/ directory containing runtime.yaml by "
         f"walking up from {here} or at {installed_config}",
     )
+
+
+def release_config_root() -> Path:
+    """Locate shipped schemas for offline migration, ignoring operator overlays."""
+    return _find_config_root_by_walking_up()
 
 
 def _resolve_given_root(raw: str | os.PathLike[str], invalid_message: str) -> Path:
@@ -417,6 +418,10 @@ def _walk(schema: dict[str, Any], value: Any, path: list[Any], errors: list[tupl
 
 
 def _validate(name: str, document: dict[str, Any], schema_path: Path) -> None:
+    from common.config.mrms_validation import MIGRATION_HINT, validate_mrms_document
+
+    if name == "ingest" and document.get("schema_version") == 2:
+        schema_path = schema_path.with_name("ingest.v2.schema.json")
     if not schema_path.is_file():
         raise ConfigError(str(schema_path), None, "schema file not found")
 
@@ -429,7 +434,13 @@ def _validate(name: str, document: dict[str, Any], schema_path: Path) -> None:
     _walk(schema, document, [], errors)
     if errors:
         first_path, first_message = min(errors, key=lambda e: (len(e[0]), [str(p) for p in e[0]]))
+        if name == "ingest":
+            first_message += " " + MIGRATION_HINT
         raise ConfigError(f"{name}.yaml", _dotted_path(first_path) or None, first_message)
+    try:
+        validate_mrms_document(name, document)
+    except ValueError as exc:
+        raise ConfigError(f"{name}.yaml", None, str(exc)) from exc
 
 
 def validate_document(
@@ -460,7 +471,17 @@ def reset_cache() -> None:
 
 def validate_all_configs(*, config_dir: str | os.PathLike[str] | None = None) -> tuple[Any, ...]:
     """Validate and cache every catalog before application startup side effects."""
-    return tuple(load_config(name, config_dir=config_dir) for name in CONFIG_NAMES)
+    documents = tuple(load_config(name, config_dir=config_dir) for name in CONFIG_NAMES)
+    validate_catalog_invariants(config_dir=config_dir)
+    return documents
+
+
+def validate_catalog_invariants(*, config_dir: str | os.PathLike[str] | None = None) -> None:
+    """Cross-file rules a single document schema cannot express.
+
+    ``scheduler.s3_lookback_hours`` is independent of unpinned raw-input
+    retention; no cross-file rule currently applies.
+    """
 
 
 def load_config(name: str, *, config_dir: str | os.PathLike[str] | None = None) -> Any:

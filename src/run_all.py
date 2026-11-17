@@ -3,7 +3,7 @@
 A thin subprocess supervisor only. It starts the three direct services with
 ``subprocess.Popen`` using explicit argument lists and the current Python
 executable, forwards SIGINT/SIGTERM, and exits nonzero if a started child
-exits unexpectedly.
+exits. One child exiting does not stop its siblings.
 
 It performs no ingest, scientific work, or rendering; imports no pipeline
 module; creates no ``multiprocessing.Manager``, queues, readiness events,
@@ -14,7 +14,7 @@ started directly.
 
 Usage:
 
-    python src/run_all.py [--services edgewarn,ewmrs,nexrad] [flags...]
+    python src/run_all.py [--services ingest,edgewarn,nexrad] [flags...]
 
 Every flag the launcher accepts is routed only to the services that own it;
 unset flags are simply not forwarded, so each child keeps resolving its own
@@ -34,8 +34,8 @@ from util.runtime.process_identity import set_parent_death_signal
 
 
 SERVICE_SCRIPTS = {
+    "ingest": "run_ingest.py",
     "edgewarn": "run_edgewarn.py",
-    "ewmrs": "run_ewmrs.py",
     "nexrad": "run_nexrad.py",
 }
 
@@ -44,19 +44,21 @@ SERVICE_SCRIPTS = {
 #: for forced cleanup, child reaping, log draining, and entrypoint teardown.
 STOP_GRACE_SECONDS = 20.0
 
-# Flag routing (plans/realtime-runner-decomposition-plan.md, CLI contract):
+# Flag routing (CLI contract from the retired
+# plans/realtime-runner-decomposition-plan.md; see 93bbcc0e^):
 # each entry maps a launcher flag to the services that own it.
 _ROUTING = {
     "--lat_limits": ("edgewarn",),
     "--lon_limits": ("edgewarn",),
-    "--profile": ("edgewarn", "ewmrs", "nexrad"),
-    "--disable-ctam": ("edgewarn",),
+    "--profile": ("ingest", "edgewarn", "nexrad"),
+    # Dependency-shared: they decide whether StormProb sources gate integration.
+    "--disable-ctam": ("ingest", "edgewarn"),
+    "--disable-stormprob": ("ingest", "edgewarn"),
+    "--disable-ctam-modules": ("edgewarn",),
     "--disable-tracking": ("edgewarn",),
     "--disable-polygon-expansion": ("edgewarn",),
-    "--disable-goes": ("edgewarn", "ewmrs"),
-    "--disable-metar": ("ewmrs",),
-    "--disable-nws": ("ewmrs",),
-    "--disable-wpc": ("ewmrs",),
+    "--disable-glm": ("ingest", "edgewarn"),
+    "--disable-nws": ("ingest",),
     "--refl-threshold": ("edgewarn",),
     "--min-seed-percentage": ("edgewarn",),
     "--drop-offset": ("edgewarn",),
@@ -69,17 +71,13 @@ _LIST_FLAGS = {"--lat_limits", "--lon_limits"}
 def resolve_services(args, requested):
     """Apply environment/YAML topology settings to requested services."""
     run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
-    omit_ewmrs = bool(overlay.resolve(
-        args.disable_ewmrs, env_names=["EDGEWARN_DISABLE_EWMRS"],
-        yaml_value=run_cfg["disable_ewmrs"], key="run.disable_ewmrs",
-    ))
     omit_nexrad = bool(overlay.resolve(
         args.disable_nexrad, env_names=["EDGEWARN_DISABLE_NEXRAD"],
         yaml_value=run_cfg["disable_nexrad"], key="run.disable_nexrad",
     ))
     services = list(requested)
-    if omit_ewmrs:
-        services = [name for name in services if name != "ewmrs"]
+    if len(services) != len(set(services)):
+        raise ValueError("duplicate services are not allowed")
     if omit_nexrad:
         services = [name for name in services if name != "nexrad"]
     args.mrms_core_only = bool(overlay.resolve(
@@ -87,10 +85,52 @@ def resolve_services(args, requested):
         key="run.mrms_core_only",
     ))
     if args.mrms_core_only:
-        services = [name for name in services if name == "edgewarn"]
+        services = [name for name in services if name in {"ingest", "edgewarn"}]
     if not services:
         raise ValueError("service selection resolved to an empty set")
     return services
+
+
+def preflight_topology(args, services, service_argv=None):
+    """Check producer ownership and align roots/dependency flags before spawning.
+
+    Worker-scoped roots and GLM options propagate to the topology. Conflicting
+    explicit values fail. The shared config root and dependency options keep
+    producer/consumer fingerprints consistent without importing scientific code.
+    """
+    from pathlib import Path
+    from util.cli import build_service_parser
+
+    if len(services) != len(set(services)):
+        raise ValueError("duplicate services are not allowed")
+    if {"edgewarn"}.intersection(services) and "ingest" not in services:
+        raise ValueError("supervised Core requires ingest in --services; "
+                         "use direct consumer commands for an external producer")
+    runtime = config_loader.load_config("runtime", config_dir=args.config_dir)
+    if "ingest" in services and not overlay.resolve(
+        None, env_names=["EDGEWARN_HANDOFF_ENABLED"],
+        yaml_value=runtime["handoff"]["enabled"], key="handoff.enabled",
+    ):
+        raise ValueError("independent ingest requires handoff.enabled=true")
+    parsed = {name: build_service_parser(name, add_help=False).parse_args(argv)
+              for name, argv in (service_argv or {}).items()}
+    roots = {str(Path(value.base_dir).expanduser().resolve())
+             for value in parsed.values() if value.base_dir is not None}
+    if len(roots) > 1:
+        raise ValueError("conflicting worker base directories; all workers must share one root")
+    if roots:
+        args.base_dir = roots.pop()
+    participants = {"ingest", "edgewarn"}.intersection(services)
+    for attribute in ("disable_glm", "disable_ctam", "disable_stormprob"):
+        choices = {getattr(value, attribute) for name, value in parsed.items()
+                   if name in participants and getattr(value, attribute, None) is not None}
+        if getattr(args, attribute, None) is not None:
+            choices.add(getattr(args, attribute))
+        if len(choices) > 1:
+            flag = "--" + attribute.replace("_", "-")
+            raise ValueError(f"conflicting {flag} options change the dependency fingerprint")
+        if choices:
+            setattr(args, attribute, choices.pop())
 
 
 def _parse_args(argv=None):
@@ -109,9 +149,9 @@ def _parse_args(argv=None):
     parser.add_argument("--lat_limits", nargs=2, type=float, default=None)
     parser.add_argument("--lon_limits", nargs=2, type=float, default=None)
     for flag in (
-        "disable-ctam", "disable-tracking", "disable-polygon-expansion",
-        "disable-goes", "disable-metar", "disable-nws", "disable-wpc",
-        "disable-ewmrs", "disable-nexrad",
+        "disable-ctam", "disable-stormprob", "disable-ctam-modules", "disable-tracking", "disable-polygon-expansion",
+        "disable-glm", "disable-nws",
+        "disable-nexrad",
     ):
         parser.add_argument(f"--{flag}", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--refl-threshold", type=float, default=None)
@@ -174,7 +214,7 @@ def build_service_commands(args, services, src_root, *, service_argv=None):
         for flag, owners in _ROUTING.items():
             if service not in owners:
                 continue
-            value = getattr(args, flag.lstrip("-").replace("-", "_"))
+            value = getattr(args, flag.lstrip("-").replace("-", "_"), None)
             if value is None:
                 continue
             if value is True:
@@ -196,17 +236,22 @@ def build_service_commands(args, services, src_root, *, service_argv=None):
     return commands
 
 
-def supervise(commands, *, src_root, stop_event=None):
+def supervise(commands, *, src_root, stop_event=None, restart_policy=None):
     """Start every command, forward signals, and wait; returns an exit code.
 
-    A child exiting unexpectedly stops the launcher with a nonzero code after
-    terminating the remaining children. A signal-driven shutdown exits zero
+    A failed child's process group is reaped before a bounded-backoff restart.
+    Siblings continue running. Exhausted restart bursts enter a cooldown while
+    siblings are alive; if every service stops, the launcher exits nonzero. A signal-driven shutdown
+    exits zero
     when every service leader reports clean termination; bounded escalation of
     a leftover descendant is successful containment, not a service failure.
     """
     if stop_event is None:
         stop_event = threading.Event()
 
+    restart_policy = restart_policy if restart_policy is not None else config_loader.load_config("runtime")["supervisor"]
+    restart_times = {service: [] for service in commands}
+    restart_due = {}
     previous_handlers = {}
     original_int = signal.getsignal(signal.SIGINT)
 
@@ -224,25 +269,27 @@ def supervise(commands, *, src_root, stop_event=None):
 
     def _terminate_children(force=False):
         for proc in processes.values():
-            signum = signal.SIGKILL if force else signal.SIGTERM
-            try:
-                if os.name == "posix":
-                    # Every service is a session/process-group leader. Signal
-                    # the group even if that leader has already exited: CTAM
-                    # modules and other descendants may still be running.
-                    os.killpg(proc.pid, signum)
-                elif proc.poll() is None:
+            _signal_tree(proc, signal.SIGKILL if force else signal.SIGTERM)
+
+    def _signal_tree(proc, signum):
+        try:
+            if os.name == "posix":
+                # Every service is a session/process-group leader. Signal
+                # the group even if that leader has already exited: CTAM
+                # modules and other descendants may still be running.
+                os.killpg(proc.pid, signum)
+            elif proc.poll() is None:
+                proc.send_signal(signum)
+        except ProcessLookupError:
+            # Test doubles and a concurrently reaped group can have no
+            # process group; retain direct-child behavior when possible.
+            if proc.poll() is None:
+                try:
                     proc.send_signal(signum)
-            except ProcessLookupError:
-                # Test doubles and a concurrently reaped group can have no
-                # process group; retain direct-child behavior when possible.
-                if proc.poll() is None:
-                    try:
-                        proc.send_signal(signum)
-                    except OSError:
-                        pass
-            except OSError:
-                pass
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     def _tree_is_alive(proc):
         # Reap an exited leader before probing its group. Otherwise the leader
@@ -305,8 +352,16 @@ def supervise(commands, *, src_root, stop_event=None):
                 break
         print(f"[Launcher] Started: {', '.join(f'{s} (pid {p.pid})' for s, p in processes.items())}")
 
+        # A service that exits is reported and its orphaned descendants are
+        # reaped, but its siblings keep running: the services coordinate only
+        # through durable records, so NEXRAD stay useful without
+        # Core. The launcher stops once every service has exited.
+        exited: set[str] = set()
+        orphan_deadlines: dict[str, float] = {}
         while not stop_event.is_set():
             for service, proc in processes.items():
+                if service in exited:
+                    continue
                 code = proc.poll()
                 if code is None:
                     continue
@@ -317,12 +372,48 @@ def supervise(commands, *, src_root, stop_event=None):
                 )
                 print(
                     f"[Launcher] Service '{service}' exited {detail}; "
-                    "stopping the remaining children"
+                    "the remaining services keep running"
                 )
                 exit_code = 1
-                stop_event.set()
-                break
-            if stop_event.is_set():
+                exited.add(service)
+                now = time.monotonic()
+                times = restart_times[service]
+                times[:] = [stamp for stamp in times if now - stamp < restart_policy["restart_window_seconds"]]
+                if len(times) < restart_policy["max_restarts"]:
+                    times.append(now)
+                    delay = min(restart_policy["max_backoff_seconds"],
+                                restart_policy["base_backoff_seconds"] * 2 ** (len(times) - 1))
+                    restart_due[service] = now + delay
+                    print(f"[Launcher] Restarting '{service}' after {delay:g}s")
+                elif restart_policy["max_restarts"] > 0 and any(
+                        other != service and child.poll() is None for other, child in processes.items()):
+                    restart_due[service] = now + restart_policy["restart_window_seconds"]
+                    print(f"[Launcher] '{service}' restart burst exhausted; cooling down")
+                _signal_tree(proc, signal.SIGTERM)
+                orphan_deadlines[service] = time.monotonic() + STOP_GRACE_SECONDS
+            for service, deadline in list(orphan_deadlines.items()):
+                proc = processes[service]
+                if not _tree_is_alive(proc):
+                    del orphan_deadlines[service]
+                elif time.monotonic() >= deadline:
+                    print(f"[Launcher] Escalating to SIGKILL for orphans of '{service}'")
+                    _signal_tree(proc, signal.SIGKILL)
+                    del orphan_deadlines[service]
+            for service, due in list(restart_due.items()):
+                if service in orphan_deadlines or time.monotonic() < due:
+                    continue
+                try:
+                    processes[service] = subprocess.Popen(
+                        commands[service], cwd=src_root, start_new_session=True,
+                        preexec_fn=set_parent_death_signal if os.name == "posix" else None)
+                except OSError as exc:
+                    print(f"[Launcher] Restart failed for '{service}': {exc}")
+                    del restart_due[service]
+                    continue
+                exited.discard(service)
+                del restart_due[service]
+            if processes and len(exited) == len(processes) and not restart_due:
+                print("[Launcher] Every service has exited; stopping")
                 break
             time.sleep(0.5)
 
@@ -375,6 +466,28 @@ def supervise(commands, *, src_root, stop_event=None):
 
 def main(argv=None):
     args, services = _parse_args(argv)
+    args.config_dir = str(config_loader.export_config_root(args.config_dir))
+    args.base_dir = str(overlay.resolve_base_dir(
+        args.base_dir, config_loader.load_config("filesystem", config_dir=args.config_dir)
+    ).expanduser().resolve())
+    from util.runtime.mrms_migration import require_completed_migration
+    require_completed_migration(args.config_dir)
+    config_loader.validate_all_configs(config_dir=args.config_dir)
+    preflight_topology(args, services)
+    if "edgewarn" in services:
+        from EdgeWARN.ctam.preflight import check_core_startup
+        from util.ctam_config import resolve_ctam_module_dir
+        run_cfg = config_loader.load_config("runtime", config_dir=args.config_dir)["run"]
+        filesystem = config_loader.load_config("filesystem", config_dir=args.config_dir)
+        check_core_startup(
+            config_dir=args.config_dir,
+            base_dir=overlay.resolve_base_dir(args.base_dir, filesystem),
+            module_root=resolve_ctam_module_dir(config_dir=args.config_dir),
+            disable_ctam=overlay.resolve(args.disable_ctam, yaml_value=run_cfg["disable_ctam"]),
+            disable_ctam_modules=bool(args.disable_ctam_modules),
+            disable_stormprob=overlay.resolve(args.disable_stormprob, yaml_value=run_cfg["disable_stormprob"]),
+            mrms_core_only=args.mrms_core_only,
+        )
     src_root = os.path.dirname(os.path.abspath(__file__))
     commands = build_service_commands(args, services, src_root)
     print(

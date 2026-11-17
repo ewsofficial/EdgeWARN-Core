@@ -50,3 +50,8 @@ def inactive_cell_max_age_minutes() -> int:
     files. Same number today; changing one must not change the other.
     """
     return _api_index()["inactive_cell_max_age_minutes"]
+
+
+def stormprob_inactive_cell_max_age_minutes() -> int:
+    """Age after which realtime cleanup prunes inactive StormProb history."""
+    return _api_index()["stormprob_inactive_cell_max_age_minutes"]

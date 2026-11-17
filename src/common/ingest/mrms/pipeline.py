@@ -59,28 +59,32 @@ async def run_ingestion_pipeline(
             for folder in cleanup_dirs
         ]
 
-    results = await asyncio.gather(*download_tasks)
-    if wait_for_cleanup:
-        await asyncio.gather(*cleanup_tasks)
-    else:
-        for cleanup_task in cleanup_tasks:
-            # Retrieve exceptions so deferred housekeeping cannot produce an
-            # unhandled-task warning after the readiness phase is released.
-            cleanup_task.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
-    return results
+    try:
+        results = await asyncio.gather(*download_tasks)
+        if wait_for_cleanup:
+            await asyncio.gather(*cleanup_tasks)
+        # Noncritical housekeeping is cancelled/joined in finally. Production
+        # raw cleanup defers under the cycle lease and is flushed after workers
+        # finish; no detached asyncio task outlives this acquisition batch.
+        return results
+    finally:
+        for task in (*download_tasks, *cleanup_tasks):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*download_tasks, *cleanup_tasks, return_exceptions=True)
 
 
 def run_with_async_fallback(
     *,
     io_manager,
-    async_runner: Callable[[], Awaitable[None]],
-    sync_fallback: Callable[[], None],
+    async_runner: Callable[[], Awaitable],
+    sync_fallback: Callable,
     failure_prefix: str = "Async downloads failed",
     fallback_message: str = "Falling back to synchronous downloads...",
-) -> None:
+):
     try:
-        asyncio.run(async_runner())
+        return asyncio.run(async_runner())
     except Exception as exc:
         io_manager.write_error(f"{failure_prefix}: {exc}")
         io_manager.write_info(fallback_message)
-        sync_fallback()
+        return sync_fallback()

@@ -1,7 +1,7 @@
 # AGENTS Guide for `src/common/ingest/`
 
 ## Scope
-Shared ingestion implementations for MRMS, NWS, Synoptic/METAR, and WPC inputs.
+Shared ingestion implementations for MRMS, NWS, Synoptic, and NEXRAD inputs.
 
 ## Agent guidance
 - Keep async-first ingest behavior with safe sync/HTTPS fallback.

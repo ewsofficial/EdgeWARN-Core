@@ -11,7 +11,8 @@ server/process startup.
 | StormProb-only | 1 s | not measured | alert cleanup/publication side effects only |
 | One inline external module | 5 s | less than 128 MB `tracemalloc` peak | one in-memory transaction; host publication is not exercised |
 
-`benchmarks/test_ctam_phase7.py` records elapsed time for the StormProb-only and
+The removed `benchmarks/test_ctam_phase7.py`
+(`git show d5c7850c^:benchmarks/test_ctam_phase7.py`) recorded elapsed time for the StormProb-only and
 external-module paths. The disabled path checks the disabled return contract.
 The external test creates an inline synthetic module under `tmp_path`; it does
 not use the tracked fixture or the SDK. The memory assertion uses

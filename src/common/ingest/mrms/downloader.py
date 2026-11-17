@@ -2,12 +2,14 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import fmean
+from types import MappingProxyType
 
 from common.ingest.manifest import StagedInput, staged_input_from_path
 from common.ingest.mrms.config import (
     get_goes_max_entries,
     get_goes_modifiers,
     get_mrms_modifiers,
+    get_registry,
     goes_bucket,
     goes_cleanup_max_age_minutes,
     goes_hour_lookback,
@@ -45,8 +47,9 @@ def _write_netcdf_atomically(dataset, destination: Path) -> None:
     atomically replace the destination only after ``to_netcdf`` succeeds.
     """
     destination = Path(destination)
-    temporary = destination.with_name(f".{destination.name}.part")
-    temporary.unlink(missing_ok=True)
+    # Unique per writer: two concurrent writers of one scan must never share
+    # (and delete or rename) each other's in-progress file.
+    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.part")
     try:
         dataset.to_netcdf(temporary, engine="netcdf4")
         temporary.replace(destination)
@@ -81,6 +84,8 @@ class DownloadBatchResult:
     attempted: tuple[str, ...]
     downloaded: tuple[StagedInput, ...]
     failed: tuple[str, ...]
+    product_results: tuple = ()
+    metrics: tuple = ()
 
     def __post_init__(self):
         invalid = [
@@ -93,6 +98,10 @@ class DownloadBatchResult:
                 "DownloadBatchResult.downloaded requires StagedInput records; "
                 f"received {', '.join(invalid)}"
             )
+
+    @property
+    def results_by_product(self):
+        return MappingProxyType({result.product: result for result in self.product_results})
 
     @property
     def downloaded_products(self) -> tuple[str, ...]:
@@ -306,6 +315,10 @@ async def _cleanup_goes_specs_async(goes_specs, trace_id, max_age_minutes=None):
 
 async def download_all_files_async_internal(dt, max_entries, target_modifiers=None):
     """Internal async function that handles the actual download operations"""
+    registry = get_registry()
+    if registry is not None:
+        from common.ingest.mrms.acquisition import acquire_batch
+        return await acquire_batch(registry, dt, max_entries, target_modifiers, io_manager)
     trace_id = f"INGEST-{uuid.uuid4().hex[:8]}"
     
     # Create shared async S3 client for all operations
@@ -348,6 +361,10 @@ async def download_all_files_async_internal(dt, max_entries, target_modifiers=No
 
 async def download_modifier_async(region, modifier, outdir, dt, max_entries, s3_client, parent_trace_id=None, perf_maps=None):
     """Internal async version of download_modifier using aioboto3 for non-blocking S3 operations"""
+    registry = get_registry()
+    if registry is not None:
+        batch = await download_all_files_async_internal(dt, max_entries, [modifier])
+        return _mrms_modifier_label(modifier), next(iter(batch.downloaded), None)
     # Enforce minute-precision dt
     dt = dt.replace(second=0, microsecond=0)
     
@@ -419,6 +436,10 @@ async def download_modifier_async(region, modifier, outdir, dt, max_entries, s3_
 
 def download_files_sync_fallback(dt, max_entries, target_modifiers=None):
     """Sync fallback for a selected MRMS phase (or all products)."""
+    registry = get_registry()
+    if registry is not None:
+        from common.ingest.mrms.acquisition import acquire_batch_sync
+        return acquire_batch_sync(registry, dt, max_entries, target_modifiers, io_manager)
     # Multithread MRMS downloads
     mrms_modifiers_list = [
         spec for spec in get_mrms_modifiers()
@@ -455,6 +476,10 @@ def download_all_files_sync_fallback(dt, max_entries):
 
 def download_modifier_sync(region, modifier, outdir, dt, max_entries):
     """Internal sync version of download_modifier for fallback"""
+    registry = get_registry()
+    if registry is not None:
+        batch = download_files_sync_fallback(dt, max_entries, [modifier])
+        return _mrms_modifier_label(modifier), next(iter(batch.downloaded), None)
     # Enforce minute-precision dt
     dt = dt.replace(second=0, microsecond=0)
 
@@ -498,7 +523,7 @@ def download_modifier_sync(region, modifier, outdir, dt, max_entries):
 
 # ==================== GOES-19 Download Functions ====================
 
-def download_goes_product(goes_spec, dt, hour_lookback=None, preloaded_files=None):
+def download_goes_product(goes_spec, dt, hour_lookback=None, preloaded_files=None, *, cleanup=True):
     """
     Download a specific GOES-19 product.
 
@@ -586,7 +611,7 @@ def download_goes_product(goes_spec, dt, hour_lookback=None, preloaded_files=Non
                         merged_ds.close()
                         
                         # Delete individual files after successful merge
-                        for f in processed_files:
+                        for f in (processed_files if cleanup else ()):
                             try:
                                 f.unlink()
                             except Exception as del_e:

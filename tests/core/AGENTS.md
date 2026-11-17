@@ -1,7 +1,5 @@
-# AGENTS Guide for `tests/core/`
+# Core test guide
 
-## Purpose
-Python tests for core modules across EdgeWARN, EWMRS, ingest, process, CTAM, and scheduling.
-
-## Agent guidance
-- Prefer placing direct module behavior tests here before adding broader integration coverage.
+Module tests cover Core analysis, acquisition, CTAM, and scheduling. Prefer
+focused behavior tests here before broader integration coverage. Keep fixtures
+small, deterministic, and rooted in temporary directories.

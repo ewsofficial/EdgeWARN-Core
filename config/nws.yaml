@@ -4,8 +4,11 @@ schema_version: 1
 
 # NWS alert ingest. Event filtering affects both alert storage and cell matching.
 nws:
-  # Alert-cache lifetime; lower values refresh more often but increase API traffic.
-  registry_ttl_hours: 2.0
+  # Retention for alerts not seen recently and timestamp snapshots; polling cadence is separate.
+  registry_ttl_hours: 6.0
+
+  # Retention for EdgeWARN-generated alert files and timestamp snapshots (minutes).
+  edgewarn_alert_retention_minutes: 360
 
   # Intentionally ignored events; review before removing entries because volume can rise sharply.
   dropped_events:

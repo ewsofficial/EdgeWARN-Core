@@ -1,19 +1,4 @@
-"""Binary producer/consumer contracts: RAP uint16, EWMRS chunks, NEXRAD fields.
-
-Phase 9 secondary coverage: production Python encoders emit the exact bytes
-the Node API serves (``rapData`` octet-stream, render ``chunk`` float16
-payloads, ``radarField`` gzip fields), but no test generated artifacts with
-the real encoders and validated the wire properties independently. These
-cases encode small synthetic fields with the production functions, then read
-the bytes back with independent decoders (raw ``numpy.frombuffer`` struct
-reads, never the encoder's own loader) and pin shape, dtype, endianness,
-nodata, and the metadata the Node service derives its response headers from.
-
-The companion Jest suite (``tests/api/test_binary_contracts.js``) serves
-fixtures produced by these same encoders through the real repository and
-ancillary stack and asserts headers plus byte passthrough. Together the two
-sides prove the producer and consumer agree without sharing implementation.
-"""
+"""Independent NEXRAD binary producer and API fixture contracts."""
 
 from __future__ import annotations
 
@@ -25,9 +10,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from EWMRS.rap import uint16_pipeline
-from EWMRS.rap.config import uint16_nodata, uint16_valid_max
-from EWMRS.render.tiler import save_float16_chunk
 from NEXRAD import render as nexrad_render
 
 
@@ -108,118 +90,6 @@ def _rap_layer(outdir):
 
 def _rap_message():
     return {"shortName": "CAPE", "typeOfLevel": "surface", "level": 0}
-
-
-class TestRapUint16Contract:
-    def test_scale_maps_endpoints_nodata_and_clipping(self):
-        values = np.array([[0.0, 50.0], [100.0, np.nan], [np.inf, -5.0], [250.0, 25.0]])
-        encoded = uint16_pipeline.scale_to_uint16(values, {"min": 0.0, "max": 100.0})
-        assert encoded.dtype == np.dtype("<u2")
-        assert encoded.shape == values.shape
-        assert int(encoded[0, 0]) == 0
-        assert int(encoded[0, 1]) == round(uint16_valid_max() / 2)
-        assert int(encoded[1, 0]) == uint16_valid_max()
-        assert int(encoded[1, 1]) == uint16_nodata()  # NaN reserves nodata
-        assert int(encoded[2, 0]) == uint16_nodata()  # non-finite reserves nodata
-        assert int(encoded[2, 1]) == 0  # below-min clips to min
-        assert int(encoded[3, 0]) == uint16_valid_max()  # above-max clips to max
-
-    def test_inverted_scale_is_rejected(self):
-        with pytest.raises(ValueError, match="greater than min"):
-            uint16_pipeline.scale_to_uint16(np.ones((2, 2)), {"min": 10.0, "max": 10.0})
-
-    def test_missing_value_masking(self):
-        values = np.array([[-999.0, 20.0]])
-        encoded = uint16_pipeline.scale_to_uint16(
-            values, {"min": 0.0, "max": 100.0}, missing_value=-999.0
-        )
-        assert int(encoded[0, 0]) == uint16_nodata()
-        assert int(encoded[0, 1]) != uint16_nodata()
-
-    def test_written_artifact_decodes_independently(self, tmp_path):
-        layer = _rap_layer(tmp_path / "RAP" / "CAPE")
-        values = np.array(
-            [[0.0, 33.3, 100.0], [np.nan, 50.0, 75.5]], dtype=np.float64
-        )
-        encoded = uint16_pipeline.scale_to_uint16(values, layer["scale"])
-        data_path = tmp_path / "RAP" / "CAPE" / TIMESTAMP / "data.u16"
-        data_path.parent.mkdir(parents=True)
-        data_path.write_bytes(encoded.tobytes(order="C"))
-        metadata = uint16_pipeline._build_metadata(
-            layer=layer,
-            message=_rap_message(),
-            rap_path=tmp_path / "rap_20260317_2000.grib2",
-            timestamp=TIMESTAMP,
-            grid={"ni": 3, "nj": 2, "point_count": 6},
-        )
-        (data_path.parent / "metadata.json").write_text(json.dumps(metadata))
-
-        # Independent read: raw little-endian uint16 shaped by the metadata.
-        raw = (data_path.parent / "data.u16").read_bytes()
-        assert len(raw) == 6 * 2
-        grid = np.frombuffer(raw, dtype="<u2").reshape(metadata["shape"])
-        assert metadata["shape"] == [2, 3]
-        assert metadata["dtype"] == "uint16"
-        assert metadata["byte_order"] == "little_endian"
-        assert metadata["missing_value"] == uint16_nodata()
-        assert grid[0, 0] == 0 and grid[0, 2] == uint16_valid_max()
-        assert grid[1, 0] == uint16_nodata()
-
-        # Invert the scale and recover the field within half a quantum.
-        quantum = (layer["scale"]["max"] - layer["scale"]["min"]) / uint16_valid_max()
-        valid = grid != uint16_nodata()
-        recovered = grid[valid].astype(np.float64) / uint16_valid_max() * 100.0
-        assert recovered == pytest.approx(values[valid], abs=quantum)
-
-    def test_metadata_carries_every_field_node_headers_need(self, tmp_path):
-        layer = _rap_layer(tmp_path / "RAP" / "CAPE")
-        metadata = uint16_pipeline._build_metadata(
-            layer=layer,
-            message=_rap_message(),
-            rap_path=tmp_path / "rap.grib2",
-            timestamp=TIMESTAMP,
-            grid={"ni": 3, "nj": 2, "point_count": 6},
-        )
-        # ancillary.js rapData derives X-Grid-Ni/Nj, X-Scale-Min/Max, X-Units,
-        # X-Data-Type, X-Byte-Order, X-Missing-Value from exactly these keys.
-        assert metadata["grid"]["ni"] == 3 and metadata["grid"]["nj"] == 2
-        assert metadata["scale"] == {"min": 0.0, "max": 100.0}
-        assert metadata["units"] == "J/kg"
-        assert metadata["shape"] == [metadata["grid"]["nj"], metadata["grid"]["ni"]]
-
-
-class TestEwmrsChunkContract:
-    def test_float16_chunk_is_headerless_tight_payload(self, tmp_path):
-        values = np.array([[1.0, np.nan], [3.5, -0.0]], dtype=np.float16)
-        chunk_path = tmp_path / "chunk_0_0.f16.gz"
-        save_float16_chunk(np.ascontiguousarray(values), chunk_path)
-
-        payload = gzip.decompress(chunk_path.read_bytes())
-        assert len(payload) == values.size * 2  # no header, 2 bytes per component
-        assert np.frombuffer(payload, dtype="<f2").shape == (4,)
-
-    def test_chunk_values_round_trip_including_nan_nodata(self, tmp_path):
-        values = np.array([[10.25, np.nan, 0.0]], dtype=np.float16)
-        chunk_path = tmp_path / "chunk_1_0.f16.gz"
-        save_float16_chunk(np.ascontiguousarray(values), chunk_path)
-
-        payload = gzip.decompress(chunk_path.read_bytes())
-        decoded = np.frombuffer(payload, dtype=np.float16).reshape(values.shape)
-        assert decoded[0, 0] == pytest.approx(10.25)
-        assert np.isnan(decoded[0, 1])  # NaN is the chunk nodata sentinel
-        assert decoded[0, 2] == pytest.approx(0.0)
-
-    @pytest.mark.parametrize(
-        "bad",
-        [
-            np.ones((2, 2), dtype=np.float32),  # wrong dtype
-            np.ones((2, 2, 2), dtype=np.float16),  # bad channel count
-            np.ones(4, dtype=np.float16),  # wrong dimensionality
-        ],
-    )
-    def test_chunk_encoder_rejects_non_conforming_arrays(self, tmp_path, bad):
-        with pytest.raises(ValueError):
-            save_float16_chunk(bad, tmp_path / "chunk_0_0.f16.gz")
 
 
 class TestNexradFieldContract:

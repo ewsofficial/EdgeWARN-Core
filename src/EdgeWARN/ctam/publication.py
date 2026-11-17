@@ -56,9 +56,14 @@ class CTAMPublicationCoordinator:
         recovered = []
         quarantine = self.journal_dir / "quarantine"; quarantine.mkdir(parents=True, exist_ok=True)
         for journal_path in self.journal_dir.glob("*.json"):
-            journal = json.loads(journal_path.read_text(encoding="utf-8"))
-            if journal.get("state") == "committed": continue
             try:
+                journal = json.loads(journal_path.read_text(encoding="utf-8"))
+                if journal.get("state") == "committed":
+                    import time
+                    from EdgeWARN.api_integration.config import inactive_cell_max_age_minutes
+                    if time.time() - journal_path.stat().st_mtime > inactive_cell_max_age_minutes() * 60:
+                        journal_path.unlink(missing_ok=True)
+                    continue
                 _require_db_cycle(journal.get("db_dependency"))
                 for item in journal["targets"]:
                     target, temporary = Path(item["target"]), Path(item["temporary"])
@@ -69,7 +74,10 @@ class CTAMPublicationCoordinator:
                     json.loads(target.read_text(encoding="utf-8"))
                 journal["state"] = "committed"; atomic_write_json(journal_path, journal)
                 recovered.append(journal_path)
-            except Exception:
+            except Exception as exc:
+                cause = exc.__cause__ or exc
+                if isinstance(cause, sqlite3.OperationalError) and any(word in str(cause).lower() for word in ("locked", "busy")):
+                    continue
                 self.replace(str(journal_path), str(quarantine / journal_path.name))
         return recovered
 
