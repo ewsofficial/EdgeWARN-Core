@@ -5,7 +5,7 @@ Framework-level CTAM tests.
 
 ## Agent guidance
 - Use this area for registry, engine, and interface behavior rather than module-specific math details.
-- `baseline.py` is the Phase 0 snapshot harness for `plans/modular-ctam-internal-api-plan.md`.
+- `baseline.py` is the Phase 0 snapshot harness for the retired `plans/modular-ctam-internal-api-plan.md`.
   Committed snapshots live in `tests/ctam_baseline/`. Regenerate with
   `UPDATE_CTAM_BASELINE=1 python -m pytest tests/core/ctam`, and only when the
   source change was an intentional behavior change -- an unexplained diff is the

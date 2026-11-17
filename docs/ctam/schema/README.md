@@ -1,7 +1,8 @@
 # CTAM internal API v1 schemas
 
-Contract schemas for `/internal/ctam/v1`, checked in by Phase 0 of
-`plans/modular-ctam-internal-api-plan.md`. The schemas remain checked-in
+Contract schemas for `/internal/ctam/v1`, checked in by Phase 0 of the
+retired CTAM internal API plan
+(`git show 93bbcc0e^:plans/modular-ctam-internal-api-plan.md`). The schemas remain checked-in
 contract artifacts rather than runtime-loaded configuration, but CTAM runtime
 code now implements and mirrors their v1 contract. They provide a fixed target
 for the OpenAPI examples and contract tests.
@@ -89,7 +90,8 @@ therefore accepts a value with a trailing newline: `re.search` of
 Identity and format patterns in this directory end in `\Z` for that reason;
 intentional non-empty-string checks use the unanchored `\S` pattern. This differs from
 the config schemas in `config/schema/`, which use `$` and have the same gap;
-that is recorded in `plans/modular-ctam-phase0-findings.md` rather than changed
+that is recorded in the retired Phase 0 findings
+(`git show 93bbcc0e^:plans/modular-ctam-phase0-findings.md`) rather than changed
 here, because Phase 0 does not modify existing behavior.
 
 ## What these schemas cannot enforce

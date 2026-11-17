@@ -1,6 +1,6 @@
 """Phase 0 characterization of cell-history semantics.
 
-Phase 3 of ``plans/modular-ctam-internal-api-plan.md`` moves history publication
+Phase 3 of the retired ``plans/modular-ctam-internal-api-plan.md`` moves history publication
 under a single coordinator and requires two current behaviors to survive:
 "inactive cells are not refreshed and the same timestamp replaces the last entry
 rather than duplicating it". Both are frozen here.

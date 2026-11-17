@@ -53,7 +53,7 @@ def atomic_output_path(destination: str | Path, *, suffix: str = ".part") -> Ite
         # requires a handle opened for writing and returns EBADF on a read-only
         # descriptor.  Read-only is the intuitive mode for a file you only want
         # to flush, and choosing it made every atomic_write_json call fail on
-        # Windows -- see plans/modular-ctam-phase0-findings.md finding 1.  This
+        # Windows -- see the retired plans/modular-ctam-phase0-findings.md finding 1.  This
         # re-open is redundant for atomic_write_bytes, which fsyncs its own
         # writable handle below, but it is the only fsync a caller that drives
         # the context manager directly gets, so it stays.

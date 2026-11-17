@@ -2,8 +2,8 @@
 
 Phase 1 originally characterized the v1 runtime. It does not enable v2, change
 acquisition or readiness, move directories, or enforce new CTAM/StormProb gates.
-The implementation sequence is in the
-[implementation plan](../../plans/configurable-mrms-ingestion-plan.md#12-implementation-phases).
+The implementation sequence was in the retired implementation plan, section 12
+(`git show d5c7850c^:plans/configurable-mrms-ingestion-plan.md`).
 
 ## Baseline and intended contract
 

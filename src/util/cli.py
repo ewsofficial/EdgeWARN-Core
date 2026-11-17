@@ -1,6 +1,6 @@
 """Reusable, ownership-scoped CLI flag builders for the realtime entry points.
 
-Decomposition Phase 1 (plans/realtime-runner-decomposition-plan.md): the old
+Decomposition Phase 1 (retired plans/realtime-runner-decomposition-plan.md): the old
 monolithic runner owned every flag in one parser, so no service could expose
 only the flags it honors. These builders compose that same flag set from
 per-service groups so each future entry point (primary, ingest, NEXRAD, and the

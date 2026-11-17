@@ -427,7 +427,7 @@ def test_scheduler_lookback_and_perf_gate_have_no_literals():
 def test_scheduler_check_pools_stay_uncapped_with_no_catalog_key():
     """REVERTED (Phase 5): the two check pools are excluded from extraction.
 
-    `plans/source-configuration-extraction-plan.md:622` excludes both bare
+    retired `plans/source-configuration-extraction-plan.md:622` excludes both bare
     `ThreadPoolExecutor()` calls -- they have no cap today, so adding one is a
     retune, not an extraction. A `check_max_workers` key was added anyway and then
     reverted; this test is what stops it coming back a third time.

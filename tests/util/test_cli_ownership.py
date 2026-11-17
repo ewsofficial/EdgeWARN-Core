@@ -1,7 +1,7 @@
 """CLI flag-ownership contracts (decomposition Phase 0/1).
 
 Each service must expose only the flags it honors, per the ownership table in
-plans/realtime-runner-decomposition-plan.md. The builders in ``util.cli`` are
+retired plans/realtime-runner-decomposition-plan.md. The builders in ``util.cli`` are
 the single source of those flag definitions; these tests pin which groups a
 service's parser accepts and that unowned flags are rejected exactly.
 """

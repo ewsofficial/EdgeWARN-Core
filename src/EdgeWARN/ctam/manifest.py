@@ -755,7 +755,8 @@ def validate_write_pointer(
     Pointer has no traversal semantics, so a ``..`` segment is a literal key
     name. Normalizing it as a path is what would turn
     ``/modules/Foo/../id`` into a write to ``/id``. See
-    ``plans/modular-ctam-phase0-findings.md`` section 10.
+    the retired Phase 0 findings, section 10
+    (``git show 93bbcc0e^:plans/modular-ctam-phase0-findings.md``).
     """
     prefix = POINTER_PREFIXES[resource]
     if not pointer.startswith(prefix + "/"):

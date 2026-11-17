@@ -1,7 +1,7 @@
 """Phase 7 end-to-end coverage for CTAM public module routes.
 
 Covers the declaration, transaction, loopback, SDK, and runner edges listed
-in plans/ctam-public-module-routes-plan.md section 7 that are not already
+in the retired plans/ctam-public-module-routes-plan.md section 7 that are not already
 pinned by the focused test files.
 """
 from __future__ import annotations

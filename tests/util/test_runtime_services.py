@@ -3,7 +3,7 @@
 Covers the heartbeat schema, atomic publication, state classification
 (disabled / unsupported-schema / stale / active / degraded), and the
 route-family-to-service dependency map recorded in
-plans/realtime-runner-decomposition-plan.md.
+retired plans/realtime-runner-decomposition-plan.md.
 """
 
 from datetime import datetime, timedelta, timezone

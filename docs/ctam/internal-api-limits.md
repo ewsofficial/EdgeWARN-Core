@@ -1,7 +1,12 @@
 # CTAM Internal API Limits
 
-Target bounds for the `/internal/ctam/v1` internal API described in
-`plans/modular-ctam-internal-api-plan.md`. These values are not all enforced by
+Target bounds for the `/internal/ctam/v1` internal API described in the
+retired CTAM internal API plan.
+
+Some citations below point to plans and benchmarks that are no longer in the
+tree. Recover them from history: plans with
+`git show 93bbcc0e^:plans/<file>`, benchmarks with
+`git show d5c7850c^:benchmarks/<file>`. These values are not all enforced by
 the current runtime; rows below distinguish implemented behavior from planned
 limits so operators do not mistake the plan for a security boundary.
 
@@ -96,7 +101,7 @@ per-module timeouts.
 Read the 2-second figure with care. The former in-package registry did not
 provide a stable module API, so StormProb is now the only bundled built-in and
 all optional modules use manifests. The stage-level benchmark reads
-`data.get("cells", [])` at `benchmarks/test_performance.py:381`, but the
+`data.get("cells", [])` at the removed `benchmarks/test_performance.py:381`, but the
 snapshot envelope key is `features`
 (`src/EdgeWARN/process/detect/tools/save.py:33`), so the fixture always returns
 an empty list and the test always skips. The 2-second budget is recorded intent,
@@ -123,7 +128,7 @@ existing schema-level lower bound on a worker timeout in the repository.
 The maximum of 30 seconds is the repository's standing outbound timeout: 30
 seconds for bounded upstream acquisition, and
 `request_timeout_ms: 30000` at `config/api.yaml:10`. It also matches the plan's
-own manifest example (`plans/modular-ctam-internal-api-plan.md:273`).
+own manifest example (retired `plans/modular-ctam-internal-api-plan.md:273`).
 
 The default of 10 seconds when a manifest omits `timeout_seconds` comes from
 `config/ingest.yaml:72`, `sync_timeout_seconds: 10`.
@@ -162,8 +167,8 @@ snapshot to.
 
 The largest storm-cell count configured anywhere in the repository is 200, in
 the "Large MRMS-like grid" benchmark case at
-`benchmarks/benchmark_grid_index.py:186`; the other cases are 50 and 100,
-and `benchmarks/benchmark_lazy_loading.py:183` defaults to 100. Taking 200
+the removed `benchmarks/benchmark_grid_index.py:186`; the other cases are 50 and 100,
+and the removed `benchmarks/benchmark_lazy_loading.py:183` defaults to 100. Taking 200
 as the worst-case snapshot width, 8388608 / 200 gives 41943 bytes per feature for
 the entire entry, including everything detection and integration already wrote.
 
@@ -250,11 +255,12 @@ raise this bound; it must not quietly clamp StormProb.
 ### Streamed file size
 
 256 MiB is derived from the only documented statement of real MRMS field size in
-the repository: `benchmarks/benchmark_lazy_loading.py:114-117` records
+the repository's history: the removed
+`benchmarks/benchmark_lazy_loading.py:114-117` records
 MRMS grids as roughly 3500 by 7000 points with a "File size: ~100-200MB per
 uncompressed field", and MRMS files are stored decompressed locally
 (`config/ingest.yaml:18-22` sizes the local gzip expansion). 256 MiB covers the
-200 MB upper end with headroom. `benchmarks/test_performance.py:128`
+200 MB upper end with headroom. The removed `benchmarks/test_performance.py:128`
 records a larger figure, roughly 784 MB, but that is the decoded float64 array
 in memory rather than the file on disk, so it does not bound a streamed read.
 
@@ -283,7 +289,7 @@ Three of the plan's stated values or assumptions do not survive contact with the
 repository. Each needs a decision before the phase that depends on it.
 
 1. **`timeout_seconds = 30` in the manifest example**
-   (`plans/modular-ctam-internal-api-plan.md:273`) is 15 times the current CTAM
+   (retired `plans/modular-ctam-internal-api-plan.md:273`) is 15 times the current CTAM
    stage budget of 2 seconds and equal to the whole-integration budget of 30
    seconds. It is accepted here as the maximum, but it cannot be the example
    value in the manifest reference Phase 1 writes
@@ -291,7 +297,7 @@ repository. Each needs a decision before the phase that depends on it.
    documenting that one such module consumes the entire external budget. The
    example should use the 10-second default.
 
-2. **`min_history_entries = 2`** (`plans/modular-ctam-internal-api-plan.md:285`)
+2. **`min_history_entries = 2`** (retired `plans/modular-ctam-internal-api-plan.md:285`)
    is a requirement floor, and it is fine. The problem is the paired notion of a
    bounded history window: StormProb reads unbounded history today and nothing
    trims an active cell's history, so a history cap is a StormProb behavior

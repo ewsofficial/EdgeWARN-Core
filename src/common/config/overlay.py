@@ -9,7 +9,7 @@ configuration *value*. The one other environment read in the config layer is
 ``loader.config_root``'s ``EDGEWARN_CONFIG_DIR`` (``loader.py:155``), which selects
 *which catalog to load* and so cannot come from a catalog; it is resolved before any
 key exists and stays outside this precedence chain by necessity.
-``plans/source-configuration-extraction-plan.md`` names
+The retired ``plans/source-configuration-extraction-plan.md`` named
 ``synoptic/config.py``'s ``get_rap_max_age_minutes`` as the reference shape for
 an override -- a named env-var constant, an unset test, and a ``ValueError``
 that re-quotes the raw value -- while also requiring that no domain module parse

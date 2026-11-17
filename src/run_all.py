@@ -44,7 +44,8 @@ SERVICE_SCRIPTS = {
 #: for forced cleanup, child reaping, log draining, and entrypoint teardown.
 STOP_GRACE_SECONDS = 20.0
 
-# Flag routing (plans/realtime-runner-decomposition-plan.md, CLI contract):
+# Flag routing (CLI contract from the retired
+# plans/realtime-runner-decomposition-plan.md; see 93bbcc0e^):
 # each entry maps a launcher flag to the services that own it.
 _ROUTING = {
     "--lat_limits": ("edgewarn",),

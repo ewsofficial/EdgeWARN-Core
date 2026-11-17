@@ -1,6 +1,6 @@
 """Atomic publication regression tests for shared source/state writers.
 
-Phase 0 prerequisite (plans/realtime-runner-decomposition-plan.md): every
+Phase 0 prerequisite (retired plans/realtime-runner-decomposition-plan.md): every
 writer whose final filename is observable by an independent process must
 commit through a sibling temporary file and ``os.replace``. A failed write
 must never leave truncated content visible under the real name.

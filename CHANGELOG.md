@@ -1,7 +1,12 @@
 # Changelog
 
-## [Unreleased] — Retire EWMRS (breaking)
+## [3.1.0] 2026-11-17
 
+3.1.0 is a breaking release. It retires the EWMRS rendering service and its
+accessory products. Read *Breaking: EWMRS retirement* and *Upgrade and rollback*
+before deploying. EWMRS work developed during the 3.1.0 cycle never shipped.
+
+### Breaking: EWMRS retirement
 - Removed the EWMRS service/package, raster chunk and RAP Uint16 production,
   render consumers/outbox/checkpoints, and GOES ABI/METAR/WPC accessories.
   NWS alert fetching is retained and moves to ingest (see below).
@@ -33,8 +38,6 @@
 - The Docker image now downloads NWS zone geometry at build time (the build fails
   without it) and ingest (all deployments) exits at startup when zone assets are
   unavailable unless NWS fetching is disabled. Building requires network access to api.weather.gov.
-- Deleted product-specific tests, fixtures, benchmarks, and plotting scripts;
-  retained Core/GLM/NEXRAD contracts and added retirement regressions.
 
 ### Upgrade and rollback
 
@@ -80,17 +83,8 @@ rm -rf -- "$runtime_root/wpc/surface_analysis" \
   "$runtime_root/state/realtime/ingest/v1/render-plan"
 ```
 
-Historical plans and release notes retain retired names; live code, guides,
+Earlier release notes retain retired names; live code, guides,
 configuration, tests, and packaging contain no references to the retired name.
-
-### Fixed
-
-- Fixed a NEXRAD worker-pool recycle race: a volume that grabbed the pool just
-  before `record_volume_and_maybe_recycle` retired it hit `cannot schedule new
-  futures after shutdown` and logged "worker parse failed". Submission now
-  retries on a fresh pool (at most 3 attempts); other errors are unchanged.
-
-## [3.1.0] 2026-10-05
 
 ### Added
 - Added a configurable MRMS product registry. Composite reflectivity, PrecipFlag,
@@ -99,8 +93,7 @@ configuration, tests, and packaging contain no references to the retired name.
   contract defines the protected products.
 - Added the ingest v2 schema (`config/schema/ingest.v2.schema.json`), selected
   when `ingest.schema_version` is 2, and shipped `ingest.yaml` as schema
-  version 2. Integration statistics and MRMS render layers accept a `product`
-  field that uses the upstream product identity in place of a raw `filepath`.
+  version 2. Integration statistics accept a `product` field that uses the upstream product identity in place of a raw `filepath`.
 - Added `runtime.run.disable_stormprob` and the `--disable-stormprob` /
   `--no-disable-stormprob` flags.
 - Added `edgewarn migrate-mrms` to convert a v1 configuration and its raw MRMS
@@ -122,9 +115,9 @@ configuration, tests, and packaging contain no references to the retired name.
   and a 30-second optional-product deadline) so optional products can no longer
   hold up mandatory callbacks.
 - Added CTAM and StormProb preflight checks at startup, before workers start.
-- Added an effective MRMS registry that Core publishes after preflight. EWMRS
-  requires its identity, contract version, fingerprint, and a fresh heartbeat
-  from the same run before it consumes MRMS inputs.
+- Added an effective MRMS registry descriptor. Readers require the producer's
+  identity, contract version, registry fingerprint, and a fresh heartbeat from
+  the same run before they consume MRMS inputs.
 - Added MRMS registry documentation: `docs/core/configurable-mrms-phase*.md`
   and updates to `docs/core/ingestion.md`, `configuration.md`, and `integration.md`.
 - Added a Docker-first quickstart. The processing image now runs the Node API
@@ -141,18 +134,9 @@ configuration, tests, and packaging contain no references to the retired name.
   overflowed scans explicitly, and no longer holds the input lease for a whole
   cycle. It also stops publishing the legacy render triggers and the old
   producer descriptor.
-- EWMRS now renders each committed input independently from the per-input render
-  outbox. Work is keyed by input ID, layer ID, and render configuration
-  fingerprint, and runs in a persistent bounded render pool. Each layer is
-  acknowledged only after its artifacts and product index are published and
-  validated. Layers fail and retry independently, and RAP conversion can be
-  restricted to a selected layer set.
-- Shared RAP product-index updates are serialized between processes and sorted
-  descending, so a late older completion can never move a product's latest
-  timestamp backward.
 - Realtime MRMS ingest phases are now independent and replayable.
-  Integration and EWMRS references use full upstream product identities, while
-  GUI paths, binary payloads, and API v3 product identities are unchanged.
+  Integration references use full upstream product identities, while API v3
+  product identities are unchanged.
 - Detection and integration read MRMS inputs through validated manifest records
   by family and product, with explicit previous-scan roles and no fallback to
   arbitrary latest files.
@@ -178,6 +162,10 @@ configuration, tests, and packaging contain no references to the retired name.
   has been pruned with 400 so the client can restart the collection.
 
 ### Fixed
+- Fixed a NEXRAD worker-pool recycle race: a volume that grabbed the pool just
+  before `record_volume_and_maybe_recycle` retired it hit `cannot schedule new
+  futures after shutdown` and logged "worker parse failed". Submission now
+  retries on a fresh pool (at most 3 attempts); other errors are unchanged.
 - StormProb pruning is skipped when StormProb or CTAM is disabled.
 - StormProb inference is skipped for predicted-only cells. StormProb records an
   explicit skipped forecast for them, and they no longer fail the whole cycle.
@@ -203,5 +191,8 @@ configuration, tests, and packaging contain no references to the retired name.
 
 ### Testing
 - Added tests for the MRMS registry, the ingest v2 catalog and migration, ingest
-  and Core readiness consumers, EWMRS layer pooling and the RAP Uint16 pipeline,
-  CTAM/StormProb preflight, replay, and release qualification.
+  and Core readiness consumers, CTAM/StormProb preflight, replay, and release
+  qualification.
+- Deleted product-specific tests, fixtures, benchmarks, and plotting scripts for
+  retired features; retained Core/GLM/NEXRAD contracts and added retirement
+  regressions.

@@ -2,8 +2,8 @@
 
 Phase 2 supplies pure definitions for the coordinated v2 release. The shipped
 ingest catalog, live acquisition, filesystem bindings, readiness gates, and
-consumer behavior still use v1. Activation belongs to later phases in
-[the implementation plan](../../plans/configurable-mrms-ingestion-plan.md).
+consumer behavior still use v1. Activation belongs to later phases in the retired implementation plan
+(`git show d5c7850c^:plans/configurable-mrms-ingestion-plan.md`).
 
 ## Interfaces and ownership
 

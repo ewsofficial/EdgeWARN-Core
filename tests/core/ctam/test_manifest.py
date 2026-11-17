@@ -939,7 +939,7 @@ def test_traversal_segment_is_rejected_as_a_literal_key_not_as_a_path(tmp_path):
     ``/id``. So the case the host must get right is the *sibling* form
     ``/features/*/modules/../id``, which names a key ``..`` under ``modules``
     that the caller does not own. It is rejected for not being the owner's key,
-    not for containing dots. See ``plans/modular-ctam-phase0-findings.md``
+    not for containing dots. See the retired ``plans/modular-ctam-phase0-findings.md``
     section 10.
     """
     from EdgeWARN.ctam.manifest import validate_write_pointer

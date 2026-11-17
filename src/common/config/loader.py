@@ -15,9 +15,9 @@ a silently-unenforced constraint, so a schema author who reaches for
 ``oneOf``/``$ref``/``format`` finds out immediately instead of shipping a
 schema that looks stricter than it is.
 
-``jsonschema`` is deliberately not used, which is a departure from
-``plans/source-configuration-extraction-plan.md`` as originally written; that
-document has been corrected. Three reasons, in order of weight. ``src/config/
+``jsonschema`` is deliberately not used, which is a departure from the retired
+``plans/source-configuration-extraction-plan.md`` as originally written
+(``git show 93bbcc0e^:plans/source-configuration-extraction-plan.md``). Three reasons, in order of weight. ``src/config/
 loader.js`` implements the same walker over the same keyword set, and
 cross-language parity is a requirement -- adopting a full validator here alone
 would mean Python quietly accepting ``$ref``/``oneOf``/``format`` schemas that
