@@ -630,11 +630,11 @@ class TestShutdown:
 
 class TestIngestEntryPoint:
     @staticmethod
-    def _launch(tmp_path, **env_overrides):
+    def _launch(tmp_path, *args, **env_overrides):
         root = Path(__file__).resolve().parents[3]
         env = dict(os.environ, EDGEWARN_CONFIG_DIR=str(root / "config"),
                    EDGEWARN_BASE_DIR=str(tmp_path / "runtime"), **env_overrides)
-        return subprocess.run([sys.executable, str(root / "src" / "run_ingest.py")],
+        return subprocess.run([sys.executable, str(root / "src" / "run_ingest.py"), *args],
                               capture_output=True, text=True, env=env, cwd=str(root), timeout=300)
 
     def test_disabled_durable_handoff_is_rejected_before_any_runtime_mutation(self, tmp_path):
@@ -647,7 +647,7 @@ class TestIngestEntryPoint:
         holder = ServiceLock(tmp_path / "runtime", "ingest")
         holder.acquire()
         try:
-            completed = self._launch(tmp_path)
+            completed = self._launch(tmp_path, "--disable-nws")
         finally:
             holder.release()
         assert completed.returncode == 1
