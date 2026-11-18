@@ -416,7 +416,33 @@ def test_model_inputs_long_track_preserves_age_and_30_row_window(tmp_path):
         cell["stormprob"]["observation"] = build_observation_record(cell)
         repo.commit_cycle(f"cycle{index}", when, [cell])
     inputs = repo.model_inputs(101)
-    assert len(inputs["history_sequence"]) == 30
+    assert "history_sequence" not in inputs
+    assert len(inputs["history_mask"]) == 30
     assert all(inputs["history_mask"])
     assert inputs["current"][-2:] == [31 * 300.0, 30.0]
     assert inputs["trajectory_sequence"][-1][-2] == pytest.approx(31 * 5 / 60)
+
+
+def test_partial_stormprob_cell_persists_all_four_leads(tmp_path, monkeypatch):
+    import util.file as fs
+    from EdgeWARN.process.integrate import pipeline
+
+    monkeypatch.setattr(fs, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(fs, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(fs, "CELL_DIR", tmp_path / "data" / "cells")
+    monkeypatch.setattr(fs, "STORMCELL_DIR", tmp_path / "data" / "stormcells")
+    monkeypatch.setattr(pipeline, "_update_api_indexes", lambda *args: None)
+    snapshot = fs.STORMCELL_DIR / "stormcells_20240501-120000.json"
+    cell = _cell()
+    leads = [{"cell_id": "101", "analysis_time": cell["timestamp"], "lead_minutes": lead,
+              "model_version": "stormprob/v2", "status": "ok", "reason": None,
+              "east_km": 1.0, "north_km": 1.0, "polygon": {"type": "Polygon"}}
+             for lead in (15, 30, 45)]
+    leads.append({**leads[0], "lead_minutes": 60, "status": "no-polygon",
+                  "reason": "empty-0.25-contour", "polygon": None})
+    cell["modules"] = {"StormProb": {"status": "partial", "leads": leads}}
+    pipeline._publish_cycle(None, cell["timestamp"], [cell], snapshot, False)
+    with StormProbRepository(tmp_path).reader() as db:
+        rows = db.execute("SELECT lead_minutes,status FROM forecasts "
+                          "WHERE model_version='stormprob/v2' ORDER BY lead_minutes").fetchall()
+    assert [tuple(r) for r in rows] == [(15, "ok"), (30, "ok"), (45, "ok"), (60, "no-polygon")]

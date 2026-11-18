@@ -562,7 +562,7 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
     forecasts = []
     for cell in cells:
         result = (cell.get("modules") or {}).get("StormProb") or {}
-        if result.get("status") in {"success", "error", "skipped"}:
+        if result.get("status") in {"success", "partial", "error", "skipped"}:
             forecasts.extend(result.get("leads", []))
     publication_started = time.perf_counter()
     sqlite_started = time.perf_counter()

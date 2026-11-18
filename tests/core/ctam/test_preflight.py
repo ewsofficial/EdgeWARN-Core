@@ -328,3 +328,30 @@ def test_bad_cell_feature_does_not_block_good_cells(tmp_path):
     preflight.validate_stormprob_cycle(cells, manifest)
     assert all(cell["stormprob"].get("status") != "unavailable" for cell in cells[:2])
     assert cells[2]["stormprob"]["status"] == "unavailable"
+
+
+def _stormprob_asset_issues(monkeypatch, tmp_path, *, corrupt):
+    import shutil
+    from EdgeWARN.stormprob import assets
+
+    directory = tmp_path / 'assets'
+    shutil.copytree(assets.asset_dir(), directory)
+    if corrupt:
+        with (directory / 'stormprob_radial.onnx').open('ab') as handle:
+            handle.write(b'\0')
+    monkeypatch.setattr(assets, 'asset_dir', lambda: directory)
+    monkeypatch.setattr(preflight, '_validate_stormprob_sources', lambda *_: [])
+    try:
+        _preflight(monkeypatch, tmp_path / 'missing', tmp_path / 'runtime', disable_stormprob=False)
+    except preflight.PreflightError as error:
+        return str(error)
+    return ''
+
+
+def test_stormprob_preflight_passes_without_calibrator(monkeypatch, tmp_path):
+    assert 'incompatible' not in _stormprob_asset_issues(monkeypatch, tmp_path, corrupt=False)
+
+
+def test_stormprob_preflight_fails_on_graph_hash_mismatch(monkeypatch, tmp_path):
+    message = _stormprob_asset_issues(monkeypatch, tmp_path, corrupt=True)
+    assert 'radial ONNX graph hash mismatch' in message

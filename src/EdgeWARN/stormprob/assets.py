@@ -1,4 +1,4 @@
-"""Locate the packaged StormProb ONNX graphs and calibrator."""
+"""Locate the packaged StormProb ONNX graphs, manifest, and normalization."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,6 @@ from pathlib import Path
 _REQUIRED_ASSETS = (
     "manifest.json",
     "normalization-stats.json",
-    "isotonic_calibrator.json",
     "stormprob_radial.onnx",
     "stormprob_motion.onnx",
 )

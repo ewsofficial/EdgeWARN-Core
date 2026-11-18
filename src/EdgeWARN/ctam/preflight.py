@@ -294,7 +294,6 @@ def check_core_startup(
                     info = manifest["onnx_export"]["models"][model]
                     if onnx_runtime._hash(asset_root / info["file"]) != info["sha256"]:
                         raise RuntimeError(f"{model} ONNX graph hash mismatch")
-                onnx_runtime.load_calibrator(asset_root, manifest_path())
                 features.load_normalization()
             except (FileNotFoundError, RuntimeError, ValueError, KeyError, OSError) as exc:
                 issues.append(f"WARNING: StormProb assets are incompatible: {exc}")

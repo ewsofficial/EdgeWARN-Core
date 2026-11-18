@@ -6,6 +6,13 @@
 accessory products. Read *Breaking: EWMRS retirement* and *Upgrade and rollback*
 before deploying. EWMRS work developed during the 3.1.0 cycle never shipped.
 
+### Changed: StormProb joint model (`stormprob/v2`)
+- Replaced the radial model and isotonic calibrator with a joint radial/centroid
+  ensemble. Probability is the raw 20-member fraction at the 0.25 threshold; the
+  calibrator asset is no longer shipped. Forecast rows use `stormprob/v2`;
+  leads with an empty contour are persisted as `no-polygon`, including when the
+  module reports `partial`. `stormprob.audit` evaluates `stormprob/v2` rows only.
+
 ### Breaking: EWMRS retirement
 - Removed the EWMRS service/package, raster chunk and RAP Uint16 production,
   render consumers/outbox/checkpoints, and GOES ABI/METAR/WPC accessories.

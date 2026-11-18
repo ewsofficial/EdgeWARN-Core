@@ -20,7 +20,7 @@ ordered float32 vector, the `stormprob-input/v1` schema and order checksum, raw
 named values, units, source analysis times, and quality flags. `radial_profiles`
 stores 64 float32 kilometer radii and polygon log area. `forecasts` has one row
 per cell, analysis time, lead (15/30/45/60 minutes), and model version. The
-packaged `stormprob/v1` model is deployed. Pending companion rows can still
+packaged `stormprob/v2` joint model is deployed. Pending companion rows can still
 explicitly report `not-computed/model-not-deployed` or
 `skipped/input-not-ready`; they are not predictions. Forecast rows can be
 inserted through `commit_cycle(..., forecasts=...)` after inference.
@@ -101,5 +101,5 @@ updated before the projection is removed.
 Forecast geometry failures are recorded per lead as `status: error` with
 `reason: geometry-failed`. The module reports `partial` and retains successful
 leads. Alerts require successful 15- and 30-minute leads; tracking requires a
-successful 15-minute lead. Nonpositive calibrated rays terminate at the forecast
+successful 15-minute lead. Nonpositive sampled rays terminate at the forecast
 centroid. They never create opposite-direction boundary points.

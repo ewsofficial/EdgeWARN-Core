@@ -132,11 +132,11 @@ def test_installed_wheel_loads_and_runs_stormprob_models(installed_command):
                 "statistics_history=np.zeros((128,30,1), np.float32), "
                 "current_features=np.zeros((128,135), np.float32), "
                 "history_mask=np.zeros((128,30), np.bool_), "
-                "history_sequence=np.zeros((128,30,135), np.float32), "
                 "trajectory_sequence=np.zeros((128,30,16), np.float32), "
                 "trajectory_mask=np.zeros((128,30), np.bool_)); "
                 "assert outputs['coefficient_mean'].shape == (128,4,33); "
                 "assert outputs['residual_motion_mps'].shape == (128,4,2); "
+                "assert not (directory / 'isotonic_calibrator.json').exists(); "
                 "print(directory)"
             ),
         ],

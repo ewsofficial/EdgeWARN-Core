@@ -13,15 +13,15 @@ The operational envelope starts from the same committed polygon and centroid.
 Expanded detection footprints remain available to other EdgeWARN processing.
 A predicted-only track without a current ProbSevere observation is not
 inference-ready.
-Sampled radial boundaries use the v7 training and evaluation floor of 0.1 km
-before calibration, occupancy rasterization, or operational geometry.
+Sampled radial boundaries use the joint model's 0.1 km floor before
+occupancy rasterization or operational geometry. No calibration is applied.
 
 Each cell result is published under `modules.StormProb` with only the operational
 status, analysis time, and four lead records. Each lead contains its lead and
 valid times, status, and—when successful—centroid displacement, predicted
 centroid, and a compact polygon spanning the original and predicted areas. The
 polygon adaptively has 4–12 points, adding points when needed to fit the shape,
-and has a 1 km metric buffer. The operational polygon uses the calibrator's
+and has a 1 km metric buffer. The operational polygon uses the raw member-fraction
 0.25 threshold to select its ensemble radial boundary. The current adapter does
 not persist detailed probability heatmaps or run a separate asynchronous
 heatmap workflow.

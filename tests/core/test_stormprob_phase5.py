@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from EdgeWARN.ctam.builtins.stormprob import BuiltinStormProbAdapter, StormProbCycleService
-from EdgeWARN.stormprob import onnx_runtime, postprocess
+from EdgeWARN.stormprob import MODEL_VERSION, onnx_runtime, postprocess
 from EdgeWARN.stormprob.audit import audit
 from EdgeWARN.stormprob.database import StormProbRepository
 from EdgeWARN.stormprob.database import clean_public_projection
@@ -22,6 +22,33 @@ def _cell(when="2024-05-01T12:00:00", *, wind=True):
 
 def test_audit_missing_database_is_a_failed_gate(tmp_path):
     assert audit(StormProbRepository(tmp_path))["failures"] == ["database-not-found"]
+
+
+def _lead(lead, status, version):
+    row = {"cell_id": "101", "analysis_time": "2024-05-01T12:00:00",
+           "lead_minutes": lead, "model_version": version, "status": status,
+           "reason": None if status == "ok" else "empty-0.25-contour"}
+    if status == "ok":
+        row.update(east_km=1.0, north_km=1.0, polygon={"type": "Polygon"})
+    return row
+
+
+def test_audit_counts_only_deployed_model_forecasts(tmp_path):
+    # Before cutover a window holding only v1 rows fails the v2 gate on purpose.
+    repo = StormProbRepository(tmp_path)
+    cell = _cell()
+    repo.commit_cycle("cycle1", cell["timestamp"], [cell],
+                      forecasts=[_lead(lead, "ok", "stormprob/v1") for lead in (15, 30, 45, 60)])
+    assert "no-successful-forecasts" in audit(repo)["failures"]
+    repo.commit_cycle("cycle2", cell["timestamp"], [cell],
+                      forecasts=[_lead(lead, "ok", MODEL_VERSION) for lead in (15, 30, 45, 60)])
+    assert "no-successful-forecasts" not in audit(repo)["failures"]
+
+
+def test_installed_assets_validate_without_calibrator():
+    from EdgeWARN.stormprob import assets
+
+    assert not (assets.validate_assets() / "isotonic_calibrator.json").exists()
 
 
 def test_unready_committed_row_skips_before_model_load(tmp_path, monkeypatch):
@@ -60,12 +87,7 @@ def test_first_frame_produces_four_leads_from_committed_features(tmp_path, monke
     repo.commit_cycle("cycle1", cell["timestamp"], [cell])
     assert sum(repo.model_inputs(101)["history_mask"]) == 1
     monkeypatch.setattr(onnx_runtime, "load_sessions", lambda *args: (object(), object()))
-    monkeypatch.setattr(onnx_runtime, "load_calibrator", lambda *args: {
-        "parameters": [{"calibrated_probabilities": [i / 20 for i in range(21)]} for _ in range(4)]})
-    monkeypatch.setattr(onnx_runtime, "infer_pair", lambda *args, **kwargs: {
-        "coefficient_mean": np.zeros((1, 4, 33), np.float32),
-        "coefficient_log_std": np.full((1, 4, 33), -20, np.float32),
-        "residual_motion_mps": np.zeros((1, 4, 2), np.float32)})
+    monkeypatch.setattr(onnx_runtime, "infer_pair", lambda *args, **kwargs: _outputs())
     BuiltinStormProbAdapter(StormProbCycleService(repo)).run(cell)
     result = cell["modules"]["StormProb"]
     assert result["status"] == "success"
@@ -80,8 +102,8 @@ def test_batch_pads_and_maps_outputs_to_ready_cells(monkeypatch):
     adapter = BuiltinStormProbAdapter.__new__(BuiltinStormProbAdapter)
     adapter._sessions = (object(), object())
     adapter._prepare = lambda cell: (_fake_inputs(float(cell["id"])), {"raw_values": {}}) if cell["id"] != 102 else (_ for _ in ()).throw(ValueError("bad input"))
-    adapter._load_models = lambda: {}
-    adapter._finish = lambda cell, inputs, observation, outputs, calibrator: {
+    adapter._load_models = lambda: None
+    adapter._finish = lambda cell, inputs, observation, outputs: {
         "status": "success", "leads": [{"metadata": {}}],
         "value": float(outputs["coefficient_mean"][0, 0, 0])}
     calls = []
@@ -93,7 +115,9 @@ def test_batch_pads_and_maps_outputs_to_ready_cells(monkeypatch):
         means[:, 0, 0] = values
         return {"coefficient_mean": means,
                 "coefficient_log_std": np.zeros_like(means),
-                "residual_motion_mps": np.zeros((128, 4, 2), np.float32)}
+                "residual_motion_mps": np.zeros((128, 4, 2), np.float32),
+                "centroid_offset_km": np.zeros((128, 4, 2), np.float32),
+                "centroid_cholesky": np.zeros((128, 4, 2, 2), np.float32)}
 
     monkeypatch.setattr(onnx_runtime, "infer_pair", fake_infer)
     adapter.run_batch(cells)
@@ -104,12 +128,22 @@ def test_batch_pads_and_maps_outputs_to_ready_cells(monkeypatch):
     assert [cells[index]["modules"]["StormProb"]["value"] for index in (0, 2)] == [101, 103]
 
 
+def _outputs(batch=1):
+    """Deterministic shapes with no centroid spread beyond the 0.1 km floor."""
+    cholesky = np.zeros((batch, 4, 2, 2), np.float32)
+    cholesky[..., 0, 0] = cholesky[..., 1, 1] = 0.1
+    return {"coefficient_mean": np.zeros((batch, 4, 33), np.float32),
+            "coefficient_log_std": np.full((batch, 4, 33), -20, np.float32),
+            "centroid_offset_km": np.zeros((batch, 4, 2), np.float32),
+            "centroid_cholesky": cholesky,
+            "residual_motion_mps": np.zeros((batch, 4, 2), np.float32)}
+
+
 def _fake_inputs(value):
     return {"radial_history": [[0] * 64 for _ in range(30)],
             "radial_statistics_history": [[0] for _ in range(30)],
             "current": [value] + [0] * 134,
             "radial_history_mask": [False] * 30,
-            "history_sequence": [[0] * 135 for _ in range(30)],
             "trajectory_sequence": [[0] * 16 for _ in range(30)],
             "trajectory_mask": [False] * 30}
 
@@ -126,13 +160,11 @@ def test_polygon_wrap_preserves_closed_public_rings():
 
 
 def test_operational_envelope_is_compact_and_buffered():
-    calibrator = {"parameters": [{
-        "calibrated_probabilities": [0.0] * 5 + [0.3] * 16
-    } for _ in range(4)]}
+    angle = np.arange(64) * (2 * np.pi / 64)
+    contour = np.column_stack((12.0 + 8.0 * np.cos(angle), 4.0 + 8.0 * np.sin(angle)))
     polygon = postprocess.operational_envelope(
         [[35.0, 265.0], [35.0, 265.02], [35.02, 265.02], [35.02, 265.0]],
-        [35.01, 265.01], [12.0, 4.0],
-        np.full((20, 64), 8.0, dtype=np.float32), calibrator, 0)
+        [35.01, 265.01], contour)
     ring = polygon["coordinates"][0]
     assert polygon["type"] == "Polygon"
     assert 4 <= len(ring) - 1 <= 12
@@ -191,15 +223,30 @@ def test_forecast_geometry_uses_committed_ps_polygon_and_centroid(monkeypatch):
                   [35.02, 265.02], [35.02, 265.0]]
     observation = {"centroid": [35.01, 265.01], "polygon": ps_polygon,
                    "raw_values": {}}
-    outputs = {"coefficient_mean": np.zeros((1, 4, 33), np.float32),
-               "coefficient_log_std": np.full((1, 4, 33), -20, np.float32),
-               "residual_motion_mps": np.zeros((1, 4, 2), np.float32)}
-    inputs = {"radial_history": np.ones((30, 64), np.float32)}
+    inputs = {"radial_history": np.full((30, 64), 3.0, np.float32)}
     result = BuiltinStormProbAdapter.__new__(BuiltinStormProbAdapter)._finish(
-        cell, inputs, observation, outputs, {})
+        cell, inputs, observation, _outputs())
 
     assert observed == [(ps_polygon, observation["centroid"])] * 4
     assert result["leads"][0]["predicted_centroid"] == observation["centroid"]
+
+
+def test_empty_contour_is_no_polygon_and_module_partial(monkeypatch):
+    from EdgeWARN.ctam.builtins import stormprob as builtin
+
+    monkeypatch.setattr(builtin, "predict_initial_wind", lambda _: {"u": 0.0, "v": 0.0})
+    monkeypatch.setattr(postprocess, "occupancy_probability",
+                        lambda *_: np.zeros((4, 201, 201), np.float32))
+    cell = _cell()
+    observation = {"centroid": [35.01, 265.01], "raw_values": {},
+                   "polygon": [[35.0, 265.0], [35.0, 265.02], [35.02, 265.02], [35.02, 265.0]]}
+    inputs = {"radial_history": np.full((30, 64), 3.0, np.float32)}
+    result = BuiltinStormProbAdapter.__new__(BuiltinStormProbAdapter)._finish(
+        cell, inputs, observation, _outputs())
+
+    assert result["status"] == "partial"
+    assert [lead["status"] for lead in result["leads"]] == ["no-polygon"] * 4
+    assert all(lead["reason"] == "empty-0.25-contour" for lead in result["leads"])
 
 
 def test_tracking_replaces_stormprob_geometry_with_matched_detection():
@@ -218,7 +265,7 @@ def test_tracking_replaces_stormprob_geometry_with_matched_detection():
 
 def test_public_projection_uses_operational_stormprob_contract():
     cell = {"id": 101, "modules": {"StormProb": {
-        "status": "success", "model_version": "stormprob/v1",
+        "status": "success", "model_version": "stormprob/v2",
         "analysis_time": "2024-05-01T12:00:00+00:00",
         "initial_wind_mps": [1.0, 2.0], "inference_duration_ms": 12.0,
         "alert_geometry": {"geometry_kind": "swept-envelope-0-30min"},
@@ -255,12 +302,12 @@ def test_alert_is_labeled_as_a_swept_envelope():
 
 
 def test_negative_rays_terminate_at_centroid():
-    calibrator = {"parameters": [{"calibrated_probabilities": [0.0] + [1.0] * 20}] * 4}
-    radii = np.full((20, 64), -10.0)
-    radii[:, 0] = 5.0
-    boundary = postprocess.calibrated_radial_boundary(radii, calibrator, 0)
-    assert boundary[0] == 5.0
-    assert np.all(boundary[1:] == 0.0)
+    radii = np.full((1, 20, 4, 64), -10.0, np.float32)
+    radii[..., 0] = 5.0
+    probability = postprocess.occupancy_probability(radii, np.zeros((1, 20, 4, 2), np.float32))
+    # Row 100 is north 0; column 100 + k is east k.
+    assert np.all(probability[0, 100, 100:106] == 1.0)
+    assert np.all(probability[0, 100, 94:100] == 0.0)
 
 
 def test_geometry_failure_preserves_other_leads(tmp_path, monkeypatch):
@@ -268,13 +315,11 @@ def test_geometry_failure_preserves_other_leads(tmp_path, monkeypatch):
     cell = _cell()
     repo.commit_cycle("cycle1", cell["timestamp"], [cell])
     monkeypatch.setattr(onnx_runtime, "load_sessions", lambda *args: (object(), object()))
-    monkeypatch.setattr(onnx_runtime, "load_calibrator", lambda *args: {})
-    monkeypatch.setattr(onnx_runtime, "infer_pair", lambda *args, **kwargs: {
-        "coefficient_mean": np.zeros((1, 4, 33), np.float32),
-        "coefficient_log_std": np.full((1, 4, 33), -20, np.float32),
-        "residual_motion_mps": np.zeros((1, 4, 2), np.float32)})
+    monkeypatch.setattr(onnx_runtime, "infer_pair", lambda *args, **kwargs: _outputs())
+    calls = []
     def geometry(*args):
-        if args[5] == 3:
+        calls.append(args)
+        if len(calls) == 4:
             raise ValueError("injected geometry failure")
         return {"type": "Polygon", "coordinates": [[[265.0, 35.0], [265.1, 35.0],
             [265.1, 35.1], [265.0, 35.1], [265.0, 35.0]]]}

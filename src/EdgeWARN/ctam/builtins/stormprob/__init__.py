@@ -17,13 +17,14 @@ import numpy as np
 
 from EdgeWARN.alerts import AlertManager
 from EdgeWARN.alerts.schema import AlertPayload
-from EdgeWARN.stormprob import assets, onnx_runtime, postprocess
+from EdgeWARN.stormprob import MODEL_VERSION, assets, onnx_runtime, postprocess
 from EdgeWARN.stormprob.database import LEADS, StormProbRepository
 from EdgeWARN.stormprob.envelope import geojson_to_alert_ring, swept_envelope_0_30
 from EdgeWARN.stormprob.features import predict_initial_wind
 
 
-MODEL_VERSION = "stormprob/v1"
+RADIAL_CHECKPOINT_ID = "radial-joint-e7"
+MOTION_CHECKPOINT_ID = "motion-residual-e16"
 
 
 class InputNotReady(ValueError):
@@ -87,25 +88,30 @@ class BuiltinStormProbAdapter:
             raise InputNotReady("committed-observation-not-ready")
         return inputs, observation
 
-    def _load_models(self):
+    def _load_models(self) -> None:
         if self._sessions is None:
-            model_dir = assets.asset_dir()
             self._sessions = onnx_runtime.load_sessions(
-                model_dir, assets.manifest_path())
-        return onnx_runtime.load_calibrator(assets.asset_dir(), assets.manifest_path())
+                assets.asset_dir(), assets.manifest_path())
 
     def _finish(self, cell: dict[str, Any], inputs: dict, observation: dict,
-                outputs: dict, calibrator: dict) -> dict[str, Any]:
+                outputs: dict) -> dict[str, Any]:
         timestamp = cell["timestamp"]
         initial = predict_initial_wind({"wind_field": {
             key.rsplit(".", 1)[1]: value
             for key, value in observation["raw_values"].items()
             if key.startswith("wind_field.")}})
-        displacement = postprocess.displacement(
+        base = postprocess.base_displacement(
             [initial["u"], initial["v"]], outputs["residual_motion_mps"])
-        radii = postprocess.sample_radii(outputs["coefficient_mean"],
-            outputs["coefficient_log_std"],
-            np.asarray(inputs["radial_history"])[-1:])
+        radii, centres = postprocess.sample_joint(
+            outputs["coefficient_mean"], outputs["coefficient_log_std"],
+            np.asarray(inputs["radial_history"])[-1:], base,
+            outputs["centroid_offset_km"], outputs["centroid_cholesky"])
+        probability = postprocess.occupancy_probability(radii, centres)
+        mean_km = base + outputs["centroid_offset_km"]
+        cholesky = outputs["centroid_cholesky"][0]
+        # Marginal std of L @ L.T: east = |l11|, north = sqrt(l21^2 + l22^2).
+        centroid_std = np.stack((np.abs(cholesky[:, 0, 0]),
+                                 np.hypot(cholesky[:, 1, 0], cholesky[:, 1, 1])), axis=-1)
         # These are the same committed PS polygon and PS-only centroid used
         # to construct the radial history supplied to the model.
         original_polygon = observation["polygon"]
@@ -114,38 +120,48 @@ class BuiltinStormProbAdapter:
             raise ValueError("missing-original-ps-geometry")
         analysis = _utc(timestamp)
         forecasts = []
+        centroid_lat, centroid_lon = map(float, original_centroid)
         for index, lead in enumerate(LEADS):
-            east, north = map(float, displacement[0, index])
-            lat, lon = map(float, original_centroid)
-            lon += east / (111.0 * math.cos(math.radians(lat)))
-            lat += north / 111.0
-            try:
-                polygon = postprocess.operational_envelope(
-                    original_polygon, original_centroid, displacement[0, index],
-                    radii[0, :, index], calibrator, index)
-            except (ValueError, ArithmeticError) as exc:
-                forecasts.append({
-                    "cell_id": str(cell["id"]), "analysis_time": timestamp,
-                    "lead_minutes": lead, "model_version": MODEL_VERSION,
-                    "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
-                    "status": "error", "reason": "geometry-failed", "error": str(exc),
-                    "metadata": {"postprocess_version": postprocess.VERSION},
-                })
-                continue
-            forecasts.append({
+            east, north = map(float, mean_km[0, index])
+            lon = centroid_lon + east / (111.0 * math.cos(math.radians(centroid_lat)))
+            lat = centroid_lat + north / 111.0
+            valid_time = (analysis + timedelta(minutes=lead)).isoformat()
+            common = {
                 "cell_id": str(cell["id"]), "analysis_time": timestamp,
                 "lead_minutes": lead, "model_version": MODEL_VERSION,
-                "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
-                "radial_checkpoint_id": "radial-v7", "motion_checkpoint_id": "motion-best",
-                "status": "ok", "reason": None,
+                "valid_time": valid_time,
+                "radial_checkpoint_id": RADIAL_CHECKPOINT_ID,
+                "motion_checkpoint_id": MOTION_CHECKPOINT_ID,
+            }
+            metadata = {"postprocess_version": postprocess.VERSION,
+                        "centroid_std_km": [float(v) for v in centroid_std[index]]}
+            try:
+                contour = postprocess.contour_polygon(probability[index])
+                if contour is None:
+                    forecasts.append({**common, "status": "no-polygon",
+                                      "reason": "empty-0.25-contour",
+                                      "east_km": east, "north_km": north,
+                                      "predicted_centroid": [lat, lon],
+                                      "probability_threshold": postprocess.THRESHOLD,
+                                      "metadata": metadata})
+                    continue
+                polygon = postprocess.operational_envelope(
+                    original_polygon, original_centroid, contour)
+            except (ValueError, ArithmeticError) as exc:
+                forecasts.append({**common, "status": "error",
+                                  "reason": "geometry-failed", "error": str(exc),
+                                  "metadata": metadata})
+                continue
+            forecasts.append({
+                **common, "status": "ok", "reason": None,
                 "east_km": east, "north_km": north,
                 "predicted_centroid": [lat, lon], "polygon": polygon,
                 "probability_threshold": postprocess.THRESHOLD,
-                "metadata": {"geometry_kind": postprocess.OPERATIONAL_GEOMETRY_VERSION,
-                              "buffer_km": postprocess.OPERATIONAL_BUFFER_KM,
-                              "point_count": len(polygon["coordinates"][0]) - 1,
-                              "valid_time": (analysis + timedelta(minutes=lead)).isoformat(),
-                              "postprocess_version": postprocess.VERSION},
+                "metadata": {**metadata,
+                             "geometry_kind": postprocess.OPERATIONAL_GEOMETRY_VERSION,
+                             "buffer_km": postprocess.OPERATIONAL_BUFFER_KM,
+                             "point_count": len(polygon["coordinates"][0]) - 1,
+                             "valid_time": valid_time},
             })
         status = "success" if all(lead["status"] == "ok" for lead in forecasts) else "partial"
         return {"status": status, "model_version": MODEL_VERSION,
@@ -183,7 +199,6 @@ class BuiltinStormProbAdapter:
             "statistics_history": ("radial_statistics_history", (30, 1), np.float32),
             "current_features": ("current", (135,), np.float32),
             "history_mask": ("radial_history_mask", (30,), np.bool_),
-            "history_sequence": ("history_sequence", (30, 135), np.float32),
             "trajectory_sequence": ("trajectory_sequence", (30, 16), np.float32),
             "trajectory_mask": ("trajectory_mask", (30,), np.bool_),
         }
@@ -209,7 +224,7 @@ class BuiltinStormProbAdapter:
             }
             return
         try:
-            calibrator = self._load_models()
+            self._load_models()
             tensors = {}
             for name, (source, shape, dtype) in fields.items():
                 batch = np.zeros((onnx_runtime.BATCH_SIZE, *shape), dtype=dtype)
@@ -231,7 +246,7 @@ class BuiltinStormProbAdapter:
             finish_started = time.perf_counter()
             try:
                 one = {name: value[index:index + 1] for name, value in outputs.items()}
-                result = self._finish(cell, inputs, observation, one, calibrator)
+                result = self._finish(cell, inputs, observation, one)
                 result["inference_duration_ms"] = (time.perf_counter() - started) * 1000
                 for lead in result["leads"]:
                     lead["metadata"]["inference_duration_ms"] = result["inference_duration_ms"]

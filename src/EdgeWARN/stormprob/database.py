@@ -587,7 +587,6 @@ class StormProbRepository:
                         for row in history]
         return {
             "current": vectors[-1],
-            "history_sequence": [[0.0] * N_CURRENT for _ in range(pad)] + vectors,
             "history_mask": [False] * pad + [True] * len(history),
             "trajectory_sequence": [[0.0] * N_TRAJECTORY for _ in range(pad)] + trajectory,
             "trajectory_mask": [False] * pad + [True] * len(history),
