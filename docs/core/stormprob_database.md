@@ -101,5 +101,6 @@ updated before the projection is removed.
 Forecast geometry failures are recorded per lead as `status: error` with
 `reason: geometry-failed`. The module reports `partial` and retains successful
 leads. Alerts require successful 15- and 30-minute leads; tracking requires a
-successful 15-minute lead. Nonpositive sampled rays terminate at the forecast
-centroid. They never create opposite-direction boundary points.
+successful 15-minute lead. Sampled rays are floored at 0.1 km about each
+ensemble member's own centre. They never create opposite-direction boundary
+points.
