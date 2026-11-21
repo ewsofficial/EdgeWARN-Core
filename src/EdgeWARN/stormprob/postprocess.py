@@ -243,25 +243,35 @@ def _rasterize_members(mask, radii, cx, cy, east, north, bits):
     for start in range(rows.start, rows.stop, _RASTER_BAND_ROWS):
         stop = min(rows.stop, start + _RASTER_BAND_ROWS)
         dy = north[start:stop][None, :, None] - cy[:, None, None]
-        distance = np.hypot(dx, dy)
+        # Square-then-sqrt replaces the per-element libm ``hypot``; patch
+        # windows are at most a few hundred km, so float32 cannot overflow.
+        distance = np.square(dx) + np.square(dy)
+        np.sqrt(distance, out=distance)
         inside = distance <= reach[:, None, None]
         if not inside.any():
             continue
         angle = np.zeros(distance.shape, dtype=np.float32)
         np.arctan2(dy, dx, out=angle, where=inside)
         np.multiply(angle, np.float32(64 / (2 * math.pi)), out=angle)
-        np.remainder(angle, np.float32(64), out=angle)
-        floor = np.floor(angle, out=np.empty_like(angle))
+        # arctan2 spans (-pi, pi], i.e. (-32, 32] rays, so one conditional add
+        # wraps the negatives as remainder(angle, 64) did, without the full-array
+        # float modulo that dominates a wide-spread raster. Rounding can leave a
+        # value just below a ray boundary at exactly 64.0; the integer wrap below
+        # maps that back to ray 0, as the reference arithmetic did.
+        np.add(angle, np.float32(64), out=angle, where=angle < 0)
+        floor = np.floor(angle)
         # ``angle`` becomes the fractional position between the two adjacent rays.
         np.subtract(angle, floor, out=angle)
-        lo = np.mod(floor, 64).astype(np.intp)
+        lo = floor.astype(np.intp)
+        lo[lo == 64] = 0
         hi = np.mod(lo + 1, 64)
         low_radius = radii[members, lo]
         high_radius = radii[members, hi]
         interpolated = low_radius + (high_radius - low_radius) * angle
         inside &= distance <= interpolated
-        mask[start:stop, columns] |= np.bitwise_or.reduce(
-            inside.astype(np.uint32) << bits, axis=0)
+        packed = inside.astype(np.uint32)
+        np.left_shift(packed, bits, out=packed)
+        mask[start:stop, columns] |= np.bitwise_or.reduce(packed, axis=0)
 
 
 def base_displacement(initial_wind_mps, residual_motion_mps):

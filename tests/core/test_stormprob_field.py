@@ -89,6 +89,17 @@ def test_radii_are_floored_at_the_model_minimum():
     assert counts[:, 2].max() == 0
 
 
+def test_ray_index_stays_in_range_just_below_zero_angle():
+    """A tiny negative angle rounds to 64 rays if the wrap happens in float32."""
+    radii = np.full((1, postprocess.ENSEMBLE_SIZE, 4, 64), 10.0, np.float32)
+    centres = np.zeros((1, postprocess.ENSEMBLE_SIZE, 4, 2), np.float32)
+    east = np.asarray([1.0], dtype=np.float32)
+    north = np.asarray([-1e-9], dtype=np.float32)
+    mask = postprocess.swept_member_mask(radii, centres, east, north)
+    assert mask.shape == (1, 1)
+    assert int(np.bitwise_count(mask)[0, 0]) == postprocess.ENSEMBLE_SIZE
+
+
 def test_sweep_instants_follow_the_configured_step():
     radii = np.zeros((1, postprocess.ENSEMBLE_SIZE, 4, 64), np.float32)
     centres = np.zeros((1, postprocess.ENSEMBLE_SIZE, 4, 2), np.float32)
