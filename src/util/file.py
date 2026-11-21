@@ -102,7 +102,7 @@ def _define_paths(base_path, config_dir=None):
     global MRMS_REF_0C_DIR, MRMS_REFM5C_DIR, MRMS_REFM15C_DIR
     global MRMS_RHOHV_DIR, MRMS_PRECIPTYP_DIR, MRMS_MESH_DIR
     global GOES_GLM_DIR
-    global RAP_DIR, STORMCELL_DIR, CELL_DIR
+    global RAP_DIR, STORMCELL_DIR, CELL_DIR, STORMPROB_FIELDS_DIR
     global GUI_DIR, GUI_NEXRAD_DIR
     global STORMCELL_JSON
     global NEXRAD_LEVEL2_DIR, NEXRAD_LEVEL2_LOW_DIR, NEXRAD_LEVEL2_HIGH_DIR, NEXRAD_LEVEL2_MANIFEST_DIR
@@ -156,6 +156,7 @@ def _define_paths(base_path, config_dir=None):
     RAP_DIR = data_dir / "RAP"
     STORMCELL_DIR = data_dir / "stormcells"
     CELL_DIR = data_dir / "cells"
+    STORMPROB_FIELDS_DIR = data_dir / "stormprob" / "fields"
 
     GUI_DIR = gui_dir
     GUI_NEXRAD_DIR = gui_dir / "NEXRAD"

@@ -139,9 +139,10 @@ def test_publish_cycle_writes_each_index_once_after_cleanup(mock_io_manager, moc
         monkeypatch.setattr(manager, "_load_database_projection", lambda: ([], {"102": 0.0}))
         manager.publish_cycle_indexes("20230101-120000", [101])
 
-    assert [name for name, _ in writes] == ["cell_index.json", "stormcell_index.json"]
-    assert writes[0][1]["cellIds"] == [101]
-    assert writes[1][1]["timestamps"] == ["20230101-120000"]
+    assert [name for name, _ in writes] == [
+        "field_index.json", "cell_index.json", "stormcell_index.json"]
+    assert writes[1][1]["cellIds"] == [101]
+    assert writes[2][1]["timestamps"] == ["20230101-120000"]
     assert not (cell_dir / "102.json").exists()
 
 
@@ -199,6 +200,25 @@ def test_database_projection_cleanup_deletes_orphaned_cell_files(index_manager, 
     index_manager.remove_old_cells = True
     index_manager.publish_cycle_indexes("20261007-180000", [])
     assert not orphan.exists()
+
+
+def test_field_index_lists_canonical_cycle_keys(mock_io_manager, mock_fs, monkeypatch):
+    from EdgeWARN.api_integration import index_manager as module
+    from EdgeWARN.stormprob import field
+
+    fields = mock_fs / "stormprob" / "fields"
+    fields.mkdir(parents=True, exist_ok=True)
+    (fields / "stormprob_field_20240501-120000.bin.gz").write_bytes(
+        field.encode_field([], "2024-05-01T12:00:00Z",
+                           domain=field.Domain(30.0, 260.0, 31.0, 261.0))
+    )
+    with patch.object(module.fs, "STORMPROB_FIELDS_DIR", fields):
+        manager = APIIndexManager(mock_io_manager, remove_old_cells=False)
+        monkeypatch.setattr(module, "stormprob_field_max_age_minutes", lambda: 600)
+        manager._publish_field_index()
+
+    assert json.loads((fields / "field_index.json").read_text())["timestamps"] == [
+        "20240501-120000"]
 
 
 def test_stormcell_index_lists_snapshot_files_the_database_pruned(index_manager, mock_fs, monkeypatch):

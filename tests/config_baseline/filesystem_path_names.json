@@ -44,5 +44,6 @@
   "NEXRAD_LEVEL2_MANIFEST_DIR": "data/NEXRAD_Level2/manifests",
   "RAP_DIR": "data/RAP",
   "STORMCELL_DIR": "data/stormcells",
-  "STORMCELL_JSON": "data/stormcells.json"
+  "STORMCELL_JSON": "data/stormcells.json",
+  "STORMPROB_FIELDS_DIR": "data/stormprob/fields"
 }

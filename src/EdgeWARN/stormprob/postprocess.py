@@ -6,8 +6,9 @@ independent Gaussian centroid draw. By default both come from one NumPy PCG64(42
 stream: shape noise ``[1,20,4,33]`` first, then centroid noise ``[1,20,4,2]``.
 Explicit noise permits exact replay of the PyTorch evaluation ensemble during
 parity validation. Probability is the raw member fraction ``k/20``; no
-calibration is applied. This module never interprets a lead contour as a swept
-envelope.
+calibration is applied. A lead contour is never interpreted as a swept envelope;
+``swept_member_mask`` instead unions each member's footprint across the
+T+15..T+60 window on the caller's axes, leaving the lead polygons untouched.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import math
 import numpy as np
 
 
-VERSION = "stormprob-postprocess/v3"
+VERSION = "stormprob-postprocess/v4"
 OPERATIONAL_GEOMETRY_VERSION = "stormprob-operational-envelope/v2"
 LEADS_MINUTES = (15, 30, 45, 60)
 ENSEMBLE_SIZE = 20
@@ -24,10 +25,28 @@ GRID_HALF_WIDTH_KM = 100
 GRID_RESOLUTION_KM = 1
 THRESHOLD = 0.25
 MIN_SAMPLED_RADIUS_KM = 0.1
+SWEEP_STEP_MINUTES = 5
+SWEEP_START_MINUTES = LEADS_MINUTES[0]
+SWEEP_END_MINUTES = LEADS_MINUTES[-1]
+_RASTER_BAND_ROWS = 64
+_RASTER_MEMBER_BUCKETS = 4
+_RASTER_REACH_SPREAD = 0.10
 OPERATIONAL_BUFFER_KM = 1.0
 OPERATIONAL_MIN_POINTS = 4
 OPERATIONAL_MAX_POINTS = 12
 OPERATIONAL_MAX_AREA_INFLATION = 1.25
+
+
+def _sweep_fractions() -> tuple[np.float32, ...]:
+    """Fractions of one lead interval at the configured sweep step."""
+    gap = LEADS_MINUTES[1] - LEADS_MINUTES[0]
+    if SWEEP_STEP_MINUTES <= 0 or gap % SWEEP_STEP_MINUTES:
+        raise ValueError("StormProb sweep step must divide the lead spacing")
+    steps = gap // SWEEP_STEP_MINUTES
+    return tuple(np.float32(index) / np.float32(steps) for index in range(1, steps + 1))
+
+
+SWEEP_FRACTIONS = _sweep_fractions()
 
 
 def sample_radii(mean, log_std, current_radii, *, noise=None):
@@ -117,9 +136,132 @@ def occupancy_probability(radii, centres_km):
 
 def _grid_window(axis, centre, reach):
     """Index slice of grid coordinates within [centre - reach, centre + reach]."""
-    start = int(np.searchsorted(axis, np.float32(centre - reach), side="left"))
-    stop = int(np.searchsorted(axis, np.float32(centre + reach), side="right"))
+    return _axis_window(axis, centre - reach, centre + reach)
+
+
+def _axis_window(axis, low, high):
+    """Index slice of ascending axis coordinates within [low, high]."""
+    start = int(np.searchsorted(axis, np.float32(low), side="left"))
+    stop = int(np.searchsorted(axis, np.float32(high), side="right"))
     return slice(start, stop)
+
+
+def swept_member_mask(radii, centres_km, east_axis_km, north_axis_km):
+    """Return per-member swept coverage as a ``uint32`` bitmask patch.
+
+    Bit ``m`` is set where ensemble member ``m`` covers the point at any instant
+    in ``[T+15, T+60]``. Between leads each member's radii and centre are
+    interpolated by member index in five-minute steps, matching the swept branch
+    of the StormProb evaluation scorecard. ``east_axis_km`` and
+    ``north_axis_km`` are ascending kilometres about the cell's analysis
+    centroid, so longitude scaling is the caller's separable projection. Radii
+    are floored at the joint model's 0.1 km minimum and are never negative.
+    """
+    radii = np.maximum(np.asarray(radii, dtype=np.float32),
+                       np.float32(MIN_SAMPLED_RADIUS_KM))
+    centres = np.asarray(centres_km, dtype=np.float32)
+    if radii.shape != (1, ENSEMBLE_SIZE, 4, 64) or centres.shape != (1, ENSEMBLE_SIZE, 4, 2):
+        raise ValueError("Invalid StormProb radii or centre shape")
+    east = np.array(east_axis_km, dtype=np.float32, copy=True).reshape(-1)
+    north = np.array(north_axis_km, dtype=np.float32, copy=True).reshape(-1)
+    for name, axis in (("east", east), ("north", north)):
+        if axis.size == 0:
+            raise ValueError(f"Empty StormProb {name} axis")
+        if not np.all(np.isfinite(axis)) or np.any(np.diff(axis) <= 0):
+            raise ValueError(f"StormProb {name} axis must be finite and ascending")
+    mask = np.zeros((north.size, east.size), dtype=np.uint32)
+    bits = np.arange(ENSEMBLE_SIZE, dtype=np.uint32)[:, None, None]
+    for member_radii, member_centres in _sweep_instants(radii, centres):
+        _rasterize_instant(mask, member_radii, member_centres, east, north, bits)
+    return mask
+
+
+def _sweep_instants(radii, centres):
+    """Yield the ten ``[20,64]`` radii / ``[20,2]`` centre blocks of the window."""
+    radii = radii[0]
+    centres = centres[0]
+    yield radii[:, 0], centres[:, 0]
+    for lead in range(len(LEADS_MINUTES) - 1):
+        for fraction in SWEEP_FRACTIONS:
+            remaining = np.float32(1) - fraction
+            yield (radii[:, lead] * remaining + radii[:, lead + 1] * fraction,
+                   centres[:, lead] * remaining + centres[:, lead + 1] * fraction)
+
+
+def _rasterize_instant(mask, radii, centres, east, north, bits):
+    """OR one instant's all-member coverage into the swept bitmask patch.
+
+    Members are swept one reach bucket at a time, and each bucket handles all its
+    members in one vectorized call per row band. Bucketing keeps a compact
+    member from paying for the bounding box of a member that has travelled far,
+    while every member keeps the same test, so the grouping cannot change the
+    result. Pixels beyond a member's largest ray are rejected before the angular
+    interpolation.
+    """
+    reach = np.max(radii, axis=1)
+    cx = centres[:, 0]
+    cy = centres[:, 1]
+    for members in _reach_buckets(reach):
+        _rasterize_members(mask, radii[members], cx[members], cy[members],
+                           east, north, bits[members])
+
+
+def _reach_buckets(reach):
+    """Group member indices by similar reach, at most ``_RASTER_MEMBER_BUCKETS``."""
+    order = np.argsort(reach, kind="stable")
+    top = float(reach[order[-1]])
+    if top <= 0.0 or top - float(reach[order[0]]) <= max(1.0, _RASTER_REACH_SPREAD * top):
+        return [order]
+    limit = max(1.0, _RASTER_REACH_SPREAD * top)
+    groups = []
+    start = 0
+    base = float(reach[order[0]])
+    for position in range(1, order.size):
+        value = float(reach[order[position]])
+        if value - base > limit:
+            groups.append(order[start:position])
+            start = position
+            base = value
+    groups.append(order[start:])
+    if len(groups) > _RASTER_MEMBER_BUCKETS:
+        size = math.ceil(order.size / _RASTER_MEMBER_BUCKETS)
+        groups = [order[index:index + size] for index in range(0, order.size, size)]
+    return groups
+
+
+def _rasterize_members(mask, radii, cx, cy, east, north, bits):
+    """OR one reach bucket's coverage into the swept bitmask patch."""
+    if radii.shape[0] == 0:
+        return
+    reach = np.max(radii, axis=1)
+    columns = _axis_window(east, float(np.min(cx - reach)), float(np.max(cx + reach)))
+    rows = _axis_window(north, float(np.min(cy - reach)), float(np.max(cy + reach)))
+    if columns.start >= columns.stop or rows.start >= rows.stop:
+        return
+    dx = east[columns][None, None, :] - cx[:, None, None]
+    members = np.arange(radii.shape[0], dtype=np.intp)[:, None, None]
+    for start in range(rows.start, rows.stop, _RASTER_BAND_ROWS):
+        stop = min(rows.stop, start + _RASTER_BAND_ROWS)
+        dy = north[start:stop][None, :, None] - cy[:, None, None]
+        distance = np.hypot(dx, dy)
+        inside = distance <= reach[:, None, None]
+        if not inside.any():
+            continue
+        angle = np.zeros(distance.shape, dtype=np.float32)
+        np.arctan2(dy, dx, out=angle, where=inside)
+        np.multiply(angle, np.float32(64 / (2 * math.pi)), out=angle)
+        np.remainder(angle, np.float32(64), out=angle)
+        floor = np.floor(angle, out=np.empty_like(angle))
+        # ``angle`` becomes the fractional position between the two adjacent rays.
+        np.subtract(angle, floor, out=angle)
+        lo = np.mod(floor, 64).astype(np.intp)
+        hi = np.mod(lo + 1, 64)
+        low_radius = radii[members, lo]
+        high_radius = radii[members, hi]
+        interpolated = low_radius + (high_radius - low_radius) * angle
+        inside &= distance <= interpolated
+        mask[start:stop, columns] |= np.bitwise_or.reduce(
+            inside.astype(np.uint32) << bits, axis=0)
 
 
 def base_displacement(initial_wind_mps, residual_motion_mps):

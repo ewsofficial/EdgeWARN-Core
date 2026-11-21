@@ -8,6 +8,7 @@ from util.atomic import atomic_write_json
 from EdgeWARN.api_integration.config import (
     inactive_cell_max_age_minutes,
     remove_old_cells_realtime,
+    stormprob_field_max_age_minutes,
 )
 
 
@@ -18,6 +19,7 @@ class APIIndexManager:
         self.io_manager = io_manager
         self.stormcell_index_path = fs.STORMCELL_DIR / "stormcell_index.json"
         self.cell_index_path = fs.CELL_DIR / "cell_index.json"
+        self.field_index_path = fs.STORMPROB_FIELDS_DIR / "field_index.json"
         # The realtime value is the default; historical callers pass their own.
         self.remove_old_cells = (
             remove_old_cells_realtime() if remove_old_cells is None else remove_old_cells
@@ -33,6 +35,7 @@ class APIIndexManager:
         self.include_pending = include_pending
         self.cleanup_seconds = 0.0
         self.index_write_seconds = 0.0
+        self.field_retention_seconds = 0.0
 
     @staticmethod
     def _stormcell_file_timestamps() -> set:
@@ -227,6 +230,39 @@ class APIIndexManager:
         # Update index to match reality
         self._write_cell_index()
 
+    def _publish_field_index(self) -> None:
+        """Expire old swept-probability fields and rewrite ``field_index.json``.
+
+        Entries are canonical ``YYYYMMDD-HHMMSS`` cycle keys -- the same keys as
+        ``stormcell_index.json`` and the artifact file names -- so an index entry
+        resolves every artifact of a scan. The artifacts themselves are the
+        retention source of truth: each cycle writes or replaces its own file,
+        and a scan's field is independent of every other scan. Header-only
+        quiet-scan artifacts age out the same way.
+        """
+        from EdgeWARN.stormprob import field
+
+        directory = fs.STORMPROB_FIELDS_DIR
+        directory.mkdir(parents=True, exist_ok=True)
+        started = time.perf_counter()
+        cutoff = datetime.now(timezone.utc).timestamp() - stormprob_field_max_age_minutes() * 60
+        timestamps = []
+        for path in sorted(directory.glob("stormprob_field_*.bin.gz")):
+            try:
+                if self.remove_old_cells and path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    continue
+                timestamps.append(field.cycle_key(field.read_analysis_time(path)))
+            except (OSError, ValueError) as exc:
+                self.io_manager.write_warning(
+                    f"Skipping unreadable StormProb field {path.name}: {exc}"
+                )
+        atomic_write_json(self.field_index_path, {
+            "timestamps": sorted(set(timestamps)),
+            "lastUpdated": datetime.now(timezone.utc).isoformat(),
+        }, indent=2)
+        self.field_retention_seconds = time.perf_counter() - started
+
     def publish_cycle_indexes(self, timestamp: str, cell_ids: list) -> None:
         """Build both final listings, clean expired files, then write each once."""
         fs.STORMCELL_DIR.mkdir(parents=True, exist_ok=True)
@@ -274,6 +310,7 @@ class APIIndexManager:
                     del self.cell_timestamps[cell_id]
 
         self.cleanup_seconds = time.perf_counter() - cleanup_started
+        self._publish_field_index()
         write_started = time.perf_counter()
         self._write_cell_index()
         atomic_write_json(self.stormcell_index_path, {

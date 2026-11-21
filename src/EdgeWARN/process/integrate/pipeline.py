@@ -572,23 +572,70 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
                             forecast_policy="preserve" if disable_stormprob else "invalidate",
                             write_pending_forecasts=not disable_stormprob)
     sqlite_seconds = time.perf_counter() - sqlite_started
+    field_payload = None
+    field_seconds = 0.0
+    if not disable_stormprob:
+        field_started = time.perf_counter()
+        try:
+            from EdgeWARN.stormprob import field as stormprob_field
+
+            patches = []
+            failed_fields = 0
+            for cell in cells:
+                if not isinstance(cell, dict):
+                    continue
+                result = (cell.get("modules") or {}).get("StormProb") or {}
+                if result.get("field_status") == "error":
+                    failed_fields += 1
+                record = cell.get("stormprob")
+                if isinstance(record, dict) and isinstance(record.get("field_patch"), dict):
+                    patches.append(record["field_patch"])
+            payload = stormprob_field.encode_field(patches, timestamp)
+            if not payload.startswith(stormprob_field.MAGIC):
+                raise ValueError("encoded field artifact lacks its magic header")
+            field_payload = payload
+            if failed_fields:
+                io_manager.write_warning(
+                    f"StormProb probability field omitted {failed_fields} cell(s) "
+                    "after rasterization errors"
+                )
+        except Exception as exc:
+            io_manager.write_warning(f"Failed to encode StormProb probability field: {exc}")
+        field_seconds = time.perf_counter() - field_started
     coordinator = CTAMPublicationCoordinator(fs.DATA_DIR / "ctam" / "transactions")
     coordinator.recover()
     index_seconds = 0.0
+    field_publish_seconds = 0.0
 
     def _publish_indexes():
-        nonlocal index_seconds
-        started = time.perf_counter()
+        nonlocal index_seconds, field_publish_seconds
+        field_started = time.perf_counter()
+        if field_payload is not None:
+            # The field is written only after every JSON target of this cycle
+            # has been replaced, so an artifact never appears for an unpublished
+            # scan. A field failure still publishes the cycle and its indexes.
+            try:
+                from EdgeWARN.stormprob.database import field_path
+                from util.atomic import atomic_write_bytes
+
+                atomic_write_bytes(field_path(timestamp), field_payload)
+            except Exception as exc:
+                io_manager.write_warning(
+                    f"Failed to publish StormProb probability field: {exc}"
+                )
+        field_publish_seconds = time.perf_counter() - field_started
+        index_started = time.perf_counter()
         try:
             _update_api_indexes(projected_cells, remove_old_cells, timestamp)
         finally:
-            index_seconds = time.perf_counter() - started
+            index_seconds = time.perf_counter() - index_started
 
     filesystem_started = time.perf_counter()
     snapshot["modified"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     coordinator.publish(payloads, publish_indexes=_publish_indexes, transaction_id=str(timestamp).replace(":", "-"),
                         db_dependency={"path": str(repository.path), "cycle_id": str(timestamp)})
-    filesystem_seconds = time.perf_counter() - filesystem_started - index_seconds
+    filesystem_seconds = (time.perf_counter() - filesystem_started
+                          - index_seconds - field_publish_seconds)
     repository.mark_projection_published(str(timestamp))
     from EdgeWARN.api_integration.config import (
         remove_old_cells_realtime,
@@ -616,6 +663,8 @@ def _publish_cycle(handler, timestamp, cells, json_path, remove_old_cells, input
         "Publication phases "
         f"cycle_id={timestamp} cells={len(projected_cells)} "
         f"sqlite_transaction_seconds={sqlite_seconds:.6f} "
+        f"field_seconds={field_seconds:.6f} "
+        f"field_publish_seconds={field_publish_seconds:.6f} "
         f"filesystem_publication_seconds={filesystem_seconds:.6f} "
         f"api_index_seconds={index_seconds:.6f} "
         f"total_seconds={time.perf_counter() - publication_started:.6f}"

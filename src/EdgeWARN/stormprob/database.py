@@ -42,6 +42,22 @@ def database_path(base_dir: Path | str | None = None) -> Path:
     return Path(base_dir if base_dir is not None else fs.BASE_DIR) / "data" / "stormprob" / "stormprob.sqlite3"
 
 
+def stormprob_fields_dir(base_dir: Path | str | None = None) -> Path:
+    """Directory holding published swept-probability field artifacts."""
+    return Path(base_dir if base_dir is not None else fs.BASE_DIR) / "data" / "stormprob" / "fields"
+
+
+def field_path(cycle_id: Any, base_dir: Path | str | None = None) -> Path:
+    """Published field path for one cycle, keyed by canonical ``YYYYMMDD-HHMMSS``.
+
+    The key matches the stormcell snapshot name and ``stormcell_index.json`` so
+    one index entry resolves both artifacts.
+    """
+    from .field import cycle_key
+
+    return stormprob_fields_dir(base_dir) / f"stormprob_field_{cycle_key(cycle_id)}.bin.gz"
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True, default=str)
 
@@ -816,5 +832,5 @@ class StormProbRepository:
                     "sha256": digest, "skipped": False}
 
 
-__all__ = ["StormProbRepository", "database_path", "LEADS", "PENDING_MODEL_VERSION",
-           "clean_projection", "clean_public_projection"]
+__all__ = ["StormProbRepository", "database_path", "stormprob_fields_dir", "field_path",
+           "LEADS", "PENDING_MODEL_VERSION", "clean_projection", "clean_public_projection"]

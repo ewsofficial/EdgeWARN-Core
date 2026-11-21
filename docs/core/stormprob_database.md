@@ -104,3 +104,26 @@ leads. Alerts require successful 15- and 30-minute leads; tracking requires a
 successful 15-minute lead. Sampled rays are floored at 0.1 km about each
 ensemble member's own centre. They never create opposite-direction boundary
 points.
+
+## Swept probability field artifacts
+
+Publication writes one swept field per cycle to
+`<BASE_DIR>/data/stormprob/fields/stormprob_field_<cycle>.bin.gz`. It is a
+filesystem artifact, not a SQLite table, and holds no cross-scan state. The
+format is `EWSPv2U1`: a 64-byte little-endian plain header (magic,
+`analysis_unix_ms`, the 15/60-minute window, ensemble size 20, contributing cell
+count, flags, domain `(lat_min, lon_min, dlat, dlon)`, crop origin, and crop
+shape) followed by a gzip container (level 6, `mtime = 0`) of row-major `uint8`
+member counts, rows ascending latitude. Counts are integers 0–20 and probability
+is `count / 20`; there is no calibration and no float plane. The crop is the
+union of the cell patches, processed in row bands capped by a pixel budget (at
+most 256 rows) so a full-crop array is never allocated; a scan with no ready
+cells writes only the header. The artifact is written only after the cycle's
+JSON snapshots are committed, and `field_index.json` lists canonical
+`YYYYMMDD-HHMMSS` cycle keys -- the same keys as `stormcell_index.json` and the
+artifact file names. Cell
+patches live on `cell["stormprob"]["field_patch"]` until publication and are
+never persisted, so the public cell projection is unchanged. Field files are
+retained by scan age through `APIIndexManager`
+(`detection.stormcell_cleanup_max_age_minutes`) and listed in
+`data/stormprob/fields/field_index.json`.

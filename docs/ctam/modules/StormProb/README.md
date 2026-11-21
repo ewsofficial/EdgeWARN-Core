@@ -30,8 +30,24 @@ predicted areas. Lead metadata carries `centroid_std_km`, the east/north
 marginal standard deviations of the centroid distribution. The predicted area
 is the largest component of the ≥0.25 occupancy contour (5 of 20 members). The
 polygon adaptively has 4–12 points, adding points when needed to fit the shape,
-and has a 1 km metric buffer. The current adapter does not persist detailed
-probability heatmaps or run a separate asynchronous heatmap workflow.
+and has a 1 km metric buffer.
+
+Core also publishes one domain-wide swept probability field per scan: for every
+0.01° cell of the configured runtime domain, the fraction of the 20 members
+whose footprint covers that cell at any time in `[T+15, T+60]`, as raw
+`count/20`. It is built from the same members as the leads, interpolating each
+member's radii and centre by member index in five-minute steps, so no cross-scan
+compositing or per-lead heatmap is stored. The artifact is
+`<BASE_DIR>/data/stormprob/fields/stormprob_field_<cycle>.bin.gz`: a 64-byte
+`EWSPv2U1` header followed by a gzip `uint8` member-count plane cropped to the
+union of the cell footprints; a quiet scan writes the header only. Publication
+writes it only after the cycle's JSON snapshots are committed; a raster failure
+is recorded internally as `field_status: error` with its `field_error` reason
+and never changes a lead, an alert, or a tracked cell. Fields age out with
+`detection.stormcell_cleanup_max_age_minutes` and are listed in
+`data/stormprob/fields/field_index.json` under canonical `YYYYMMDD-HHMMSS`
+cycle keys, the same keys as `stormcell_index.json`.
+
 A lead whose 0.25 contour is empty is recorded as `no-polygon` with reason
 `empty-0.25-contour`; it keeps the centroid but has no polygon.
 Handled non-successful leads contain a machine-readable reason and geometry is

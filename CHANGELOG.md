@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added: StormProb swept probability field
+- Core publishes one domain-wide swept probability field per scan: the fraction
+  of the 20 ensemble members whose footprint covers each 0.01° cell of the
+  configured runtime domain at any time in T+15 to T+60, as raw `count/20`.
+  Each artifact is `<BASE_DIR>/data/stormprob/fields/stormprob_field_<cycle>.bin.gz`
+  with an `EWSPv2U1` header and a gzip member-count plane, published alongside
+  the existing per-lead polygons, which are unchanged. Fields are listed in
+  `field_index.json` and expire with `detection.stormcell_cleanup_max_age_minutes`.
+  Postprocessing advances to `stormprob-postprocess/v4`. No API route is added
+  yet.
+
 ## [3.1.0] 2026-11-17
 
 3.1.0 is a breaking release. It retires the EWMRS rendering service and its

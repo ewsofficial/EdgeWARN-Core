@@ -17,7 +17,7 @@ import numpy as np
 
 from EdgeWARN.alerts import AlertManager
 from EdgeWARN.alerts.schema import AlertPayload
-from EdgeWARN.stormprob import MODEL_VERSION, assets, onnx_runtime, postprocess
+from EdgeWARN.stormprob import MODEL_VERSION, assets, field, onnx_runtime, postprocess
 from EdgeWARN.stormprob.database import LEADS, StormProbRepository
 from EdgeWARN.stormprob.envelope import geojson_to_alert_ring, swept_envelope_0_30
 from EdgeWARN.stormprob.features import predict_initial_wind
@@ -73,6 +73,7 @@ class BuiltinStormProbAdapter:
     def __init__(self, service: StormProbCycleService | None = None):
         self._service = service or StormProbCycleService()
         self._sessions = None
+        self._field_seconds = 0.0
 
     def _prepare(self, cell: dict[str, Any]) -> tuple[dict, dict]:
         if cell.get("tracking_mode") == "predicted":
@@ -118,6 +119,23 @@ class BuiltinStormProbAdapter:
         original_centroid = observation["centroid"]
         if original_polygon is None or original_centroid is None:
             raise ValueError("missing-original-ps-geometry")
+        # The swept field is auxiliary: a raster failure is recorded on the cell
+        # and never changes a lead, an alert, or a tracked cell.
+        field_started = time.perf_counter()
+        field_status = "ok"
+        field_error = None
+        target = cell.setdefault("stormprob", {})
+        try:
+            if not isinstance(target, dict):
+                raise ValueError("invalid-stormprob-cell-record")
+            target["field_patch"] = field.cell_patch(radii, centres, original_centroid)
+        except Exception as exc:
+            field_status = "error"
+            field_error = str(exc) or type(exc).__name__
+            if isinstance(target, dict):
+                target["field_error"] = field_error
+        self._field_seconds = (getattr(self, "_field_seconds", 0.0)
+                               + time.perf_counter() - field_started)
         analysis = _utc(timestamp)
         forecasts = []
         centroid_lat, centroid_lon = map(float, original_centroid)
@@ -166,6 +184,7 @@ class BuiltinStormProbAdapter:
         status = "success" if all(lead["status"] == "ok" for lead in forecasts) else "partial"
         return {"status": status, "model_version": MODEL_VERSION,
                 "analysis_time": timestamp, "leads": forecasts,
+                "field_status": field_status, "field_error": field_error,
                 "initial_wind_mps": [initial["u"], initial["v"]]}
 
     def run(self, cell: dict[str, Any]) -> None:
@@ -194,6 +213,7 @@ class BuiltinStormProbAdapter:
         if len(cells) > onnx_runtime.BATCH_SIZE:
             raise ValueError("StormProb batch exceeds graph capacity")
         batch_started = time.perf_counter()
+        self._field_seconds = 0.0
         fields = {
             "radial_history": ("radial_history", (30, 64), np.float32),
             "statistics_history": ("radial_statistics_history", (30, 1), np.float32),
@@ -221,6 +241,7 @@ class BuiltinStormProbAdapter:
                 "prepare_seconds": prepared_at - batch_started,
                 "inference_seconds": 0.0,
                 "postprocess_seconds": 0.0,
+                "field_seconds": self._field_seconds,
             }
             return
         try:
@@ -239,6 +260,7 @@ class BuiltinStormProbAdapter:
                 "prepare_seconds": prepared_at - batch_started,
                 "inference_seconds": time.perf_counter() - prepared_at,
                 "postprocess_seconds": 0.0,
+                "field_seconds": self._field_seconds,
             }
             return
         inferred_at = time.perf_counter()
@@ -263,6 +285,7 @@ class BuiltinStormProbAdapter:
             "prepare_seconds": prepared_at - batch_started,
             "inference_seconds": inferred_at - prepared_at,
             "postprocess_seconds": time.perf_counter() - inferred_at,
+            "field_seconds": self._field_seconds,
         }
 
     def alerts(self, cell: dict[str, Any]) -> list[AlertPayload]:
