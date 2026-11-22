@@ -65,6 +65,24 @@ def test_reach_bucketing_matches_the_naive_reference_on_a_wide_spread():
     np.testing.assert_array_equal(mask, _naive_swept(radii, centres, axis, axis))
 
 
+def test_split_bands_and_reused_workspace_match_the_naive_reference(monkeypatch):
+    """Tiny bands and a workspace reused across patch sizes keep the raster exact."""
+    rng = np.random.default_rng(29)
+    small_axis = np.arange(-30, 31, 1.0, dtype=np.float32)
+    wide_axis = np.arange(-70, 71, 1.0, dtype=np.float32)
+    cases = []
+    for axis in (wide_axis, small_axis, wide_axis):
+        radii = rng.uniform(2.0, 25.0, (1, 20, 4, 64)).astype(np.float32)
+        centres = rng.uniform(-25.0, 25.0, (1, 20, 4, 2)).astype(np.float32)
+        cases.append((radii, centres, axis))
+    expected = [_naive_swept(radii, centres, axis, axis) for radii, centres, axis in cases]
+    # One row of a narrow bucket per band forces every band-boundary path.
+    monkeypatch.setattr(postprocess, "_RASTER_BAND_ELEMENTS", 1)
+    for (radii, centres, axis), reference in zip(cases, expected):
+        mask = postprocess.swept_member_mask(radii, centres, axis, axis)
+        np.testing.assert_array_equal(mask, reference)
+
+
 def test_hand_case_covers_axis_from_seven_to_sixty_eight():
     radii = np.full((1, 20, 4, 64), 8.0, np.float32)
     centres = np.zeros((1, 20, 4, 2), np.float32)

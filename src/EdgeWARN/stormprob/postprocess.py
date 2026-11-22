@@ -13,6 +13,7 @@ T+15..T+60 window on the caller's axes, leaving the lead polygons untouched.
 from __future__ import annotations
 
 import math
+import threading
 
 import numpy as np
 
@@ -28,7 +29,10 @@ MIN_SAMPLED_RADIUS_KM = 0.1
 SWEEP_STEP_MINUTES = 5
 SWEEP_START_MINUTES = LEADS_MINUTES[0]
 SWEEP_END_MINUTES = LEADS_MINUTES[-1]
-_RASTER_BAND_ROWS = 64
+# Elements (members x rows x columns) per raster band, about 11 MB of scratch:
+# 20 members x 64 rows x 410 columns. Small reach buckets get taller bands, so
+# each numpy call does enough work to hide its fixed Python overhead.
+_RASTER_BAND_ELEMENTS = 1 << 19
 _RASTER_MEMBER_BUCKETS = 4
 _RASTER_REACH_SPREAD = 0.10
 OPERATIONAL_BUFFER_KM = 1.0
@@ -171,8 +175,10 @@ def swept_member_mask(radii, centres_km, east_axis_km, north_axis_km):
             raise ValueError(f"StormProb {name} axis must be finite and ascending")
     mask = np.zeros((north.size, east.size), dtype=np.uint32)
     bits = np.arange(ENSEMBLE_SIZE, dtype=np.uint32)[:, None, None]
+    workspace = _RasterWorkspace.for_patch(north.size, east.size)
     for member_radii, member_centres in _sweep_instants(radii, centres):
-        _rasterize_instant(mask, member_radii, member_centres, east, north, bits)
+        _rasterize_instant(mask, member_radii, member_centres, east, north, bits,
+                           workspace)
     return mask
 
 
@@ -188,22 +194,22 @@ def _sweep_instants(radii, centres):
                    centres[:, lead] * remaining + centres[:, lead + 1] * fraction)
 
 
-def _rasterize_instant(mask, radii, centres, east, north, bits):
+def _rasterize_instant(mask, radii, centres, east, north, bits, workspace):
     """OR one instant's all-member coverage into the swept bitmask patch.
 
     Members are swept one reach bucket at a time, and each bucket handles all its
     members in one vectorized call per row band. Bucketing keeps a compact
     member from paying for the bounding box of a member that has travelled far,
     while every member keeps the same test, so the grouping cannot change the
-    result. Pixels beyond a member's largest ray are rejected before the angular
-    interpolation.
+    result. Pixels beyond a member's largest ray are rejected by the reach test;
+    a band where no member reaches any pixel skips the angular interpolation.
     """
     reach = np.max(radii, axis=1)
     cx = centres[:, 0]
     cy = centres[:, 1]
     for members in _reach_buckets(reach):
         _rasterize_members(mask, radii[members], cx[members], cy[members],
-                           east, north, bits[members])
+                           east, north, bits[members], workspace)
 
 
 def _reach_buckets(reach):
@@ -229,7 +235,40 @@ def _reach_buckets(reach):
     return groups
 
 
-def _rasterize_members(mask, radii, cx, cy, east, north, bits):
+class _RasterWorkspace:
+    """Band-sized scratch arrays reused by every bucket, instant, and patch.
+
+    Band temporaries are large enough for the allocator to page-map them fresh
+    on every allocation, so the raster used to spend a large share of its time
+    in page faults. One grow-only set per thread is kept instead (about 12 MB
+    for a 341-column patch); views are prefixes of its flat buffers. The set is
+    thread-local because CTAM modules may run on server threads.
+    """
+
+    _DTYPES = (np.float32, np.float32, np.float32, np.int32, np.complex64, np.bool_, np.bool_)
+    _local = threading.local()
+
+    def __init__(self, size):
+        self.size = size
+        self._buffers = [np.empty(size, dtype=dtype) for dtype in self._DTYPES]
+
+    @classmethod
+    def for_patch(cls, rows, cols):
+        # A band never exceeds the element budget or one row of every member,
+        # whichever is larger, nor the whole patch.
+        size = min(ENSEMBLE_SIZE * rows * cols,
+                   max(_RASTER_BAND_ELEMENTS, ENSEMBLE_SIZE * cols))
+        workspace = getattr(cls._local, "workspace", None)
+        if workspace is None or workspace.size < size:
+            workspace = cls._local.workspace = cls(size)
+        return workspace
+
+    def views(self, shape):
+        size = shape[0] * shape[1] * shape[2]
+        return [buffer[:size].reshape(shape) for buffer in self._buffers]
+
+
+def _rasterize_members(mask, radii, cx, cy, east, north, bits, workspace):
     """OR one reach bucket's coverage into the swept bitmask patch."""
     if radii.shape[0] == 0:
         return
@@ -238,39 +277,64 @@ def _rasterize_members(mask, radii, cx, cy, east, north, bits):
     rows = _axis_window(north, float(np.min(cy - reach)), float(np.max(cy + reach)))
     if columns.start >= columns.stop or rows.start >= rows.stop:
         return
-    dx = east[columns][None, None, :] - cx[:, None, None]
-    members = np.arange(radii.shape[0], dtype=np.intp)[:, None, None]
-    for start in range(rows.start, rows.stop, _RASTER_BAND_ROWS):
-        stop = min(rows.stop, start + _RASTER_BAND_ROWS)
-        dy = north[start:stop][None, :, None] - cy[:, None, None]
+    count = radii.shape[0]
+    width = columns.stop - columns.start
+    dx = east[columns][None, :] - cx[:, None]
+    dx_squared = np.square(dx)[:, None, :]
+    # One complex64 entry per ray holds ``(low, high - low)`` for the ray and its
+    # neighbour, so a single gather replaces two. A 65th entry per member lets a
+    # ray index that rounding pushes to exactly 64 land on rays 0 and 1 as the
+    # reference wrap did. ``high - low`` is the same float32 subtraction the
+    # per-pixel form performed, so the interpolation is bit-identical.
+    low = np.concatenate((radii, radii[:, :1]), axis=1)
+    high = np.concatenate((radii[:, 1:], radii[:, :2]), axis=1)
+    table = np.empty(low.shape, dtype=np.complex64)
+    table.real = low
+    table.imag = high - low
+    table = table.reshape(-1)
+    # Member offsets into the flattened table, added in float32 before the one
+    # integer conversion; offsets stay far below 2**24, so the add is exact.
+    offset = (np.arange(count, dtype=np.float32) * np.float32(low.shape[1]))[:, None, None]
+    weights = np.left_shift(np.uint32(1), bits)
+    band_rows = max(1, _RASTER_BAND_ELEMENTS // (count * width))
+    for start in range(rows.start, rows.stop, band_rows):
+        stop = min(rows.stop, start + band_rows)
+        shape = (count, stop - start, width)
+        distance, angle, floor, index, pair, inside, hit = workspace.views(shape)
+        dy = (north[start:stop][None, :] - cy[:, None])[:, :, None]
         # Square-then-sqrt replaces the per-element libm ``hypot``; patch
         # windows are at most a few hundred km, so float32 cannot overflow.
-        distance = np.square(dx) + np.square(dy)
+        np.add(dx_squared, np.square(dy), out=distance)
         np.sqrt(distance, out=distance)
-        inside = distance <= reach[:, None, None]
+        np.less_equal(distance, reach[:, None, None], out=inside)
         if not inside.any():
             continue
-        angle = np.zeros(distance.shape, dtype=np.float32)
-        np.arctan2(dy, dx, out=angle, where=inside)
+        # Every pixel takes the plain SIMD ``arctan2``: a ``where=`` mask forces
+        # numpy's masked loop, which costs several times more than the angles it
+        # skips. Pixels beyond reach are discarded by ``inside`` below.
+        np.arctan2(dy, dx[:, None, :], out=angle)
         np.multiply(angle, np.float32(64 / (2 * math.pi)), out=angle)
         # arctan2 spans (-pi, pi], i.e. (-32, 32] rays, so one conditional add
-        # wraps the negatives as remainder(angle, 64) did, without the full-array
-        # float modulo that dominates a wide-spread raster. Rounding can leave a
-        # value just below a ray boundary at exactly 64.0; the integer wrap below
-        # maps that back to ray 0, as the reference arithmetic did.
+        # wraps the negatives as remainder(angle, 64) did, without a full-array
+        # float modulo. Rounding can leave a value at exactly 64.0; the 65th
+        # table entry maps that back to ray 0.
         np.add(angle, np.float32(64), out=angle, where=angle < 0)
-        floor = np.floor(angle)
+        np.floor(angle, out=floor)
         # ``angle`` becomes the fractional position between the two adjacent rays.
         np.subtract(angle, floor, out=angle)
-        lo = floor.astype(np.intp)
-        lo[lo == 64] = 0
-        hi = np.mod(lo + 1, 64)
-        low_radius = radii[members, lo]
-        high_radius = radii[members, hi]
-        interpolated = low_radius + (high_radius - low_radius) * angle
-        inside &= distance <= interpolated
-        packed = inside.astype(np.uint32)
-        np.left_shift(packed, bits, out=packed)
+        np.add(floor, offset, out=floor)
+        # int32 converts far faster than intp and ``take`` widens it cheaply.
+        # Indices are in range by construction (ray 0..64 plus the member
+        # offset), so ``clip`` only skips numpy's per-element bounds check.
+        np.copyto(index, floor, casting="unsafe")
+        np.take(table, index, out=pair, mode="clip")
+        np.multiply(pair.imag, angle, out=angle)
+        np.add(pair.real, angle, out=angle)
+        np.less_equal(distance, angle, out=hit)
+        inside &= hit
+        # ``floor`` is free again; reuse its bytes for the per-member bit plane.
+        packed = floor.view(np.uint32)
+        np.multiply(inside, weights, out=packed)
         mask[start:stop, columns] |= np.bitwise_or.reduce(packed, axis=0)
 
 
