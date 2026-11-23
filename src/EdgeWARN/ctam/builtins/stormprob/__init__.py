@@ -128,7 +128,8 @@ class BuiltinStormProbAdapter:
         try:
             if not isinstance(target, dict):
                 raise ValueError("invalid-stormprob-cell-record")
-            target["field_patch"] = field.cell_patch(radii, centres, original_centroid)
+            target["field_patch"] = field.cell_patch(
+                radii, centres, original_centroid, polygon_latlon=original_polygon)
         except Exception as exc:
             field_status = "error"
             field_error = str(exc) or type(exc).__name__

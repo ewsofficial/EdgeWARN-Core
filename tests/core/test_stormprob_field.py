@@ -405,3 +405,23 @@ def test_swept_field_latency_and_working_set():
     tracemalloc.stop()
     assert large.rows * large.cols > 1_500_000
     assert peak < 8 * 1024 * 1024, f"{peak / 1024 / 1024:.1f} MB working set"
+
+
+def test_cell_patch_includes_current_polygon_with_all_members():
+    domain = _domain()
+    # Every member sweeps 10 km north, so the storm's own footprint is uncovered.
+    radii = np.full((1, 20, 4, 64), 1.0, np.float32)
+    centres = np.zeros((1, 20, 4, 2), np.float32)
+    centres[..., 1] = 10.0
+    lat, lon = domain.row_latitude(50), domain.col_longitude(50)
+    ring = [[lat - 0.03, lon - 0.03], [lat - 0.03, lon + 0.03],
+            [lat + 0.03, lon + 0.03], [lat + 0.03, lon - 0.03]]
+    bare = field.cell_patch(radii, centres, (lat, lon), domain=domain)
+    patch = field.cell_patch(radii, centres, (lat, lon), domain=domain, polygon_latlon=ring)
+    for row, col in ((50, 50), (48, 52), (52, 48)):
+        assert np.bitwise_count(bare["mask"][row - bare["row"], col - bare["col"]]) == 0
+        assert np.bitwise_count(patch["mask"][row - patch["row"], col - patch["col"]]) == 20
+    # A sub-cell polygon still marks one cell.
+    tiny = [[lat, lon], [lat, lon + 0.001], [lat + 0.001, lon]]
+    small = field.cell_patch(radii, centres, (lat, lon), domain=domain, polygon_latlon=tiny)
+    assert np.bitwise_count(small["mask"][50 - small["row"], 50 - small["col"]]) == 20

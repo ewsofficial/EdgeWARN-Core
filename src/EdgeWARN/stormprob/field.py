@@ -103,7 +103,8 @@ def load_domain(config_dir: str | None = None) -> Domain:
     return domain
 
 
-def cell_patch(radii_km, centres_km, centroid_latlon, *, domain: Domain | None = None) -> dict:
+def cell_patch(radii_km, centres_km, centroid_latlon, *, domain: Domain | None = None,
+               polygon_latlon=None) -> dict:
     """Rasterize one cell's swept members straight onto its domain box.
 
     The local offset is separable: the east axis depends only on the column,
@@ -111,7 +112,9 @@ def cell_patch(radii_km, centres_km, centroid_latlon, *, domain: Domain | None =
     The cell's reach keeps a 2 km margin so a fast storm's sweep is not clipped,
     and radii are floored at the model's 0.1 km minimum. Returns the transient
     ``{"row", "col", "mask"}`` record used by publication; the mask is a
-    ``uint32`` patch whose bounds are domain indices.
+    ``uint32`` patch whose bounds are domain indices. ``polygon_latlon`` is the
+    cell's current ``[lat, lon]`` detection ring: the storm is already there, so
+    every grid cell it covers counts all members regardless of the sweep.
     """
     domain = load_domain() if domain is None else domain
     radii = np.maximum(np.asarray(radii_km, dtype=np.float32),
@@ -126,6 +129,16 @@ def cell_patch(radii_km, centres_km, centroid_latlon, *, domain: Domain | None =
     if not math.isfinite(scale) or abs(scale) < 1e-6:
         raise ValueError("invalid longitude scale for StormProb field")
     reach_km = float(np.max(np.abs(centres)) + np.max(radii)) + CELL_REACH_MARGIN_KM
+    polygon_km = None
+    if polygon_latlon is not None:
+        points = np.asarray(polygon_latlon, dtype=np.float64)
+        if points.ndim != 2 or points.shape[1] != 2 or points.shape[0] < 3 \
+                or not np.all(np.isfinite(points)):
+            raise ValueError("invalid StormProb current polygon")
+        polygon_km = np.column_stack((
+            ((points[:, 1] - lon_c + 180.0) % 360.0 - 180.0) * scale,
+            (points[:, 0] - lat_c) * KM_PER_DEGREE))
+        reach_km = max(reach_km, float(np.max(np.abs(polygon_km))) + CELL_REACH_MARGIN_KM)
     reach_lat = reach_km / KM_PER_DEGREE
     reach_lon = reach_km / scale
     res = domain.resolution_deg
@@ -146,8 +159,31 @@ def cell_patch(radii_km, centres_km, centroid_latlon, *, domain: Domain | None =
     east = (domain.col_longitude(np.arange(col_start, col_stop, dtype=np.float64))
             - lon_c) * scale
     mask = postprocess.swept_member_mask(radii, centres, east, north)
+    if polygon_km is not None:
+        mask |= _polygon_member_mask(polygon_km, east, north)
     return {"row": row_start, "col": col_start,
             "mask": np.ascontiguousarray(mask[::-1])}
+
+
+def _polygon_member_mask(polygon_km, east, north) -> Any:
+    """All-member bits on grid cells whose centre the local polygon touches.
+
+    A polygon smaller than a cell can miss every centre, so the cell nearest its
+    centroid is always included.
+    """
+    import shapely
+
+    polygon = shapely.Polygon(polygon_km)
+    if not polygon.is_valid:
+        polygon = polygon.buffer(0)
+    full = np.uint32((1 << ENSEMBLE_SIZE) - 1)
+    grid_east, grid_north = np.meshgrid(east, north)
+    inside = shapely.intersects_xy(polygon, grid_east, grid_north)
+    if not inside.any() and not polygon.is_empty:
+        centre = polygon.centroid
+        inside[int(np.argmin(np.abs(north - centre.y))),
+               int(np.argmin(np.abs(east - centre.x)))] = True
+    return np.where(inside, full, np.uint32(0)).astype(np.uint32)
 
 
 def encode_field(patches, analysis_time: Any, *, domain: Domain | None = None) -> bytes:
