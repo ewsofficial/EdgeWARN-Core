@@ -7,7 +7,8 @@
   of the 20 ensemble members whose footprint covers each 0.01° cell of the
   configured runtime domain at any time in T+15 to T+60, as raw `count/20`.
   Each artifact is `<BASE_DIR>/data/stormprob/fields/stormprob_field_<cycle>.bin.gz`
-  with an `EWSPv2U1` header and a gzip member-count plane, published alongside
+  with an `EWSPv2U1` header and a gzip member-count plane on the MRMS grid
+  (cell centres, row 0 northernmost, so pixels overlay MRMS one-to-one), published alongside
   the existing per-lead polygons, which are unchanged. Fields are listed in
   `field_index.json` and expire with `detection.stormcell_cleanup_max_age_minutes`.
   Postprocessing advances to `stormprob-postprocess/v4`. No API route is added

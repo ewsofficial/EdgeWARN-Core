@@ -112,9 +112,14 @@ Publication writes one swept field per cycle to
 filesystem artifact, not a SQLite table, and holds no cross-scan state. The
 format is `EWSPv2U1`: a 64-byte little-endian plain header (magic,
 `analysis_unix_ms`, the 15/60-minute window, ensemble size 20, contributing cell
-count, flags, domain `(lat_min, lon_min, dlat, dlon)`, crop origin, and crop
+count, flags, domain `(first_lat, first_lon, dlat, dlon)`, crop origin, and crop
 shape) followed by a gzip container (level 6, `mtime = 0`) of row-major `uint8`
-member counts, rows ascending latitude. Counts are integers 0–20 and probability
+member counts. The grid matches MRMS: values sit at 0.01° cell centres, row 0 is
+the northernmost row, rows step south by `dlat` and columns step east by `dlon`.
+`first_lat`/`first_lon` is the centre of the domain's north-west pixel and the
+crop origin is the centre of the crop's north-west pixel, so the default
+`[20, 55] × [230, 300]` domain starts at 54.995 N, 230.005 E like the MRMS CONUS
+grid and every field pixel overlays one MRMS pixel. Counts are integers 0–20 and probability
 is `count / 20`; there is no calibration and no float plane. The crop is the
 union of the cell patches, processed in row bands capped by a pixel budget (at
 most 256 rows) so a full-crop array is never allocated; a scan with no ready

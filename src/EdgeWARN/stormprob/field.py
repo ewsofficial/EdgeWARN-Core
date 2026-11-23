@@ -8,9 +8,13 @@ Nothing is composited across scans.
 
 A file is a 64-byte plain header followed by a gzip container (level 6,
 ``mtime = 0``, deterministic) holding the row-major ``uint8`` member counts.
-Rows ascend latitude. The header stays outside the compressed body so an empty
-field is exactly the header and a client can locate the crop without inflating
-the plane.
+The grid matches MRMS: values sit at cell centres on half-hundredth degrees,
+row 0 is the northernmost row, and rows step south while columns step east.
+For the default CONUS domain the first point is 54.995 N, 230.005 E, the MRMS
+first grid point, so a field pixel overlays one MRMS pixel exactly. Header
+coordinates are cell centres. The header stays outside the compressed body so
+an empty field is exactly the header and a client can locate the crop without
+inflating the plane.
 """
 from __future__ import annotations
 
@@ -46,7 +50,12 @@ KM_PER_DEGREE = 111.0
 
 @dataclass(frozen=True)
 class Domain:
-    """Rectangular 0.01-degree grid; row 0 is the southernmost latitude band."""
+    """Rectangular 0.01-degree MRMS-style grid over ``[lat_min, lat_max]``.
+
+    Row ``i`` and column ``j`` are the cell centred at
+    ``(lat_max - (i + 0.5) * res, lon_min + (j + 0.5) * res)``: row 0 is the
+    northernmost row, as in MRMS.
+    """
 
     lat_min: float
     lon_min: float
@@ -62,10 +71,23 @@ class Domain:
     def cols(self) -> int:
         return max(0, int(math.floor((self.lon_max - self.lon_min) / self.resolution_deg + 1e-9)))
 
+    def row_latitude(self, row) -> Any:
+        """Centre latitude of a row index (scalar or array)."""
+        return self.lat_max - (row + 0.5) * self.resolution_deg
+
+    def col_longitude(self, col) -> Any:
+        """Centre longitude of a column index (scalar or array)."""
+        return self.lon_min + (col + 0.5) * self.resolution_deg
+
     @property
     def bounds(self) -> tuple[float, float, float, float]:
-        """Header form: ``(lat_min, lon_min, dlat, dlon)``."""
-        return (self.lat_min, self.lon_min, self.resolution_deg, self.resolution_deg)
+        """Header form: ``(first_lat, first_lon, dlat, dlon)``.
+
+        The first point is the north-west cell centre; rows step south by
+        ``dlat`` and columns step east by ``dlon``.
+        """
+        return (self.row_latitude(0), self.col_longitude(0),
+                self.resolution_deg, self.resolution_deg)
 
 
 def load_domain(config_dir: str | None = None) -> Domain:
@@ -104,25 +126,28 @@ def cell_patch(radii_km, centres_km, centroid_latlon, *, domain: Domain | None =
     if not math.isfinite(scale) or abs(scale) < 1e-6:
         raise ValueError("invalid longitude scale for StormProb field")
     reach_km = float(np.max(np.abs(centres)) + np.max(radii)) + CELL_REACH_MARGIN_KM
-    row_start = max(0, math.floor((lat_c - reach_km / KM_PER_DEGREE - domain.lat_min)
-                                  / domain.resolution_deg))
-    row_stop = min(domain.rows, math.ceil((lat_c + reach_km / KM_PER_DEGREE - domain.lat_min)
-                                          / domain.resolution_deg) + 1)
-    col_start = max(0, math.floor((lon_c - reach_km / scale - domain.lon_min)
-                                  / domain.resolution_deg))
-    col_stop = min(domain.cols, math.ceil((lon_c + reach_km / scale - domain.lon_min)
-                                          / domain.resolution_deg) + 1)
+    reach_lat = reach_km / KM_PER_DEGREE
+    reach_lon = reach_km / scale
+    res = domain.resolution_deg
+    # Rows count southward from ``lat_max``; both index ranges use cell centres.
+    row_start = max(0, math.floor((domain.lat_max - lat_c - reach_lat) / res - 0.5))
+    row_stop = min(domain.rows,
+                   math.ceil((domain.lat_max - lat_c + reach_lat) / res - 0.5) + 1)
+    col_start = max(0, math.floor((lon_c - reach_lon - domain.lon_min) / res - 0.5))
+    col_stop = min(domain.cols,
+                   math.ceil((lon_c + reach_lon - domain.lon_min) / res - 0.5) + 1)
     if row_stop <= row_start or col_stop <= col_start:
         return {"row": min(row_start, domain.rows), "col": min(col_start, domain.cols),
                 "mask": np.zeros((0, 0), dtype=np.uint32)}
-    north = (domain.lat_min
-             + np.arange(row_start, row_stop, dtype=np.float64) * domain.resolution_deg
-             - lat_c) * KM_PER_DEGREE
-    east = (domain.lon_min
-            + np.arange(col_start, col_stop, dtype=np.float64) * domain.resolution_deg
+    # The kernel needs an ascending north axis, so rasterize south to north and
+    # flip the patch into the grid's north-first row order.
+    south_first_rows = np.arange(row_stop - 1, row_start - 1, -1, dtype=np.float64)
+    north = (domain.row_latitude(south_first_rows) - lat_c) * KM_PER_DEGREE
+    east = (domain.col_longitude(np.arange(col_start, col_stop, dtype=np.float64))
             - lon_c) * scale
     mask = postprocess.swept_member_mask(radii, centres, east, north)
-    return {"row": row_start, "col": col_start, "mask": mask}
+    return {"row": row_start, "col": col_start,
+            "mask": np.ascontiguousarray(mask[::-1])}
 
 
 def encode_field(patches, analysis_time: Any, *, domain: Domain | None = None) -> bytes:
@@ -145,8 +170,9 @@ def encode_field(patches, analysis_time: Any, *, domain: Domain | None = None) -
         row_start = col_start = row_stop = col_stop = 0
     crop_rows = row_stop - row_start
     crop_cols = col_stop - col_start
-    crop_lat = domain.lat_min + row_start * domain.resolution_deg
-    crop_lon = domain.lon_min + col_start * domain.resolution_deg
+    # The crop origin is the centre of the crop's north-west pixel.
+    crop_lat = domain.row_latitude(row_start)
+    crop_lon = domain.col_longitude(col_start)
     header = HEADER.pack(
         MAGIC, _analysis_milliseconds(analysis_time),
         WINDOW_START_MINUTES, WINDOW_END_MINUTES, ENSEMBLE_SIZE, 0,

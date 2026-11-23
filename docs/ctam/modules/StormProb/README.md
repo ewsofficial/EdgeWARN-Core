@@ -40,7 +40,9 @@ member's radii and centre by member index in five-minute steps, so no cross-scan
 compositing or per-lead heatmap is stored. The artifact is
 `<BASE_DIR>/data/stormprob/fields/stormprob_field_<cycle>.bin.gz`: a 64-byte
 `EWSPv2U1` header followed by a gzip `uint8` member-count plane cropped to the
-union of the cell footprints; a quiet scan writes the header only. Publication
+union of the cell footprints; a quiet scan writes the header only. The plane
+uses the MRMS grid layout: 0.01° cell centres, row 0 northernmost, so each pixel
+overlays one MRMS pixel. Publication
 writes it only after the cycle's JSON snapshots are committed; a raster failure
 is recorded internally as `field_status: error` with its `field_error` reason
 and never changes a lead, an alert, or a tracked cell. Fields age out with

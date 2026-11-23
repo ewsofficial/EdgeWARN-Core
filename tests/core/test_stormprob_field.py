@@ -169,7 +169,7 @@ def test_member_wise_union_counts_members_not_cells():
     assert field.decode_header(payload)["cell_count"] == 2
 
 
-def test_format_round_trip_is_deterministic_and_rows_ascend_north():
+def test_format_round_trip_is_deterministic_and_rows_step_south():
     domain = _domain()
     mask = np.zeros((4, 5), dtype=np.uint32)
     mask[:] = (1 << 20) - 1
@@ -182,12 +182,14 @@ def test_format_round_trip_is_deterministic_and_rows_ascend_north():
     assert decoded["window_end_minutes"] == 60
     assert decoded["ensemble_size"] == 20
     assert decoded["analysis_unix_ms"] == 1714564800000
-    assert decoded["domain_bounds"] == pytest.approx((30.0, 260.0, 0.01, 0.01), rel=1e-6)
-    assert decoded["crop_origin"] == pytest.approx((30.4, 260.6), rel=1e-6)
+    # Header coordinates are cell centres: the north-west domain pixel and the
+    # north-west crop pixel (row 40 counts south from 31.0 N).
+    assert decoded["domain_bounds"] == pytest.approx((30.995, 260.005, 0.01, 0.01), rel=1e-6)
+    assert decoded["crop_origin"] == pytest.approx((30.595, 260.605), rel=1e-6)
     assert decoded["crop_shape"] == (4, 5)
     np.testing.assert_array_equal(decoded["member_count"], np.full((4, 5), 20, np.uint8))
-    # Higher latitude rows sit later in the plane and in the crop origin.
-    assert decoded["crop_origin"][0] > decoded["domain_bounds"][0]
+    # Row 0 is the northernmost row, so a crop below it has a lower origin.
+    assert decoded["crop_origin"][0] < decoded["domain_bounds"][0]
 
 
 def test_quiet_scan_writes_only_the_header():
@@ -268,14 +270,39 @@ def test_cell_patch_projects_separably_onto_the_domain_grid():
     centres = np.zeros((1, 20, 4, 2), np.float32)
     patch = field.cell_patch(radii, centres, (30.5, 260.5), domain=domain)
     mask = patch["mask"]
-    centre_row = 50 - patch["row"]
-    centre_col = 50 - patch["col"]
+    # Row 49 is centred at 30.505 N and column 49 at 260.495 E.
+    centre_row = 49 - patch["row"]
+    centre_col = 49 - patch["col"]
     assert np.bitwise_count(mask[centre_row, centre_col]) == 20
     assert mask[0, 0] == 0
     # The east axis grows with the column: a 5 km radius is gone six 0.01-degree cells east.
     assert np.bitwise_count(mask[centre_row, centre_col + 6]) == 0
     # At 30.5 N a kilometre spans more longitude cells than latitude cells.
     assert mask.shape[1] > mask.shape[0]
+
+
+def test_default_domain_matches_the_mrms_conus_grid():
+    domain = field.Domain(20.0, 230.0, 55.0, 300.0)
+    assert (domain.rows, domain.cols) == (3500, 7000)
+    # MRMS first grid point and last grid point, both cell centres.
+    assert domain.bounds == pytest.approx((54.995, 230.005, 0.01, 0.01))
+    assert domain.row_latitude(domain.rows - 1) == pytest.approx(20.005)
+    assert domain.col_longitude(domain.cols - 1) == pytest.approx(299.995)
+
+
+def test_cell_patch_rows_run_north_to_south():
+    domain = _domain()
+    radii = np.full((1, 20, 4, 64), 1.0, np.float32)
+    centres = np.zeros((1, 20, 4, 2), np.float32)
+    centres[..., 1] = 5.0  # every member sits 5 km north of the centroid
+    centroid = (domain.row_latitude(50), domain.col_longitude(50))
+    patch = field.cell_patch(radii, centres, centroid, domain=domain)
+    rows, cols = np.nonzero(np.bitwise_count(patch["mask"]))
+    covered_rows = rows + patch["row"]
+    # 5 km north is about 4.5 rows, so coverage sits at lower row indices.
+    assert covered_rows.max() < 50
+    assert 44 <= int(np.round(covered_rows.mean())) <= 46
+    assert int(np.round((cols + patch["col"]).mean())) == 50
 
 
 def test_adapter_attaches_a_transient_field_patch(tmp_path, monkeypatch):
