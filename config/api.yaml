@@ -42,8 +42,8 @@ logging:
 
 rate_limits:
   # Set max to 0 only to intentionally disable this limiter.
-  per_second: {max: 100, window_ms: 1000}
-  per_minute: {max: 6000, window_ms: 60000}
+  per_second: {max: 30, window_ms: 1000}
+  per_minute: {max: 1800, window_ms: 60000}
   standard_headers: true
   legacy_headers: false
 

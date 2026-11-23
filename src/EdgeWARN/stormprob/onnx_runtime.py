@@ -68,47 +68,30 @@ def load_sessions(model_dir: str | Path, manifest_path: str | Path,
     return tuple(sessions)
 
 
-@lru_cache(maxsize=4)
-def load_calibrator(model_dir: str | Path, manifest_path: str | Path) -> dict:
-    """Load and hash-check the paired lead-specific calibration table."""
-    manifest = json.loads(Path(manifest_path).read_text())
-    expected = manifest["deployment_parameters"]["calibrator"]["sha256"]
-    path = Path(model_dir) / "isotonic_calibrator.json"
-    if not path.is_file() or _hash(path) != expected:
-        raise ModelUnavailable(f"Missing or hash-mismatched StormProb calibrator: {path}")
-    calibrator = json.loads(path.read_text())
-    if len(calibrator.get("parameters", [])) != 4:
-        raise ModelUnavailable("StormProb calibrator does not contain four leads")
-    return calibrator
-
-
 def infer_pair(radial_session, motion_session, *, radial_history, statistics_history,
-               current_features, history_mask, history_sequence, trajectory_sequence,
-               trajectory_mask):
+               current_features, history_mask, trajectory_sequence, trajectory_mask):
     """Execute both fixed batch-128 graphs and return named float32 outputs."""
     tensors = {
         "radial_history": np.asarray(radial_history, dtype=np.float32),
         "statistics_history": np.asarray(statistics_history, dtype=np.float32),
         "current_features": np.asarray(current_features, dtype=np.float32),
         "history_mask": np.asarray(history_mask, dtype=np.bool_),
-        "history_sequence": np.asarray(history_sequence, dtype=np.float32),
         "trajectory_sequence": np.asarray(trajectory_sequence, dtype=np.float32),
         "trajectory_mask": np.asarray(trajectory_mask, dtype=np.bool_),
     }
     required = {"radial_history": (BATCH_SIZE, 30, 64), "statistics_history": (BATCH_SIZE, 30, 1),
                 "current_features": (BATCH_SIZE, 135), "history_mask": (BATCH_SIZE, 30),
-                "history_sequence": (BATCH_SIZE, 30, 135), "trajectory_sequence": (BATCH_SIZE, 30, 16),
+                "trajectory_sequence": (BATCH_SIZE, 30, 16),
                 "trajectory_mask": (BATCH_SIZE, 30)}
     for key, shape in required.items():
         if tensors[key].shape != shape:
             raise ValueError(f"{key} shape {tensors[key].shape}; expected {shape}")
     inference_started = time.perf_counter()
     try:
-        mean, log_std = radial_session.run(None, {key: tensors[key] for key in
+        mean, log_std, offset, cholesky = radial_session.run(None, {key: tensors[key] for key in
             ("radial_history", "statistics_history", "current_features", "history_mask")})
         residual, = motion_session.run(None, {key: tensors[key] for key in
-            ("current_features", "history_sequence", "history_mask",
-             "trajectory_sequence", "trajectory_mask")})
+            ("current_features", "trajectory_sequence", "trajectory_mask")})
     except Exception as exc:
         raise ModelUnavailable(f"StormProb ONNX inference failed: {exc}") from exc
     finally:
@@ -117,10 +100,14 @@ def infer_pair(radial_session, motion_session, *, radial_history, statistics_his
             f"{time.perf_counter() - inference_started:.3f}s"
         )
     outputs = {"coefficient_mean": mean, "coefficient_log_std": log_std,
+               "centroid_offset_km": offset, "centroid_cholesky": cholesky,
                "residual_motion_mps": residual}
+    shapes = {"coefficient_mean": (BATCH_SIZE, 4, 33), "coefficient_log_std": (BATCH_SIZE, 4, 33),
+              "centroid_offset_km": (BATCH_SIZE, 4, 2), "centroid_cholesky": (BATCH_SIZE, 4, 2, 2),
+              "residual_motion_mps": (BATCH_SIZE, 4, 2)}
     for name, value in outputs.items():
         if value.dtype != np.float32 or not np.isfinite(value).all():
             raise ModelUnavailable(f"StormProb {name} is non-finite or not float32")
-    if mean.shape != (BATCH_SIZE, 4, 33) or log_std.shape != (BATCH_SIZE, 4, 33) or residual.shape != (BATCH_SIZE, 4, 2):
-        raise ModelUnavailable("StormProb ONNX output shape mismatch")
+        if value.shape != shapes[name]:
+            raise ModelUnavailable(f"StormProb {name} output shape {value.shape}; expected {shapes[name]}")
     return outputs

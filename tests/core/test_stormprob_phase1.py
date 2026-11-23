@@ -278,8 +278,7 @@ class TestTrackBuilder:
         assert tensors["trajectory_mask"] == [False] * 29 + [True]
         assert tensors["trajectory_sequence"][-1][:14] == [0.0] * 14
         assert tensors["trajectory_sequence"][-1][15] == pytest.approx(1 / 30)
-        assert len(tensors["history_sequence"]) == 30
-        assert len(tensors["history_sequence"][0]) == 135
+        assert "history_sequence" not in tensors
 
     def test_duplicate_timestamp_last_wins(self):
         first = _obs("2022-04-13T21:00:00", lat=35.0)

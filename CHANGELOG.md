@@ -1,10 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Added: StormProb swept probability field
+- Core publishes one domain-wide swept probability field per scan: the fraction
+  of the 20 ensemble members whose footprint covers each 0.01° cell of the
+  configured runtime domain at any time in T+15 to T+60, as raw `count/20`.
+  Each artifact is `<BASE_DIR>/data/stormprob/fields/stormprob_field_<cycle>.bin.gz`
+  with an `EWSPv2U1` header and a gzip member-count plane on the MRMS grid
+  (cell centres, row 0 northernmost, so pixels overlay MRMS one-to-one), published alongside
+  the existing per-lead polygons, which are unchanged. Fields are listed in
+  `field_index.json` and expire with `detection.stormcell_cleanup_max_age_minutes`.
+  Postprocessing advances to `stormprob-postprocess/v4`. No API route is added
+  yet.
+
 ## [3.1.0] 2026-11-17
 
 3.1.0 is a breaking release. It retires the EWMRS rendering service and its
 accessory products. Read *Breaking: EWMRS retirement* and *Upgrade and rollback*
 before deploying. EWMRS work developed during the 3.1.0 cycle never shipped.
+
+### Changed: StormProb joint model (`stormprob/v2`)
+- Replaced the radial model and isotonic calibrator with a joint radial/centroid
+  ensemble. Probability is the raw 20-member fraction at the 0.25 threshold; the
+  calibrator asset is no longer shipped. Forecast rows use `stormprob/v2`;
+  leads with an empty contour are persisted as `no-polygon`, including when the
+  module reports `partial`. `stormprob.audit` evaluates `stormprob/v2` rows only.
 
 ### Breaking: EWMRS retirement
 - Removed the EWMRS service/package, raster chunk and RAP Uint16 production,

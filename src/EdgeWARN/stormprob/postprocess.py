@@ -1,33 +1,60 @@
-"""Versioned float32 StormProb sampling and instantaneous contour construction.
+"""Versioned float32 StormProb joint sampling and instantaneous contour construction.
 
 Input arrays are the paired ONNX outputs and committed observation geometry.
-The 20-member ensemble uses NumPy PCG64 seed 42 by default. An explicit noise
-array permits exact replay of the PyTorch evaluation ensemble during parity
-validation. This module never interprets a lead contour as a swept envelope.
+Each of the 20 ensemble members pairs an independent Fourier shape draw with an
+independent Gaussian centroid draw. By default both come from one NumPy PCG64(42)
+stream: shape noise ``[1,20,4,33]`` first, then centroid noise ``[1,20,4,2]``.
+Explicit noise permits exact replay of the PyTorch evaluation ensemble during
+parity validation. Probability is the raw member fraction ``k/20``; no
+calibration is applied. A lead contour is never interpreted as a swept envelope;
+``swept_member_mask`` instead unions each member's footprint across the
+T+15..T+60 window on the caller's axes, leaving the lead polygons untouched.
 """
 from __future__ import annotations
 
 import math
+import threading
 
 import numpy as np
 
 
-VERSION = "stormprob-postprocess/v2"
-OPERATIONAL_GEOMETRY_VERSION = "stormprob-operational-envelope/v1"
+VERSION = "stormprob-postprocess/v4"
+OPERATIONAL_GEOMETRY_VERSION = "stormprob-operational-envelope/v2"
 LEADS_MINUTES = (15, 30, 45, 60)
 ENSEMBLE_SIZE = 20
 GRID_HALF_WIDTH_KM = 100
 GRID_RESOLUTION_KM = 1
 THRESHOLD = 0.25
 MIN_SAMPLED_RADIUS_KM = 0.1
+SWEEP_STEP_MINUTES = 5
+SWEEP_START_MINUTES = LEADS_MINUTES[0]
+SWEEP_END_MINUTES = LEADS_MINUTES[-1]
+# Elements (members x rows x columns) per raster band, about 11 MB of scratch:
+# 20 members x 64 rows x 410 columns. Small reach buckets get taller bands, so
+# each numpy call does enough work to hide its fixed Python overhead.
+_RASTER_BAND_ELEMENTS = 1 << 19
+_RASTER_MEMBER_BUCKETS = 4
+_RASTER_REACH_SPREAD = 0.10
 OPERATIONAL_BUFFER_KM = 1.0
 OPERATIONAL_MIN_POINTS = 4
 OPERATIONAL_MAX_POINTS = 12
 OPERATIONAL_MAX_AREA_INFLATION = 1.25
 
 
+def _sweep_fractions() -> tuple[np.float32, ...]:
+    """Fractions of one lead interval at the configured sweep step."""
+    gap = LEADS_MINUTES[1] - LEADS_MINUTES[0]
+    if SWEEP_STEP_MINUTES <= 0 or gap % SWEEP_STEP_MINUTES:
+        raise ValueError("StormProb sweep step must divide the lead spacing")
+    steps = gap // SWEEP_STEP_MINUTES
+    return tuple(np.float32(index) / np.float32(steps) for index in range(1, steps + 1))
+
+
+SWEEP_FRACTIONS = _sweep_fractions()
+
+
 def sample_radii(mean, log_std, current_radii, *, noise=None):
-    """Return `[1,20,4,64]` radii with the v7 scorecard's 0.1 km floor."""
+    """Return `[1,20,4,64]` radii with the joint model's 0.1 km floor."""
     mean = np.asarray(mean, dtype=np.float32)
     log_std = np.asarray(log_std, dtype=np.float32)
     current = np.asarray(current_radii, dtype=np.float32)
@@ -52,55 +79,285 @@ def sample_radii(mean, log_std, current_radii, *, noise=None):
     return np.maximum(radii, np.float32(MIN_SAMPLED_RADIUS_KM))
 
 
-def occupancy_probability(radii, displacement_km):
-    """Return four uncalibrated 201x201 occupancy probabilities."""
+def sample_joint(mean, log_std, current_radii, base_km, offset_km, cholesky, *,
+                 noise=None):
+    """Return paired member radii `[1,20,4,64]` and centres `[1,20,4,2]` in km.
+
+    Centre = base + offset + L @ z, with L the lower-triangular Cholesky factor.
+    ``noise`` is an optional ``(shape_noise, centroid_noise)`` pair.
+    """
+    base = np.asarray(base_km, dtype=np.float32)
+    offset = np.asarray(offset_km, dtype=np.float32)
+    chol = np.asarray(cholesky, dtype=np.float32)
+    if base.shape != (1, 4, 2) or offset.shape != base.shape or chol.shape != (1, 4, 2, 2):
+        raise ValueError("Invalid StormProb centroid shape")
+    if noise is None:
+        rng = np.random.default_rng(42)
+        shape_noise = rng.standard_normal((1, ENSEMBLE_SIZE, 4, 33), dtype=np.float32)
+        centroid_noise = rng.standard_normal((1, ENSEMBLE_SIZE, 4, 2), dtype=np.float32)
+    else:
+        shape_noise, centroid_noise = noise
+    centroid_noise = np.asarray(centroid_noise, dtype=np.float32)
+    if centroid_noise.shape != (1, ENSEMBLE_SIZE, 4, 2):
+        raise ValueError("Invalid StormProb centroid noise shape")
+    radii = sample_radii(mean, log_std, current_radii, noise=shape_noise)
+    centres = (base + offset)[:, None] + (chol[:, None] @ centroid_noise[..., None])[..., 0]
+    return radii, centres
+
+
+def occupancy_probability(radii, centres_km):
+    """Return four raw 201x201 member-fraction probabilities, members about own centres."""
     radii = np.asarray(radii, dtype=np.float32)
-    centres = np.asarray(displacement_km, dtype=np.float32)
-    if radii.shape != (1, ENSEMBLE_SIZE, 4, 64) or centres.shape != (1, 4, 2):
-        raise ValueError("Invalid StormProb radii or displacement shape")
+    centres = np.asarray(centres_km, dtype=np.float32)
+    if radii.shape != (1, ENSEMBLE_SIZE, 4, 64) or centres.shape != (1, ENSEMBLE_SIZE, 4, 2):
+        raise ValueError("Invalid StormProb radii or centre shape")
     axis = np.arange(-GRID_HALF_WIDTH_KM, GRID_HALF_WIDTH_KM + 1, dtype=np.float32)
-    east, north = np.meshgrid(axis, axis, indexing="xy")
     counts = np.zeros((4, 201, 201), dtype=np.uint8)
     for lead in range(4):
-        dx = east - centres[0, lead, 0]
-        dy = north - centres[0, lead, 1]
-        angle = np.mod(np.arctan2(dy, dx), np.float32(2 * math.pi)) * np.float32(64 / (2 * math.pi))
-        floor = np.floor(angle)
-        lo = floor.astype(np.int64) % 64
-        hi = (lo + 1) % 64
-        frac = angle - floor
-        distance = np.sqrt(dx * dx + dy * dy)
         for member in range(ENSEMBLE_SIZE):
+            cx, cy = centres[0, member, lead]
+            # Pixels beyond the member's largest ray cannot be occupied, so
+            # rasterize only its bounding box (1 km margin); the result is unchanged.
+            reach = float(np.max(radii[0, member, lead])) + 1.0
+            columns = _grid_window(axis, cx, reach)
+            rows = _grid_window(axis, cy, reach)
+            if columns.start >= columns.stop or rows.start >= rows.stop:
+                continue
+            east, north = np.meshgrid(axis[columns], axis[rows], indexing="xy")
+            dx = east - cx
+            dy = north - cy
+            angle = np.mod(np.arctan2(dy, dx), np.float32(2 * math.pi)) * np.float32(64 / (2 * math.pi))
+            floor = np.floor(angle)
+            lo = floor.astype(np.int64) % 64
+            hi = (lo + 1) % 64
+            frac = angle - floor
+            distance = np.sqrt(dx * dx + dy * dy)
             profile = np.maximum(radii[0, member, lead], 0.0)
             interpolated = profile[lo] + (profile[hi] - profile[lo]) * frac
-            counts[lead] += distance <= interpolated
+            counts[lead, rows, columns] += distance <= interpolated
     return counts.astype(np.float32) / np.float32(ENSEMBLE_SIZE)
 
 
-def calibrated_masks(probability, calibrator):
-    """Apply the four lead-specific isotonic tables at the 0.25 threshold."""
-    probability = np.asarray(probability, dtype=np.float32)
-    if probability.shape != (4, 201, 201):
-        raise ValueError("Invalid StormProb occupancy grid shape")
-    masks = np.zeros_like(probability, dtype=np.bool_)
-    for lead in range(4):
-        levels = np.asarray(calibrator["parameters"][lead]["calibrated_probabilities"],
-                            dtype=np.float32)
-        if levels.shape != (21,):
-            raise ValueError(f"Invalid StormProb calibrator lead {lead}")
-        index = np.clip(np.rint(probability[lead] * ENSEMBLE_SIZE).astype(np.int64), 0, 20)
-        masks[lead] = levels[index] >= THRESHOLD
-    return masks
+def _grid_window(axis, centre, reach):
+    """Index slice of grid coordinates within [centre - reach, centre + reach]."""
+    return _axis_window(axis, centre - reach, centre + reach)
 
 
-def displacement(initial_wind_mps, residual_motion_mps):
-    """Return east/north displacement in km for the four lead times."""
+def _axis_window(axis, low, high):
+    """Index slice of ascending axis coordinates within [low, high]."""
+    start = int(np.searchsorted(axis, np.float32(low), side="left"))
+    stop = int(np.searchsorted(axis, np.float32(high), side="right"))
+    return slice(start, stop)
+
+
+def swept_member_mask(radii, centres_km, east_axis_km, north_axis_km):
+    """Return per-member swept coverage as a ``uint32`` bitmask patch.
+
+    Bit ``m`` is set where ensemble member ``m`` covers the point at any instant
+    in ``[T+15, T+60]``. Between leads each member's radii and centre are
+    interpolated by member index in five-minute steps, matching the swept branch
+    of the StormProb evaluation scorecard. ``east_axis_km`` and
+    ``north_axis_km`` are ascending kilometres about the cell's analysis
+    centroid, so longitude scaling is the caller's separable projection. Radii
+    are floored at the joint model's 0.1 km minimum and are never negative.
+    """
+    radii = np.maximum(np.asarray(radii, dtype=np.float32),
+                       np.float32(MIN_SAMPLED_RADIUS_KM))
+    centres = np.asarray(centres_km, dtype=np.float32)
+    if radii.shape != (1, ENSEMBLE_SIZE, 4, 64) or centres.shape != (1, ENSEMBLE_SIZE, 4, 2):
+        raise ValueError("Invalid StormProb radii or centre shape")
+    east = np.array(east_axis_km, dtype=np.float32, copy=True).reshape(-1)
+    north = np.array(north_axis_km, dtype=np.float32, copy=True).reshape(-1)
+    for name, axis in (("east", east), ("north", north)):
+        if axis.size == 0:
+            raise ValueError(f"Empty StormProb {name} axis")
+        if not np.all(np.isfinite(axis)) or np.any(np.diff(axis) <= 0):
+            raise ValueError(f"StormProb {name} axis must be finite and ascending")
+    mask = np.zeros((north.size, east.size), dtype=np.uint32)
+    bits = np.arange(ENSEMBLE_SIZE, dtype=np.uint32)[:, None, None]
+    workspace = _RasterWorkspace.for_patch(north.size, east.size)
+    for member_radii, member_centres in _sweep_instants(radii, centres):
+        _rasterize_instant(mask, member_radii, member_centres, east, north, bits,
+                           workspace)
+    return mask
+
+
+def _sweep_instants(radii, centres):
+    """Yield the ten ``[20,64]`` radii / ``[20,2]`` centre blocks of the window."""
+    radii = radii[0]
+    centres = centres[0]
+    yield radii[:, 0], centres[:, 0]
+    for lead in range(len(LEADS_MINUTES) - 1):
+        for fraction in SWEEP_FRACTIONS:
+            remaining = np.float32(1) - fraction
+            yield (radii[:, lead] * remaining + radii[:, lead + 1] * fraction,
+                   centres[:, lead] * remaining + centres[:, lead + 1] * fraction)
+
+
+def _rasterize_instant(mask, radii, centres, east, north, bits, workspace):
+    """OR one instant's all-member coverage into the swept bitmask patch.
+
+    Members are swept one reach bucket at a time, and each bucket handles all its
+    members in one vectorized call per row band. Bucketing keeps a compact
+    member from paying for the bounding box of a member that has travelled far,
+    while every member keeps the same test, so the grouping cannot change the
+    result. Pixels beyond a member's largest ray are rejected by the reach test;
+    a band where no member reaches any pixel skips the angular interpolation.
+    """
+    reach = np.max(radii, axis=1)
+    cx = centres[:, 0]
+    cy = centres[:, 1]
+    for members in _reach_buckets(reach):
+        _rasterize_members(mask, radii[members], cx[members], cy[members],
+                           east, north, bits[members], workspace)
+
+
+def _reach_buckets(reach):
+    """Group member indices by similar reach, at most ``_RASTER_MEMBER_BUCKETS``."""
+    order = np.argsort(reach, kind="stable")
+    top = float(reach[order[-1]])
+    if top <= 0.0 or top - float(reach[order[0]]) <= max(1.0, _RASTER_REACH_SPREAD * top):
+        return [order]
+    limit = max(1.0, _RASTER_REACH_SPREAD * top)
+    groups = []
+    start = 0
+    base = float(reach[order[0]])
+    for position in range(1, order.size):
+        value = float(reach[order[position]])
+        if value - base > limit:
+            groups.append(order[start:position])
+            start = position
+            base = value
+    groups.append(order[start:])
+    if len(groups) > _RASTER_MEMBER_BUCKETS:
+        size = math.ceil(order.size / _RASTER_MEMBER_BUCKETS)
+        groups = [order[index:index + size] for index in range(0, order.size, size)]
+    return groups
+
+
+class _RasterWorkspace:
+    """Band-sized scratch arrays reused by every bucket, instant, and patch.
+
+    Band temporaries are large enough for the allocator to page-map them fresh
+    on every allocation, so the raster used to spend a large share of its time
+    in page faults. One grow-only set per thread is kept instead (about 12 MB
+    for a 341-column patch); views are prefixes of its flat buffers. The set is
+    thread-local because CTAM modules may run on server threads.
+    """
+
+    _DTYPES = (np.float32, np.float32, np.float32, np.int32, np.complex64, np.bool_, np.bool_)
+    _local = threading.local()
+
+    def __init__(self, size):
+        self.size = size
+        self._buffers = [np.empty(size, dtype=dtype) for dtype in self._DTYPES]
+
+    @classmethod
+    def for_patch(cls, rows, cols):
+        # A band never exceeds the element budget or one row of every member,
+        # whichever is larger, nor the whole patch.
+        size = min(ENSEMBLE_SIZE * rows * cols,
+                   max(_RASTER_BAND_ELEMENTS, ENSEMBLE_SIZE * cols))
+        workspace = getattr(cls._local, "workspace", None)
+        if workspace is None or workspace.size < size:
+            workspace = cls._local.workspace = cls(size)
+        return workspace
+
+    def views(self, shape):
+        size = shape[0] * shape[1] * shape[2]
+        return [buffer[:size].reshape(shape) for buffer in self._buffers]
+
+
+def _rasterize_members(mask, radii, cx, cy, east, north, bits, workspace):
+    """OR one reach bucket's coverage into the swept bitmask patch."""
+    if radii.shape[0] == 0:
+        return
+    reach = np.max(radii, axis=1)
+    columns = _axis_window(east, float(np.min(cx - reach)), float(np.max(cx + reach)))
+    rows = _axis_window(north, float(np.min(cy - reach)), float(np.max(cy + reach)))
+    if columns.start >= columns.stop or rows.start >= rows.stop:
+        return
+    count = radii.shape[0]
+    width = columns.stop - columns.start
+    dx = east[columns][None, :] - cx[:, None]
+    dx_squared = np.square(dx)[:, None, :]
+    # One complex64 entry per ray holds ``(low, high - low)`` for the ray and its
+    # neighbour, so a single gather replaces two. A 65th entry per member lets a
+    # ray index that rounding pushes to exactly 64 land on rays 0 and 1 as the
+    # reference wrap did. ``high - low`` is the same float32 subtraction the
+    # per-pixel form performed, so the interpolation is bit-identical.
+    low = np.concatenate((radii, radii[:, :1]), axis=1)
+    high = np.concatenate((radii[:, 1:], radii[:, :2]), axis=1)
+    table = np.empty(low.shape, dtype=np.complex64)
+    table.real = low
+    table.imag = high - low
+    table = table.reshape(-1)
+    # Member offsets into the flattened table, added in float32 before the one
+    # integer conversion; offsets stay far below 2**24, so the add is exact.
+    offset = (np.arange(count, dtype=np.float32) * np.float32(low.shape[1]))[:, None, None]
+    weights = np.left_shift(np.uint32(1), bits)
+    band_rows = max(1, _RASTER_BAND_ELEMENTS // (count * width))
+    for start in range(rows.start, rows.stop, band_rows):
+        stop = min(rows.stop, start + band_rows)
+        shape = (count, stop - start, width)
+        distance, angle, floor, index, pair, inside, hit = workspace.views(shape)
+        dy = (north[start:stop][None, :] - cy[:, None])[:, :, None]
+        # Square-then-sqrt replaces the per-element libm ``hypot``; patch
+        # windows are at most a few hundred km, so float32 cannot overflow.
+        np.add(dx_squared, np.square(dy), out=distance)
+        np.sqrt(distance, out=distance)
+        np.less_equal(distance, reach[:, None, None], out=inside)
+        if not inside.any():
+            continue
+        # Every pixel takes the plain SIMD ``arctan2``: a ``where=`` mask forces
+        # numpy's masked loop, which costs several times more than the angles it
+        # skips. Pixels beyond reach are discarded by ``inside`` below.
+        np.arctan2(dy, dx[:, None, :], out=angle)
+        np.multiply(angle, np.float32(64 / (2 * math.pi)), out=angle)
+        # arctan2 spans (-pi, pi], i.e. (-32, 32] rays, so one conditional add
+        # wraps the negatives as remainder(angle, 64) did, without a full-array
+        # float modulo. Rounding can leave a value at exactly 64.0; the 65th
+        # table entry maps that back to ray 0.
+        np.add(angle, np.float32(64), out=angle, where=angle < 0)
+        np.floor(angle, out=floor)
+        # ``angle`` becomes the fractional position between the two adjacent rays.
+        np.subtract(angle, floor, out=angle)
+        np.add(floor, offset, out=floor)
+        # int32 converts far faster than intp and ``take`` widens it cheaply.
+        # Indices are in range by construction (ray 0..64 plus the member
+        # offset), so ``clip`` only skips numpy's per-element bounds check.
+        np.copyto(index, floor, casting="unsafe")
+        np.take(table, index, out=pair, mode="clip")
+        np.multiply(pair.imag, angle, out=angle)
+        np.add(pair.real, angle, out=angle)
+        np.less_equal(distance, angle, out=hit)
+        inside &= hit
+        # ``floor`` is free again; reuse its bytes for the per-member bit plane.
+        packed = floor.view(np.uint32)
+        np.multiply(inside, weights, out=packed)
+        mask[start:stop, columns] |= np.bitwise_or.reduce(packed, axis=0)
+
+
+def base_displacement(initial_wind_mps, residual_motion_mps):
+    """Return frozen-motion east/north displacement in km for the four lead times."""
     initial = np.asarray(initial_wind_mps, dtype=np.float32)
     residual = np.asarray(residual_motion_mps, dtype=np.float32)
     if initial.shape != (2,) or residual.shape != (1, 4, 2):
         raise ValueError("Invalid StormProb wind or residual shape")
     seconds = np.asarray(LEADS_MINUTES, dtype=np.float32) * np.float32(60)
     return ((initial[None] + residual[0]) * seconds[:, None] / np.float32(1000))[None]
+
+
+def contour_polygon(probability, threshold=THRESHOLD):
+    """Return the largest >=threshold component exterior as local km points, or None."""
+    probability = np.asarray(probability, dtype=np.float32)
+    if probability.shape != (201, 201):
+        raise ValueError("Invalid StormProb occupancy grid shape")
+    polygons = _mask_polygons_local(probability >= np.float32(threshold))
+    if not polygons:
+        return None
+    largest = max(polygons, key=lambda polygon: polygon.area)
+    return np.asarray(largest.exterior.coords[:-1], dtype=np.float64)
 
 
 def _vertex_count(polygon) -> int:
@@ -266,57 +523,22 @@ def _operational_envelope_local(original, predicted, *, buffer_km=OPERATIONAL_BU
     raise ValueError("cannot fit forecast envelope within operational point and area limits")
 
 
-def calibrated_radial_boundary(radii_km, calibrator, lead_index, *,
-                               threshold=THRESHOLD):
-    """Convert calibrated occupancy probability into a radial boundary.
-
-    Along a ray, occupancy at a radius is the number of ensemble members whose
-    radial extent reaches that radius. The first calibrated member count at or
-    above the threshold therefore selects the corresponding order statistic.
-    """
-    radii = np.asarray(radii_km, dtype=np.float64)
-    if radii.shape != (ENSEMBLE_SIZE, 64) or not np.all(np.isfinite(radii)):
-        raise ValueError("invalid ensemble radial shape or values")
-    # A nonpositive extent terminates at the forecast centroid, never on
-    # the opposite ray. Apply the same rule to occupancy and contours.
-    radii = np.maximum(radii, 0.0)
-    levels = np.asarray(calibrator["parameters"][lead_index][
-        "calibrated_probabilities"], dtype=np.float64)
-    if levels.shape != (ENSEMBLE_SIZE + 1,) or not np.all(np.isfinite(levels)):
-        raise ValueError("invalid calibrated probability levels")
-    qualifying = np.flatnonzero(levels >= float(threshold))
-    if qualifying.size == 0:
-        raise ValueError("calibrator has no qualifying probability level")
-    member_count = int(qualifying[0])
-    # Count zero means the outermost ensemble boundary is the conservative
-    # finite representation of an everywhere-qualified contour.
-    if member_count == 0:
-        return np.max(radii, axis=0).astype(np.float32)
-    return np.sort(radii, axis=0)[::-1][member_count - 1].astype(np.float32)
-
-
-def operational_envelope(original_polygon_latlon, centroid_latlon, displacement_km,
-                         radii_km, calibrator, lead_index, *,
+def operational_envelope(original_polygon_latlon, centroid_latlon, contour_local_km, *,
                          buffer_km=OPERATIONAL_BUFFER_KM):
     """Return an adaptive 4-12 point, 1 km buffered forecast envelope.
 
-    The envelope spans the original detection polygon and the calibrated
-    predicted radial shape for one lead. Four points are used when the shape
-    fits; additional support points are added up to twelve when needed to keep
-    buffered area inflation within the operational tolerance. All geometry
-    operations are performed in local east/north kilometres; the result is
-    GeoJSON in [longitude, latitude].
+    The envelope spans the original detection polygon and the 0.25 occupancy
+    contour for one lead (local east/north km about ``centroid_latlon``). Four
+    points are used when the shape fits; additional support points are added up
+    to twelve when needed to keep buffered area inflation within the
+    operational tolerance. The result is GeoJSON in [longitude, latitude].
     """
     original_local, _ = _to_local(original_polygon_latlon, centroid_latlon)
     centroid = np.asarray(centroid_latlon, dtype=np.float64)
-    displacement = np.asarray(displacement_km, dtype=np.float64)
-    radii = calibrated_radial_boundary(radii_km, calibrator, lead_index)
-    if radii.shape != (64,) or displacement.shape != (2,):
-        raise ValueError("invalid operational forecast shape")
-    angle = np.arange(64, dtype=np.float64) * (2.0 * math.pi / 64.0)
-    predicted_local = np.column_stack((
-        displacement[0] + radii * np.cos(angle),
-        displacement[1] + radii * np.sin(angle)))
+    predicted_local = np.asarray(contour_local_km, dtype=np.float64)
+    if (predicted_local.ndim != 2 or predicted_local.shape[1] != 2
+            or not np.all(np.isfinite(predicted_local))):
+        raise ValueError("invalid operational forecast contour")
     buffered = _operational_envelope_local(original_local, predicted_local,
                                             buffer_km=buffer_km)
     lat, lon = map(float, centroid)
@@ -343,10 +565,23 @@ def _to_local(polygon_latlon, centroid_latlon):
     return np.column_stack((east, north)), False
 
 
+def _mask_polygons_local(mask):
+    """Polygonize one 201x201 grid mask into shapely polygons in local km."""
+    from affine import Affine
+    from rasterio.features import shapes
+    from shapely.geometry import shape
+
+    transform = Affine.translation(-100.5, 100.5) * Affine.scale(1, -1)
+    # Rasterio expects north-to-south rows; occupancy rows are ascending north.
+    image = np.ascontiguousarray(np.asarray(mask, dtype=np.bool_)[::-1].astype(np.uint8))
+    if not image.any():
+        return []
+    return [shape(geometry) for geometry, value in
+            shapes(image, mask=image.astype(np.bool_), transform=transform) if value == 1]
+
+
 def polygons_from_masks(masks, centroid_latlon):
     """Polygonize each instantaneous mask into valid GeoJSON lon/lat rings."""
-    from rasterio.features import shapes
-    from affine import Affine
     from shapely.affinity import translate
     from shapely.geometry import MultiPolygon, Polygon, box, mapping, shape
 
@@ -354,22 +589,17 @@ def polygons_from_masks(masks, centroid_latlon):
     lat, lon = map(float, centroid_latlon)
     if masks.shape != (4, 201, 201) or not (-90 < lat < 90) or not math.isfinite(lon):
         raise ValueError("Invalid StormProb mask or centroid")
-    transform = Affine.translation(-100.5, 100.5) * Affine.scale(1, -1)
     results = []
     for lead in range(4):
         if not masks[lead].any():
             results.append({"status": "no-polygon:empty-0.25-contour", "geometry": None})
             continue
         polygons = []
-        # Rasterio expects north-to-south rows; occupancy rows are ascending north.
-        image = np.ascontiguousarray(masks[lead, ::-1].astype(np.uint8))
-        for geometry, value in shapes(image, mask=image.astype(np.bool_), transform=transform):
-            if value != 1:
-                continue
+        for local in _mask_polygons_local(masks[lead]):
             rings = []
-            for ring in geometry["coordinates"]:
+            for ring in (local.exterior, *local.interiors):
                 geographic = []
-                for east_km, north_km in ring:
+                for east_km, north_km in ring.coords:
                     point_lon = lon + east_km / (111 * math.cos(math.radians(lat)))
                     point_lat = lat + north_km / 111
                     geographic.append([float(point_lon), float(point_lat)])

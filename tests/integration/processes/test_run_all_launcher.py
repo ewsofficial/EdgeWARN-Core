@@ -173,6 +173,16 @@ class TestSupervision:
 
         child = Child()
         monkeypatch.setattr(run_all.subprocess, "Popen", lambda *_a, **_k: child)
+
+        # The fake pid must never reach the real killpg: on a host where
+        # process group 1234 exists, killpg succeeds or raises PermissionError,
+        # the direct-child fallback is skipped, and a real process could be
+        # signalled. A test double has no process group.
+        def _no_process_group(pgid, _signum):
+            assert pgid == child.pid
+            raise ProcessLookupError(pgid)
+
+        monkeypatch.setattr(run_all.os, "killpg", _no_process_group)
         monkeypatch.setattr(
             run_all.time, "sleep", lambda _seconds: (_ for _ in ()).throw(
                 RuntimeError("supervisor failed")

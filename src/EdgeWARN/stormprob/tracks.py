@@ -25,7 +25,7 @@ semantics with explicitly documented Phase 1 policies:
   the one-valid-row path.
 
 From the same committed rows the builder derives the motion-model tensors
-(``current`` [135], ``history_sequence`` [30, 135], ``history_mask`` [30],
+(``current`` [135], ``history_mask`` [30],
 ``trajectory_sequence`` [30, 16], ``trajectory_mask`` [30]) and the radial
 tensors (``radial_history`` [30, 64], ``radial_statistics_history`` [30, 1],
 ``radial_history_mask`` [30]).
@@ -332,8 +332,6 @@ def build_model_inputs(
 
     return {
         "current": [float(v) for v in current_rows[-1]],
-        "history_sequence": [[0.0] * _features.N_CURRENT for _ in range(pad)]
-                            + [list(map(float, row)) for row in valid_current],
         "history_mask": [False] * pad + [True] * len(valid_current),
         "trajectory_sequence": [[0.0] * _features.N_TRAJECTORY for _ in range(pad)]
                                + [list(map(float, row)) for row in valid_traj],

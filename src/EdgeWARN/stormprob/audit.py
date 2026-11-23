@@ -14,6 +14,7 @@ from pathlib import Path
 import statistics
 import struct
 
+from . import MODEL_VERSION
 from .database import StormProbRepository
 from .features import CURRENT_FEATURE_ORDER, MISSING_THRESHOLD, feature_order_checksum
 
@@ -40,8 +41,8 @@ def audit(repository: StormProbRepository, *, cycle_limit: int = 20,
             WHERE o.cycle_id IN ({placeholders})""",
             [row[0] for row in cycles]).fetchall()
         forecasts = db.execute(f"""SELECT lead_minutes,status,metadata_json FROM forecasts
-            WHERE cycle_id IN ({placeholders}) AND model_version='stormprob/v1'""",
-            [row[0] for row in cycles]).fetchall()
+            WHERE cycle_id IN ({placeholders}) AND model_version=?""",
+            [*(row[0] for row in cycles), MODEL_VERSION]).fetchall()
     counts = Counter()
     values = {name: [] for name in CURRENT_FEATURE_ORDER}
     freshness = Counter()

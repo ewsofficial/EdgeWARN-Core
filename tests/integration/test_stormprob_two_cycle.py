@@ -44,7 +44,7 @@ def test_stormprob_cycle_n_history_drives_cycle_n_plus_1_tracker():
     adapter._sessions = None
     def forecast(cell):
         return {
-        "status": "success", "model_version": "stormprob/v1",
+        "status": "success", "model_version": "stormprob/v2",
         "analysis_time": cell["timestamp"], "leads": [
             {"lead_minutes": lead, "east_km": 3.0, "north_km": 1.5,
              "status": "ok", "metadata": {}} for lead in (15, 30, 45, 60)]}

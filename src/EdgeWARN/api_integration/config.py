@@ -55,3 +55,15 @@ def inactive_cell_max_age_minutes() -> int:
 def stormprob_inactive_cell_max_age_minutes() -> int:
     """Age after which realtime cleanup prunes inactive StormProb history."""
     return _api_index()["stormprob_inactive_cell_max_age_minutes"]
+
+
+def stormprob_field_max_age_minutes() -> int:
+    """Age above which published StormProb probability fields expire.
+
+    Owned by ``detection.stormcell_cleanup_max_age_minutes``: a swept field
+    describes the same scan as its stormcell snapshot, so the two artifacts age
+    out together instead of leaving one readable without the other.
+    """
+    from EdgeWARN.process.detect.config import section
+
+    return section("detection")["stormcell_cleanup_max_age_minutes"]
