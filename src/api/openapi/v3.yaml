@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgeWARN Unified API",
-    "version": "3.1.0",
+    "version": "3.2.0",
     "description": "The versioned, read-only EdgeWARN public API."
   },
   "servers": [

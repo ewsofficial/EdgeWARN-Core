@@ -16,7 +16,7 @@ server:
   openapi_spec: <src_dir>/api/openapi/v3.yaml
   production_version_label: '2.x'
 
-  v3_api_version: '3.1.0'
+  v3_api_version: '3.2.0'
 
 security:
   # One year; do not lower for production HTTPS deployments.
