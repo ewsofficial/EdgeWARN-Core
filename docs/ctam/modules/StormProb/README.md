@@ -48,7 +48,9 @@ is recorded internally as `field_status: error` with its `field_error` reason
 and never changes a lead, an alert, or a tracked cell. Fields age out with
 `detection.stormcell_cleanup_max_age_minutes` and are listed in
 `data/stormprob/fields/field_index.json` under canonical `YYYYMMDD-HHMMSS`
-cycle keys, the same keys as `stormcell_index.json`.
+cycle keys, the same keys as `stormcell_index.json`. The unified API serves each
+published field at `/api/v3/stormprob-fields` and
+`/api/v3/stormprob-fields/{timestamp}` (see `docs/api/unified_v3.md`).
 
 A lead whose 0.25 contour is empty is recorded as `no-polygon` with reason
 `empty-0.25-contour`; it keeps the centroid but has no polygon.

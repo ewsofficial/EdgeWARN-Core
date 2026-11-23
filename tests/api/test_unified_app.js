@@ -96,6 +96,48 @@ describe('unified API app', () => {
 
   
 
+  it('serves StormProb swept fields: list, bytes, ETag/304, HEAD, and errors', async () => {
+    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stormprob-field-api-'));
+    const fieldDir = path.join(baseDir, 'data', 'stormprob', 'fields');
+    const serviceDir = path.join(baseDir, 'state', 'realtime', 'services');
+    await fs.mkdir(fieldDir, { recursive: true });
+    await fs.mkdir(serviceDir, { recursive: true });
+    await fs.writeFile(path.join(serviceDir, 'edgewarn.json'), JSON.stringify({
+      schema_version: 1, service: 'edgewarn', pid: 1, run_id: 'test-run',
+      updated_at: new Date().toISOString(), last_successful_activity: new Date().toISOString(),
+      phase: 'cycling', degraded_children: []
+    }));
+    const { app } = await createApp({ env: { EDGEWARN_BASE_DIR: baseDir,
+      RATE_LIMIT_MAX_SEC: '0', RATE_LIMIT_MAX_MIN: '0' }, argv: [] });
+    // Absent index degrades to an empty collection.
+    expect((await request(app).get('/api/v3/stormprob-fields').expect(200)).body.data).toEqual([]);
+
+    const payload = Buffer.from([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 1, 2, 3]);
+    await fs.writeFile(path.join(fieldDir, 'stormprob_field_20260317-200000.bin.gz'), payload);
+    await fs.writeFile(path.join(fieldDir, 'field_index.json'),
+      JSON.stringify({ timestamps: ['20260317-190000', '20260317-200000'] }));
+
+    const list = await request(app).get('/api/v3/stormprob-fields').expect(200);
+    expect(list.body.data).toEqual(['20260317-200000', '20260317-190000']);
+    const paged = await request(app).get('/api/v3/stormprob-fields?limit=1').expect(200);
+    expect(paged.body.meta.nextCursor).toBe('20260317-200000');
+
+    const url = '/api/v3/stormprob-fields/20260317-200000';
+    const response = await request(app).get(url).expect(200).expect('Content-Type', /application\/gzip/);
+    expect(response.headers['cache-control']).toContain('immutable');
+    expect(Buffer.compare(Buffer.from(response.body), payload)).toBe(0);
+    const { etag } = response.headers;
+    expect(etag).toBeTruthy();
+    await request(app).get(url).set('If-None-Match', etag).expect(304);
+    const head = await request(app).head(url).expect(200);
+    expect(head.headers['content-length']).toBe(String(payload.length));
+
+    await request(app).get('/api/v3/stormprob-fields/not-a-time').expect(400);
+    await request(app).get('/api/v3/stormprob-fields/20260317-210000').expect(404);
+    await request(app).post(url).expect(405).expect('Allow', 'GET, HEAD');
+    await request(app).get(`${url}?x=1`).expect(400);
+  });
+
   it('paginates numeric cell IDs with string cursors', async () => {
     baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unified-api-pages-'));
     await fs.mkdir(path.join(baseDir, 'data', 'cells'), { recursive: true });

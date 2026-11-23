@@ -7,6 +7,7 @@ Core and NEXRAD artifacts. `/api/v3/openapi.json` is the authoritative contract.
 
 - `/api/v3/cells` and `/cells/{cellId}`
 - `/api/v3/storm-snapshots` and `/storm-snapshots/{timestamp}`
+- `/api/v3/stormprob-fields` and `/stormprob-fields/{timestamp}`
 - `/api/v3/alert-snapshots` and `/alert-snapshots/{timestamp}`
 - `/api/v3/alerts/{alertId}`
 - `/api/v3/modules`, `/modules/{moduleId}`, `/modules/{moduleId}/{routeId}`
@@ -25,6 +26,19 @@ Requests carry `X-Request-Id`. Application errors use RFC 9457
 Pagination rejects pruned cursors; restart without a cursor to obtain the
 current collection. NEXRAD `.bin.gz` artifacts retain their binary layout,
 stream/range handling, HEAD behavior, and immutable caching.
+
+`/stormprob-fields` lists published field timestamps (`YYYYMMDD-HHMMSS`,
+newest first, from `data/stormprob/fields/field_index.json`; empty when the
+index is absent). `/stormprob-fields/{timestamp}` streams the
+`stormprob_field_<timestamp>.bin.gz` artifact as `application/gzip` with
+`ETag`, `304`, `HEAD`, and immutable caching. Invalid timestamps return 400 and
+unpublished ones 404. Both routes require the `edgewarn` service. Layout
+(`EWSPv2U1`): gzip of a 64-byte little-endian header (magic, `analysis_unix_ms`
+u64, window start/end minutes u16, ensemble size u16, reserved u16, cell count
+u32, flags u32, domain bounds 4×f32, crop origin 2×f32, crop shape 2×u32)
+followed by `uint8[rows][cols]` ensemble member counts, rows ascending
+latitude. Probability is `value / ensemble_size`, the fraction of members
+covering the point at any time in T+15 to T+60. A `0×0` crop means no cells.
 
 ## Configuration and health
 

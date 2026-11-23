@@ -11,8 +11,10 @@
   (cell centres, row 0 northernmost, so pixels overlay MRMS one-to-one), published alongside
   the existing per-lead polygons, which are unchanged. Fields are listed in
   `field_index.json` and expire with `detection.stormcell_cleanup_max_age_minutes`.
-  Postprocessing advances to `stormprob-postprocess/v4`. No API route is added
-  yet.
+  Postprocessing advances to `stormprob-postprocess/v4`.
+- API v3 `GET /api/v3/stormprob-fields` and `/stormprob-fields/{timestamp}`
+  serve the StormProb swept T+15→T+60 probability field (`EWSPv2U1` gzip,
+  `ETag`/`304`/`HEAD`, immutable caching), gated on the `edgewarn` service.
 
 ## [3.1.0] 2026-11-17
 

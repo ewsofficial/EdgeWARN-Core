@@ -30,6 +30,18 @@ export function createAnalysisService(repository) {
       if (!timestamp(value)) throw new ArtifactError('INVALID_PATH', 'Invalid timestamp');
       return repository.readJson('data', ['stormcells', `stormcells_${value}.json`]);
     },
+    async listStormProbFields() {
+      try {
+        const timestamps = (await repository.readJson('data', ['stormprob', 'fields', 'field_index.json'])).timestamps || [];
+        return timestamps.slice().sort().reverse();
+      } catch (error) {
+        if (error.code === 'NOT_FOUND') return []; throw error;
+      }
+    },
+    async getStormProbField(value) {
+      if (!timestamp(value)) throw new ArtifactError('INVALID_PATH', 'Invalid timestamp');
+      return repository.open('data', ['stormprob', 'fields', `stormprob_field_${value}.bin.gz`]);
+    },
     async listAlertSnapshots(source) {
       if (!ALERT_SOURCES.has(source)) throw new ArtifactError('INVALID_PATH', 'Invalid alert source');
       try {

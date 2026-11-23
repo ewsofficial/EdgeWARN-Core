@@ -4,7 +4,7 @@ import { createServiceGate, problemJsonResponder } from '../../middleware/servic
 import { streamArtifact } from '../../streamArtifact.js';
 
 const listOptions = (req) => ({ cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined, limit: req.query.limit ? Number(req.query.limit) : undefined });
-const COLLECTION_PATHS = new Set(['/cells', '/storm-snapshots', '/alert-snapshots', '/radar-sites', '/modules']);
+const COLLECTION_PATHS = new Set(['/cells', '/storm-snapshots', '/stormprob-fields', '/alert-snapshots', '/radar-sites', '/modules']);
 
 function validateQuery(apiConfig, paths) {
   const limitPattern = new RegExp(apiConfig.query.limit_pattern);
@@ -53,6 +53,8 @@ export function createV3Router({ analysis, ancillary, modules, openApi, apiConfi
   router.get('/cells/:cellId', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, await analysis.getCell(req.params.cellId)); } catch (error) { next(error); } });
   router.get('/storm-snapshots', requireService('edgewarn'), async (req, res, next) => { try { collection(req, res, await analysis.listStormSnapshots()); } catch (error) { next(error); } });
   router.get('/storm-snapshots/:timestamp', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, { timestamp: req.params.timestamp, validTime: timestamp(req.params.timestamp), cells: await analysis.getStormSnapshot(req.params.timestamp) }); } catch (error) { next(error); } });
+  router.get('/stormprob-fields', requireService('edgewarn'), async (req, res, next) => { try { collection(req, res, await analysis.listStormProbFields()); } catch (error) { next(error); } });
+  router.get('/stormprob-fields/:timestamp', requireService('edgewarn'), async (req, res, next) => { try { await send(req, res, await analysis.getStormProbField(req.params.timestamp), 'application/gzip'); } catch (error) { next(error); } });
   router.get('/alert-snapshots', requireService('edgewarn'), async (req, res, next) => { try { collection(req, res, await analysis.listAlertSnapshots(req.query.source)); } catch (error) { next(error); } });
   router.get('/alert-snapshots/:timestamp', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, { timestamp: req.params.timestamp, validTime: timestamp(req.params.timestamp), alerts: await analysis.getAlertSnapshot(req.query.source, req.params.timestamp) }); } catch (error) { next(error); } });
   router.get('/alerts/:alertId', requireService('edgewarn'), async (req, res, next) => { try { resource(req, res, await analysis.getAlert(req.query.source, req.params.alertId)); } catch (error) { next(error); } });

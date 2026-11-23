@@ -42,6 +42,18 @@ describe('unified API services', () => {
     await expect(service.getCell('../7')).rejects.toMatchObject({ code: 'INVALID_PATH' });
   });
 
+  it('lists StormProb fields newest first and rejects invalid timestamps', async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
+    const service = createAnalysisService(new ArtifactRepository({ data: path.join(root, 'data') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT));
+    await expect(service.listStormProbFields()).resolves.toEqual([]);
+    await fs.mkdir(path.join(root, 'data', 'stormprob', 'fields'), { recursive: true });
+    await fs.writeFile(path.join(root, 'data', 'stormprob', 'fields', 'field_index.json'),
+      JSON.stringify({ timestamps: ['20260317-200000', '20260319-120000'] }));
+    await expect(service.listStormProbFields()).resolves.toEqual(['20260319-120000', '20260317-200000']);
+    await expect(service.getStormProbField('../x')).rejects.toMatchObject({ code: 'INVALID_PATH' });
+    await expect(service.getStormProbField('20260317-200000')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('lists storm snapshots newest first, degrading to empty when the index is absent', async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-services-'));
     const service = createAnalysisService(new ArtifactRepository({ data: path.join(root, 'data') }, REPOSITORY_LIMITS, REPOSITORY_CACHE, REPOSITORY_LIST_LIMIT));

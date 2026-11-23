@@ -13,6 +13,7 @@ describe('unified API contract specification', () => {
       '/api/v3', '/api/v3/openapi.json', '/health/live', '/health/ready',
       '/api/v3/cells', '/api/v3/cells/{cellId}',
       '/api/v3/storm-snapshots', '/api/v3/storm-snapshots/{timestamp}',
+      '/api/v3/stormprob-fields', '/api/v3/stormprob-fields/{timestamp}',
       '/api/v3/alert-snapshots', '/api/v3/alerts/{alertId}',
       '/api/v3/radar-sites/{siteId}/scans/{timestamp}/elevations/{elevation}/products/{productId}',
     ]));

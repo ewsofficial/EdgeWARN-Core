@@ -140,6 +140,49 @@
         }
       }
     },
+    "/api/v3/stormprob-fields": {
+      "get": {
+        "operationId": "listStormProbFields",
+        "responses": {
+          "200": {
+            "description": "StormProb swept-probability field timestamps, newest first"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceNotEnabled"
+          }
+        }
+      }
+    },
+    "/api/v3/stormprob-fields/{timestamp}": {
+      "get": {
+        "operationId": "getStormProbField",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/timestamp"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gzip-compressed EWSPv2U1 swept-probability field (T+15 to T+60)",
+            "content": {
+              "application/gzip": {}
+            }
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceNotEnabled"
+          }
+        }
+      }
+    },
     "/api/v3/alert-snapshots": {
       "get": {
         "operationId": "listAlertSnapshots",
