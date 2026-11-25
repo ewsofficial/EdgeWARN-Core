@@ -21,7 +21,9 @@ import numpy as np
 import json
 from datetime import datetime, timezone
 
+from common.ingest.nws.config import tornado_upgrade_event, tornado_upgrade_rules
 from EdgeWARN.process.detect.config import section
+from util import fastjson
 from util.io import IOManager
 
 io_manager = IOManager("[AlertMatcher]")
@@ -56,6 +58,19 @@ def convective_flood_events() -> frozenset:
     return frozenset(section("alert_matching")["events"])
 
 
+def snapshot_names_for_events(events) -> frozenset:
+    """Snapshot ``name`` values an alert of one of ``events`` can carry.
+
+    The registry names each snapshot entry after its event, except that the
+    tornado upgrade event takes its upgrade name (Tornado Emergency, PDS
+    Tornado Warning) when the description carries the upgrade phrase.
+    """
+    names = set(events)
+    if tornado_upgrade_event() in names:
+        names.update(name for _phrase, name in tornado_upgrade_rules())
+    return frozenset(names)
+
+
 def load_active_alerts(registry_dir: Path, target_timestamp: Optional[str] = None) -> List[Dict[str, Any]]:
     features, _ = _load_active_alerts_with_cache(registry_dir, target_timestamp)
     return features
@@ -64,6 +79,7 @@ def load_active_alerts(registry_dir: Path, target_timestamp: Optional[str] = Non
 def _load_active_alerts_with_cache(
     registry_dir: Path,
     target_timestamp: Optional[str] = None,
+    snapshot_names: Optional[frozenset] = None,
 ) -> tuple[List[Dict[str, Any]], Optional[tuple]]:
     """
     Load active alerts from the AlertRegistry directory.
@@ -74,7 +90,11 @@ def _load_active_alerts_with_cache(
         registry_dir: Path to the official alerts directory containing ids/ and timestamps/
         target_timestamp: Optional ISO datetime string to find alerts active at that time.
                           If None, uses the latest snapshot.
-        
+        snapshot_names: Optional set of snapshot entry names to load. A
+                        snapshot entry whose string ``name`` is not in it is
+                        skipped before its feature file is read; entries
+                        without a string name are always loaded.
+
     Returns:
         List of alert feature dictionaries
     """
@@ -116,18 +136,22 @@ def _load_active_alerts_with_cache(
         if (reference - snapshot_time).total_seconds() > section("alert_matching")["snapshot_max_age_seconds"]:
             return [], None
         cache_key = _build_alert_snapshot_cache_key(selected_file, ids_dir)
+        if snapshot_names is not None:
+            cache_key = cache_key + (frozenset(snapshot_names),)
         cached_features = _ALERT_SNAPSHOT_CACHE.get(cache_key)
         if cached_features is not None:
             return _unexpired_features(cached_features, reference), cache_key
 
-        with open(selected_file, 'r', encoding='utf-8') as f:
-            ts_data = json.load(f)
+        ts_data = fastjson.loads(selected_file.read_bytes())
 
         active_ids = ts_data.get("alerts", [])
         features = []
 
         for alert_id in active_ids:
             if isinstance(alert_id, dict):
+                name = alert_id.get("name")
+                if snapshot_names is not None and isinstance(name, str) and name not in snapshot_names:
+                    continue
                 alert_id = alert_id.get("id") or alert_id.get("urn_oid")
 
             if not isinstance(alert_id, str):
@@ -137,10 +161,9 @@ def _load_active_alerts_with_cache(
             feature_path = ids_dir / safe_id
             if feature_path.exists():
                 try:
-                    with open(feature_path, 'r', encoding='utf-8') as f:
-                        alert_data = json.load(f)
-                        if "feature" in alert_data:
-                            features.append(alert_data["feature"])
+                    alert_data = fastjson.loads(feature_path.read_bytes())
+                    if "feature" in alert_data:
+                        features.append(alert_data["feature"])
                 except Exception:
                     continue
 
@@ -601,7 +624,11 @@ def match_alerts_to_cells(
         return []
     
     # Load and filter alerts
-    all_alerts, snapshot_cache_key = _load_active_alerts_with_cache(registry_dir, target_timestamp)
+    all_alerts, snapshot_cache_key = _load_active_alerts_with_cache(
+        registry_dir,
+        target_timestamp,
+        snapshot_names=snapshot_names_for_events(convective_flood_events()),
+    )
     filtered_alerts = filter_convective_flood_alerts(all_alerts)
     
     if not filtered_alerts:
