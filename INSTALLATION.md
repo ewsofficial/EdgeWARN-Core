@@ -98,6 +98,18 @@ exits 1 unless zone assets are found, either bundled or under the configured
 `nws.zone_sync.assets_dir`; `--disable-nws` and `--mrms-core-only` skip the check. Rebuild the image to
 refresh the snapshot.
 
+To build from a pre-synchronized snapshot instead, pass its directory as the
+optional `nws_zones_seed` build context. The image copies it into
+`/opt/edgewarn/nws-zones` and skips the network sync:
+
+```bash
+docker buildx build --load --build-context nws_zones_seed=assets/nws_zones \
+  -t edgewarn:3.2.0 .
+```
+
+Without that context the build still syncs from weather.gov and fails when no
+zones are produced.
+
 ## API deployment
 
 Run `npm run api` independently (port 5000), or `npm run debug:api` (port 3001).

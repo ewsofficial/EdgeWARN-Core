@@ -23,12 +23,23 @@ RUN conda env create --file environment.yml \
     && rm -rf /tmp/edgewarn-build /tmp/edgewarn-wheel
 
 # NWS zone geometry is a hard requirement for alert processing: the build fails
-# when the download fails or yields no zones, and ingest refuses to start without
-# them (run_ingest.py). Built beside the other stages from the installed
-# package so the sync uses the same code and catalog as the running service.
+# when no zones are produced, and ingest refuses to start without them
+# (run_ingest.py). A pre-synchronized snapshot can be supplied as the optional
+# `nws_zones_seed` named build context (see INSTALLATION.md) so a build does not
+# depend on weather.gov. The default seed is a placeholder, so a normal build
+# still syncs from NWS. Built beside the other stages from the installed package
+# so the sync uses the same code and catalog as the running service.
+FROM scratch AS nws_zones_seed
+COPY docker/nws-zones-seed/README.md /README.md
+
 FROM runtime-build AS nws-zones
-RUN /opt/conda/envs/EdgeWARN/bin/edgewarn sync-nws-zones --apply --no-progress \
-        --config-path /etc/edgewarn/config --assets-dir /opt/edgewarn/nws-zones \
+COPY --from=nws_zones_seed / /opt/edgewarn/nws-zones/
+RUN if [ -n "$(find /opt/edgewarn/nws-zones -name zones.json -print -quit)" ]; then \
+        echo "Bundling pre-synchronized NWS zones"; \
+    else \
+        /opt/conda/envs/EdgeWARN/bin/edgewarn sync-nws-zones --apply --no-progress \
+            --config-path /etc/edgewarn/config --assets-dir /opt/edgewarn/nws-zones; \
+    fi \
     && test -n "$(find /opt/edgewarn/nws-zones -name zones.json -print -quit)"
 
 # The Node API shares the processing image but is started as its own service

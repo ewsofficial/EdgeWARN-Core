@@ -60,3 +60,5 @@ node_modules
 # Local planning notes and generated reports (never commit)
 plans/
 workspaces/
+# Docker compose runtime root (bind-mounted to /var/lib/edgewarn)
+/EdgeWARN_input/
