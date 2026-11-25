@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from EdgeWARN.ctam.builtins.stormprob import StormProbCycleService
-from EdgeWARN.stormprob.database import StormProbRepository
+from EdgeWARN.stormprob.database import FULL_HISTORY_LIMIT, StormProbRepository
 from EdgeWARN.stormprob.records import build_observation_record
 
 
@@ -77,6 +77,62 @@ def test_one_query_per_cell_per_cycle(repo, monkeypatch):
     view.model_inputs(101, through=through)
     view.feature_history(101, limit=1, through=through)
     assert len(calls) == 1
+
+
+def test_view_memoizes_model_inputs_per_cell_and_time(repo, monkeypatch):
+    calls = []
+    original = StormProbRepository.model_inputs
+
+    def counting(self, *args, **kwargs):
+        calls.append(args)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(StormProbRepository, "model_inputs", counting)
+    view = StormProbCycleService(repo).repository
+    first = view.model_inputs(101, through="2024-05-01T13:06:00")
+    assert view.model_inputs("101", through="2024-05-01T13:06:00+00:00") is first
+    assert view.model_inputs(101, through="2024-05-01T12:30:00") is not first
+    assert len(calls) == 2
+
+
+def _full_track_reference(repo, cell_id, through=None):
+    """model_inputs as computed before the 30-row window: every row, then slice."""
+    from EdgeWARN.stormprob.features import HISTORY_STEPS
+    from EdgeWARN.stormprob.tracks import build_trajectory_sequence
+
+    rows = repo.feature_history(cell_id, limit=FULL_HISTORY_LIMIT, through=through)
+    history = [row for row in reversed(rows)
+               if row.get("lineage", {}).get("tracking_mode") != "predicted"]
+    times = [datetime.fromisoformat(row["analysis_time"]).timestamp() for row in history]
+    trajectory, _ = build_trajectory_sequence([row["centroid"] for row in history], times,
+                                              HISTORY_STEPS)
+    vectors = []
+    for index, row in enumerate(history):
+        vector = list(row["features"])
+        vector[-2] = times[index] - times[0]
+        vector[-1] = float(min(index + 1, HISTORY_STEPS))
+        vectors.append(vector)
+    return trajectory[-HISTORY_STEPS:], vectors[-HISTORY_STEPS:]
+
+
+@pytest.mark.parametrize("through", THROUGH)
+@pytest.mark.parametrize("cell_id", [101, "b-7"])
+def test_model_inputs_window_matches_full_track(repo, through, cell_id):
+    inputs = repo.model_inputs(cell_id, through=through)
+    trajectory, vectors = _full_track_reference(repo, cell_id, through)
+    pad = len(inputs["trajectory_sequence"]) - len(trajectory)
+    assert inputs["trajectory_sequence"][pad:] == trajectory
+    assert inputs["current"] == vectors[-1]
+    assert inputs["history_mask"].count(True) == len(trajectory)
+
+
+def test_model_inputs_rejects_non_monotonic_rows_outside_window(repo):
+    rows = repo.feature_history(101, limit=FULL_HISTORY_LIMIT)
+    assert len(rows) > 31  # the oldest rows fall outside the 30-row window
+    tampered = [dict(row) for row in rows]
+    tampered[-2]["analysis_time"] = tampered[-1]["analysis_time"]  # second-oldest row
+    with pytest.raises(ValueError, match="increase monotonically"):
+        repo.model_inputs(101, history_rows=tampered)
 
 
 def test_view_delegates_other_repository_methods(repo):

@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import sqlite3
 import struct
 from contextlib import contextmanager
@@ -63,6 +64,44 @@ def field_path(cycle_id: Any, base_dir: Path | str | None = None) -> Path:
 
 def _json(value: Any) -> str:
     return json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True, default=str)
+
+
+_JSON_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
+# Every JSON string or number value of an "id" key. Inside a JSON string a
+# quote is always escaped, so '"id"' followed by ':' only occurs as a key.
+_PROJECTION_ID_VALUE = re.compile(r'"id"[ \t\n\r]*:[ \t\n\r]*("(?:[^"\\]|\\.)*"|[-+0-9.eE]+)')
+_UNUSUAL_ID_CHARS = frozenset("\"'\\[]{}")
+_UNUSUAL_ID_SPELLINGS = frozenset({
+    "true", "false", "none", "null", "nan", "-nan", "inf", "-inf", "+inf",
+    "infinity", "-infinity", "+infinity",
+})
+
+
+def _projection_needles(cell_ids) -> frozenset[str] | None:
+    """JSON spellings an ``"id"`` value takes when its ``str()`` is a listed id.
+
+    A projection cell's id is a JSON string (``json.dumps(id)``) or, when the
+    id is a plain JSON number, the bare literal. Returns ``None`` when an id
+    could be spelled some other way (non-ASCII, quotes, brackets, whitespace,
+    or a true/null/NaN/infinity spelling), so the caller parses everything.
+    """
+    needles = set()
+    for cell_id in cell_ids:
+        if (not cell_id.isascii() or not cell_id.isprintable()
+                or any(char.isspace() or char in _UNUSUAL_ID_CHARS for char in cell_id)
+                or cell_id.lower() in _UNUSUAL_ID_SPELLINGS):
+            return None
+        needles.add(json.dumps(cell_id))
+        if _JSON_NUMBER.fullmatch(cell_id):
+            needles.add(cell_id)
+    return frozenset(needles)
+
+
+def _may_hold_ids(text: Any, needles: frozenset[str] | None) -> bool:
+    """False only when JSON ``text`` has no ``"id"`` value spelled as a needle."""
+    if needles is None or not isinstance(text, str):
+        return True
+    return not needles.isdisjoint(_PROJECTION_ID_VALUE.findall(text))
 
 
 _PASS_THROUGH = frozenset({str, int, bool, type(None)})
@@ -333,6 +372,9 @@ class StormProbRepository:
             if inactive_ids:
                 # Scrub every saved cycle projection, including older replayed
                 # snapshots whose observation row was later upserted elsewhere.
+                # Text with no "id" value spelled like a pruned id cannot
+                # hold a pruned cell, so it is not parsed.
+                needles = _projection_needles(inactive_ids)
                 last_cycle_id = None
                 while True:
                     if last_cycle_id is None:
@@ -346,8 +388,11 @@ class StormProbRepository:
                         break
                     last_cycle_id = rows[-1]["cycle_id"]
                     for row in rows:
+                        text = row["projection_json"]
+                        if not _may_hold_ids(text, needles):
+                            continue
                         try:
-                            projection = fastjson.loads(row["projection_json"])
+                            projection = fastjson.loads(text)
                         except (TypeError, ValueError):
                             continue
                         if not isinstance(projection, list):
@@ -611,7 +656,7 @@ class StormProbRepository:
         it already holds instead of querying it again.
         """
         from .features import HISTORY_STEPS, N_TRAJECTORY
-        from .tracks import build_trajectory_sequence
+        from .tracks import trajectory_vector_for_index
 
         if history_rows is None:
             history_rows = self.feature_history(cell_id, limit=FULL_HISTORY_LIMIT,
@@ -627,16 +672,23 @@ class StormProbRepository:
             raise ValueError(f"no committed features for cell {cell_id}")
         centroids = [row["centroid"] for row in history]
         times = [datetime.fromisoformat(row["analysis_time"]).timestamp() for row in history]
-        trajectory, _ = build_trajectory_sequence(centroids, times, HISTORY_STEPS)
+        # Each trajectory row is computed from the full track prefix, so only
+        # the retained rows need one. The skipped prefix still gets the
+        # monotonic-time check trajectory_vector_for_index would apply to it.
+        start = max(0, len(history) - HISTORY_STEPS)
+        for index in range(1, start + 1):
+            if times[index] - times[index - 1] <= 0.0:
+                raise ValueError("Track timestamps must increase monotonically.")
+        trajectory = [trajectory_vector_for_index(centroids[: index + 1], times[: index + 1],
+                                                  HISTORY_STEPS)
+                      for index in range(start, len(history))]
         vectors = []
-        for index, row in enumerate(history):
-            vector = list(row["features"])
+        for index in range(start, len(history)):
+            vector = list(history[index]["features"])
             vector[-2] = times[index] - times[0]
             vector[-1] = float(min(index + 1, HISTORY_STEPS))
             vectors.append(vector)
-        history = history[-HISTORY_STEPS:]
-        vectors = vectors[-HISTORY_STEPS:]
-        trajectory = trajectory[-HISTORY_STEPS:]
+        history = history[start:]
         pad = HISTORY_STEPS - len(history)
         valid_radial = [row["radial_log_area"] is not None and row["geometry_status"] == "ok"
                         for row in history]

@@ -57,12 +57,17 @@ class _CycleHistoryRepository:
     def __init__(self, repository: StormProbRepository):
         self._repository = repository
         self._tracks: dict[tuple[str, str | None], list[dict]] = {}
+        self._inputs: dict[tuple[str, str | None], dict] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._repository, name)
 
+    @staticmethod
+    def _key(cell_id: Any, through: Any | None) -> tuple[str, str | None]:
+        return (str(cell_id), None if through is None else _time(through))
+
     def _track(self, cell_id: Any, through: Any | None) -> list[dict]:
-        key = (str(cell_id), None if through is None else _time(through))
+        key = self._key(cell_id, through)
         rows = self._tracks.get(key)
         if rows is None:
             rows = self._repository.feature_history(
@@ -82,8 +87,15 @@ class _CycleHistoryRepository:
         return self._track(cell_id, through)[:limit]
 
     def model_inputs(self, cell_id: Any, *, through: Any | None = None) -> dict:
-        return self._repository.model_inputs(
-            cell_id, through=through, history_rows=self._track(cell_id, through))
+        # Preflight and prepare both ask for each cell's inputs. Callers only
+        # read the result, so the memoized dict itself is returned.
+        key = self._key(cell_id, through)
+        inputs = self._inputs.get(key)
+        if inputs is None:
+            inputs = self._repository.model_inputs(
+                cell_id, through=through, history_rows=self._track(cell_id, through))
+            self._inputs[key] = inputs
+        return inputs
 
 
 class StormProbCycleService:
