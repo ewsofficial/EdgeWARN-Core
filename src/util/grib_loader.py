@@ -37,6 +37,82 @@ def eccodes_thread_safe() -> bool:
     return "ECCODES_THREADS" in str(features).split()
 
 
+@lru_cache(maxsize=1)
+def _cv2():
+    """OpenCV, imported on first use; ``None`` when it is not installed."""
+    try:
+        import cv2
+    except ImportError:
+        return None
+    return cv2
+
+
+@lru_cache(maxsize=32)
+def _png_lut(bits: int, reference: float, binary_scale: int, decimal_scale: int) -> np.ndarray:
+    """float32 value for every packed code, scaled as ecCodes' grid_png does."""
+    codes = np.arange(2 ** bits, dtype=np.float64)
+    lut = (((codes * 2.0 ** binary_scale) + reference) * 10.0 ** -decimal_scale).astype(np.float32)
+    lut.flags.writeable = False
+    return lut
+
+
+def _section7_payload(message: bytes):
+    """Return the data section's payload, or ``None`` unless exactly one exists."""
+    if len(message) < 16 or message[:4] != b"GRIB" or message[7] != 2:
+        return None
+    offset = 16
+    payload = None
+    while offset + 4 <= len(message):
+        if message[offset:offset + 4] == b"7777":
+            return payload
+        if offset + 5 > len(message):
+            return None
+        length = int.from_bytes(message[offset:offset + 4], "big")
+        number = message[offset + 4]
+        if length < 5 or offset + length > len(message):
+            return None
+        if number == 7:
+            if payload is not None:
+                return None
+            payload = message[offset + 5:offset + length]
+        offset += length
+    return None
+
+
+def _decode_png_values(gid, ni: int, nj: int):
+    """Decode a PNG-packed (template 5.41) field without ecCodes' float64 pass.
+
+    Returns the ``(nj, ni)`` float32 grid ``load_grib_fast`` would otherwise
+    produce, or ``None`` when the message is not an 8- or 16-bit, bitmap-free
+    PNG field (or OpenCV is unavailable), so the caller uses ecCodes instead.
+    """
+    cv2 = _cv2()
+    if cv2 is None:
+        return None
+    try:
+        if eccodes.codes_get_long(gid, "dataRepresentationTemplateNumber") != 41:
+            return None
+        if eccodes.codes_get_long(gid, "bitmapPresent") != 0:
+            return None
+        bits = eccodes.codes_get_long(gid, "bitsPerValue")
+        if bits not in (8, 16):
+            return None
+        reference = eccodes.codes_get_double(gid, "referenceValue")
+        binary_scale = eccodes.codes_get_long(gid, "binaryScaleFactor")
+        decimal_scale = eccodes.codes_get_long(gid, "decimalScaleFactor")
+        payload = _section7_payload(eccodes.codes_get_message(gid))
+        if payload is None:
+            return None
+        image = cv2.imdecode(np.frombuffer(payload, np.uint8), cv2.IMREAD_UNCHANGED)
+    except Exception:
+        return None
+    expected = np.uint8 if bits == 8 else np.uint16
+    if image is None or image.dtype != expected or image.ndim != 2 or image.size != ni * nj:
+        return None
+    lut = _png_lut(int(bits), float(reference), int(binary_scale), int(decimal_scale))
+    return lut[image].reshape(nj, ni)
+
+
 def load_grib_fast(filepath: str) -> xr.Dataset:
     try:
         with open(filepath, "rb") as f:
@@ -53,8 +129,10 @@ def load_grib_fast(filepath: str) -> xr.Dataset:
                 lonN = eccodes.codes_get_double(gid, "longitudeOfLastGridPointInDegrees")
                 lats = np.linspace(lat0, latN, nj, dtype=np.float32)
                 lons = np.linspace(lon0, lonN, ni, dtype=np.float32)
-                vals = eccodes.codes_get_double_array(gid, "values")
-                vals = vals.reshape(nj, ni).astype(np.float32)
+                vals = _decode_png_values(gid, ni, nj)
+                if vals is None:
+                    vals = eccodes.codes_get_double_array(gid, "values")
+                    vals = vals.reshape(nj, ni).astype(np.float32)
 
                 try:
                     name = eccodes.codes_get_string(gid, "shortName")
