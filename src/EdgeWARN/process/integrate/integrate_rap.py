@@ -5,6 +5,7 @@ Optimized: Zero-grid-memory extraction via eccodes RAPPointExtractor.
 import ast
 import operator
 
+import util.file as fs
 from .config import get_rap_products, output_decimals
 from util.grib_loader import RAPPointExtractor
 
@@ -104,6 +105,14 @@ def get_rap_output_roots(config=None):
     return roots
 
 
+def _rap_field_cache_dir():
+    """Derived decoded-field cache for the hourly RAP file, under the data root."""
+    data_dir = getattr(fs, "DATA_DIR", None)
+    if data_dir is None:
+        return None
+    return data_dir / "cache" / "rap_fields"
+
+
 def integrate_rap(storm_cells, rap_file_path, io_manager):
     """
     Integrate RAP data into storm cells.
@@ -137,7 +146,7 @@ def integrate_rap(storm_cells, rap_file_path, io_manager):
 
     # Run batch extraction
     try:
-        extractor = RAPPointExtractor(rap_file_path)
+        extractor = RAPPointExtractor(rap_file_path, cache_dir=_rap_field_cache_dir())
         extracted_data = extractor.extract_batch(products, cell_coords)
         io_manager.write_debug(f"Extracted {len(extracted_data)} keys from RAP")
     except Exception as e:

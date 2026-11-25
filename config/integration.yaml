@@ -7,6 +7,13 @@ output:
   # Output precision; change only if all API consumers tolerate the new representation.
   decimals: 2
 
+# Per-cycle enrichment concurrency. Each MRMS statistics file decodes on its
+# own thread (eccodes releases the GIL); every decode holds roughly 300 MB, so
+# keep this small. 1 (also the value when this section is absent) restores
+# one-file-at-a-time decoding.
+performance:
+  stats_file_workers: 3
+
 # Lightning binning; changing resolution affects all derived GLM statistics.
 glm:
   bin_size_degrees: 1.0

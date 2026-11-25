@@ -18,7 +18,8 @@ import numpy as np
 from EdgeWARN.alerts import AlertManager
 from EdgeWARN.alerts.schema import AlertPayload
 from EdgeWARN.stormprob import MODEL_VERSION, assets, field, onnx_runtime, postprocess
-from EdgeWARN.stormprob.database import LEADS, StormProbRepository
+from EdgeWARN.stormprob.database import FULL_HISTORY_LIMIT, LEADS, StormProbRepository, _time
+from EdgeWARN.stormprob.features import HISTORY_STEPS
 from EdgeWARN.stormprob.envelope import geojson_to_alert_ring, swept_envelope_0_30
 from EdgeWARN.stormprob.features import predict_initial_wind
 
@@ -41,11 +42,59 @@ def _geojson_polygon(cell: dict[str, Any]) -> Any:
     return cell.get("polygon") or cell.get("bbox")
 
 
+class _CycleHistoryRepository:
+    """Repository view that reads each cell's committed track once per cycle.
+
+    The cycle's preflight and the adapter's prepare step each asked SQLite for
+    ``model_inputs`` (a full-track read) and a ``feature_history`` window, so
+    every candidate cell paid four queries and connection opens. Inputs are
+    committed before CTAM runs and nothing in between writes feature rows, so
+    the full track read once serves every window: ``feature_history`` orders
+    rows newest first with unique analysis times, and a ``limit`` is a prefix
+    of that order. Everything else is delegated unchanged.
+    """
+
+    def __init__(self, repository: StormProbRepository):
+        self._repository = repository
+        self._tracks: dict[tuple[str, str | None], list[dict]] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._repository, name)
+
+    def _track(self, cell_id: Any, through: Any | None) -> list[dict]:
+        key = (str(cell_id), None if through is None else _time(through))
+        rows = self._tracks.get(key)
+        if rows is None:
+            rows = self._repository.feature_history(
+                cell_id, limit=FULL_HISTORY_LIMIT, through=through)
+            self._tracks[key] = rows
+        return rows
+
+    def feature_history(self, cell_id: Any, limit: int | None = None,
+                        before: Any | None = None,
+                        through: Any | None = None) -> list[dict]:
+        limit = HISTORY_STEPS if limit is None else limit
+        if before is not None or limit > FULL_HISTORY_LIMIT:
+            return self._repository.feature_history(
+                cell_id, limit=limit, before=before, through=through)
+        if limit < 1:
+            return []
+        return self._track(cell_id, through)[:limit]
+
+    def model_inputs(self, cell_id: Any, *, through: Any | None = None) -> dict:
+        return self._repository.model_inputs(
+            cell_id, through=through, history_rows=self._track(cell_id, through))
+
+
 class StormProbCycleService:
-    """Host boundary for database reads and alert persistence."""
+    """Host boundary for database reads and alert persistence.
+
+    A service lives for one CTAM cycle; its repository view memoizes each
+    cell's committed history for that cycle.
+    """
 
     def __init__(self, repository: StormProbRepository | None = None):
-        self.repository = repository or StormProbRepository()
+        self.repository = _CycleHistoryRepository(repository or StormProbRepository())
         self._previous_alerts: dict[str, AlertPayload] | None = None
 
     def model_inputs(self, cell_id: Any, analysis_time: Any) -> dict:

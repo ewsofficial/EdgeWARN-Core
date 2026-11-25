@@ -3,11 +3,38 @@ Fast GRIB2 loaders using eccodes bindings directly.
 Bypasses cfgrib indexing overhead for MRMS and RAP GRIB files.
 """
 
+import hashlib
+import json
+import os
+import time
+import uuid
+from functools import lru_cache
+from pathlib import Path
+
 import eccodes
 import numpy as np
 import xarray as xr
 
 eccodes.codes_grib_multi_support_on()
+
+# Bump when the on-disk layout of RAPPointExtractor's field cache changes.
+_RAP_FIELD_CACHE_VERSION = 1
+# Entries kept, including the one just written: the current hour and the last.
+_RAP_FIELD_CACHE_KEEP = 2
+
+
+@lru_cache(maxsize=1)
+def eccodes_thread_safe() -> bool:
+    """Whether this ecCodes build serializes its shared state across threads.
+
+    Concurrent decodes are only attempted when the library reports the
+    ``ECCODES_THREADS`` feature; an unknown build is treated as unsafe.
+    """
+    try:
+        features = eccodes.codes_get_features()
+    except Exception:
+        return False
+    return "ECCODES_THREADS" in str(features).split()
 
 
 def load_grib_fast(filepath: str) -> xr.Dataset:
@@ -45,8 +72,9 @@ def load_grib_fast(filepath: str) -> xr.Dataset:
 
 
 class RAPPointExtractor:
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, cache_dir=None):
         self.filepath = filepath
+        self.cache_dir = cache_dir
 
     @staticmethod
     def _get_product_vars(product: dict) -> list[str]:
@@ -123,10 +151,7 @@ class RAPPointExtractor:
 
         return results
 
-    def extract_batch(self, products: list, cell_coords: dict) -> dict:
-        from scipy.spatial import cKDTree
-
-        eccodes.codes_grib_multi_support_on()
+    def _wanted_keys(self, products: list) -> dict:
         wanted = {}
         for product in products:
             short_names = self._get_product_vars(product)
@@ -140,16 +165,19 @@ class RAPPointExtractor:
             else:
                 for short_name in short_names:
                     wanted[(short_name, type_of_level, filter_level)] = product["key"]
+        return wanted
 
-        cell_ids = list(cell_coords.keys())
-        cell_lats = np.array([cell_coords[cid][0] for cid in cell_ids])
-        cell_lons = np.array([cell_coords[cid][1] for cid in cell_ids])
-        cell_lons_360 = np.where(cell_lons < 0, cell_lons + 360, cell_lons)
-        cell_points = np.column_stack((cell_lats, cell_lons_360))
-        results = {}
+    def _scan_fields(self, wanted: dict):
+        """Decode every wanted field once: ``(keys, grid_lats, grid_lons, values)``.
+
+        ``grid_lats``/``grid_lons`` come from the first matched message, with
+        longitudes already in 0-360, and ``values`` lists the full decoded
+        arrays in file order. Returns ``None`` when nothing matched.
+        """
+        keys = []
+        values = []
         matched_keys = set()
-        tree = None
-        nearest_indices = None
+        grid_lats = grid_lons = None
 
         with open(self.filepath, "rb") as f:
             while True:
@@ -174,7 +202,7 @@ class RAPPointExtractor:
                     if output_key is None or output_key in matched_keys:
                         continue
 
-                    if tree is None:
+                    if grid_lats is None:
                         try:
                             grid_lats = eccodes.codes_get_double_array(gid, "latitudes")
                             grid_lons = eccodes.codes_get_double_array(gid, "longitudes")
@@ -192,15 +220,149 @@ class RAPPointExtractor:
                             grid_lons = grid_lons.ravel()
 
                         grid_lons = np.where(grid_lons < 0, grid_lons + 360, grid_lons)
-                        tree = cKDTree(np.column_stack((grid_lats, grid_lons)))
-                        _, nearest_indices = tree.query(cell_points)
 
-                    vals = eccodes.codes_get_double_array(gid, "values")
-                    results[output_key] = {cid: float(vals[idx]) if idx is not None else None for cid, idx in zip(cell_ids, nearest_indices)}
+                    keys.append(output_key)
+                    values.append(eccodes.codes_get_double_array(gid, "values"))
                     matched_keys.add(output_key)
                     if len(matched_keys) == len(wanted):
                         break
                 finally:
                     eccodes.codes_release(gid)
 
-        return results
+        if not keys:
+            return None
+        return keys, grid_lats, grid_lons, values
+
+    def _cache_entry(self, wanted: dict):
+        """Cache file stem for this exact source file and product catalog."""
+        stat = os.stat(self.filepath)
+        identity = json.dumps(
+            {
+                "version": _RAP_FIELD_CACHE_VERSION,
+                "path": os.path.realpath(self.filepath),
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "wanted": sorted([list(map(str, key)), value] for key, value in wanted.items()),
+            },
+            sort_keys=True,
+        )
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        return Path(self.cache_dir) / f"rap-{digest}"
+
+    @staticmethod
+    def _load_cached_fields(stem: Path):
+        meta_path = stem.with_suffix(".json")
+        data_path = stem.with_suffix(".npy")
+        if not meta_path.is_file() or not data_path.is_file():
+            return None
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        keys = meta["keys"]
+        stack = np.load(data_path, mmap_mode="r", allow_pickle=False)
+        if stack.dtype != np.float64 or stack.shape != (len(keys) + 2, meta["points"]):
+            return None
+        return keys, stack
+
+    def _store_cached_fields(self, stem: Path, keys, grid_lats, grid_lons, values) -> None:
+        stem.parent.mkdir(parents=True, exist_ok=True)
+        stack = np.vstack([np.asarray(grid_lats, dtype=np.float64),
+                           np.asarray(grid_lons, dtype=np.float64)]
+                          + [np.asarray(row, dtype=np.float64) for row in values])
+        token = f".{stem.name}.{os.getpid()}.{uuid.uuid4().hex}"
+        data_tmp = stem.parent / (token + ".npy.tmp")
+        meta_tmp = stem.parent / (token + ".json.tmp")
+        try:
+            with open(data_tmp, "wb") as handle:
+                np.save(handle, stack, allow_pickle=False)
+            meta_tmp.write_text(json.dumps({"keys": list(keys), "points": int(stack.shape[1])}),
+                                encoding="utf-8")
+            # The data file lands first; a reader needs both, and the stem is
+            # unique to this source file and catalog, so contents never differ.
+            os.replace(data_tmp, stem.with_suffix(".npy"))
+            os.replace(meta_tmp, stem.with_suffix(".json"))
+        finally:
+            for leftover in (data_tmp, meta_tmp):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
+        self._prune_cache(stem)
+
+    @staticmethod
+    def _prune_cache(current: Path) -> None:
+        """Keep the current entry and the newest other one; drop the rest."""
+        directory = current.parent
+        newest = {}
+        for path in list(directory.glob("rap-*.json")) + list(directory.glob("rap-*.npy")):
+            stem = path.with_suffix("")
+            if stem == current:
+                continue
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            newest[stem] = max(mtime, newest.get(stem, mtime))
+        entries = sorted(((mtime, stem) for stem, mtime in newest.items()), reverse=True)
+        stale_cutoff = time.time() - 3600
+        for _mtime, stem in entries[_RAP_FIELD_CACHE_KEEP - 1:]:
+            for path in (stem.with_suffix(".json"), stem.with_suffix(".npy")):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+        for leftover in directory.glob(".rap-*.tmp"):
+            try:
+                if leftover.stat().st_mtime < stale_cutoff:
+                    leftover.unlink()
+            except OSError:
+                pass
+
+    def extract_batch(self, products: list, cell_coords: dict) -> dict:
+        from scipy.spatial import cKDTree
+
+        eccodes.codes_grib_multi_support_on()
+        wanted = self._wanted_keys(products)
+
+        cell_ids = list(cell_coords.keys())
+        cell_lats = np.array([cell_coords[cid][0] for cid in cell_ids])
+        cell_lons = np.array([cell_coords[cid][1] for cid in cell_ids])
+        cell_lons_360 = np.where(cell_lons < 0, cell_lons + 360, cell_lons)
+        cell_points = np.column_stack((cell_lats, cell_lons_360))
+
+        # The hourly RAP file is re-read by every two-minute cycle, each in a
+        # fresh process, so the decoded wanted fields are kept on disk keyed by
+        # the file's identity. Any cache problem falls back to a direct scan.
+        stem = None
+        if self.cache_dir is not None:
+            try:
+                stem = self._cache_entry(wanted)
+                cached = self._load_cached_fields(stem)
+            except Exception:
+                cached = None
+            if cached is not None:
+                keys, stack = cached
+                tree = cKDTree(np.column_stack((stack[0], stack[1])))
+                _, nearest_indices = tree.query(cell_points)
+                sampled = np.asarray(stack[2:, nearest_indices])
+                del stack
+                return {
+                    key: {cid: float(value) for cid, value in zip(cell_ids, row)}
+                    for key, row in zip(keys, sampled)
+                }
+
+        fields = self._scan_fields(wanted)
+        if fields is None:
+            return {}
+        keys, grid_lats, grid_lons, values = fields
+        if stem is not None:
+            try:
+                self._store_cached_fields(stem, keys, grid_lats, grid_lons, values)
+            except Exception:
+                pass
+
+        tree = cKDTree(np.column_stack((grid_lats, grid_lons)))
+        _, nearest_indices = tree.query(cell_points)
+        return {
+            key: {cid: float(vals[idx]) if idx is not None else None
+                  for cid, idx in zip(cell_ids, nearest_indices)}
+            for key, vals in zip(keys, values)
+        }

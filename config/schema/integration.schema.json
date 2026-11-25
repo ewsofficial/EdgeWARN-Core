@@ -14,6 +14,14 @@
         "decimals": { "type": "integer", "minimum": 0 }
       }
     },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stats_file_workers"],
+      "properties": {
+        "stats_file_workers": { "type": "integer", "minimum": 1 }
+      }
+    },
     "glm": {
       "type": "object",
       "additionalProperties": false,

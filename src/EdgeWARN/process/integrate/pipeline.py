@@ -7,11 +7,12 @@ from datetime import datetime, timedelta, timezone
 
 import util.file as fs
 from common.ingest.manifest import CycleInputManifest
+from util.grib_loader import eccodes_thread_safe
 from util.io import IOManager
 from util.performance import tracker as perf_tracker
 
 from EdgeWARN.process.detect.tools.save import CellDataSaver
-from EdgeWARN.process.integrate.config import get_datasets_config, probsevere_field_map
+from EdgeWARN.process.integrate.config import get_datasets_config, probsevere_field_map, stats_file_workers
 from EdgeWARN.process.integrate.integrate import StormCellIntegrator
 from EdgeWARN.process.integrate.integrate_glm import integrate_glm
 from EdgeWARN.process.integrate.integrate_rap import get_rap_output_roots, integrate_rap
@@ -60,13 +61,31 @@ def _selection_label(input_manifest):
     return "pinned" if input_manifest is not None else "latest"
 
 
+def _stats_scratch_cells(cells):
+    """Write targets for one statistics file: id plus an empty property bag.
+
+    ``integrate_multi_stats`` only reads ``id`` and the shared cell contexts and
+    only writes its own configured keys, so each file can fill a scratch copy
+    concurrently. A cell without ``properties`` keeps that shape so the merge
+    adds the mapping exactly where the serial loop would have.
+    """
+    scratch = []
+    for cell in cells:
+        scratch_cell = {"id": cell.get("id")}
+        if "properties" in cell:
+            scratch_cell["properties"] = {}
+        scratch.append(scratch_cell)
+    return scratch
+
+
 def _integrate_dataset_groups(integrator, cells, input_manifest=None):
     grouped_configs = defaultdict(list)
     for config in get_datasets_config():
         grouped_configs[config["filepath"]].append(config)
 
-    result_cells = cells
-    cell_contexts = integrator.build_cell_contexts(result_cells)
+    cell_contexts = integrator.build_cell_contexts(cells)
+
+    jobs = []
     for filepath, group_list in grouped_configs.items():
         name_list = [c["name"] for c in group_list]
         name_str = ", ".join(name_list)
@@ -81,24 +100,69 @@ def _integrate_dataset_groups(integrator, cells, input_manifest=None):
                 f"Using {_selection_label(input_manifest)} input for "
                 f"{name_str}: {selected_file}"
             )
-
-            # Manifest records intentionally retain ``Path`` values so their
-            # identity is immutable through the cycle.  The statistics
-            # integrator predates that contract and determines its reader via
-            # ``str.endswith``; convert only at this legacy boundary.
-            result_cells = _run_step(
-                f"Integration - {name_str}",
-                lambda: integrator.integrate_multi_stats(
-                    str(selected_file),
-                    copy.deepcopy(result_cells),
-                    group_list,
-                    cell_contexts=cell_contexts,
-                ),
-            )
-            io_manager.write_debug(f"Integration completed for {name_str}")
-
+            jobs.append((name_str, selected_file, group_list))
         except Exception as e:
             io_manager.write_error(f"Failed to integrate {name_str} data: {e}")
+
+    def _run_job(job):
+        name_str, selected_file, group_list = job
+        # Manifest records intentionally retain ``Path`` values so their
+        # identity is immutable through the cycle.  The statistics
+        # integrator predates that contract and determines its reader via
+        # ``str.endswith``; convert only at this legacy boundary.
+        return _run_step(
+            f"Integration - {name_str}",
+            lambda: integrator.integrate_multi_stats(
+                str(selected_file),
+                _stats_scratch_cells(cells),
+                group_list,
+                cell_contexts=cell_contexts,
+            ),
+        )
+
+    # GRIB decodes release the GIL, so GRIB files decode concurrently. Each
+    # decode holds a full CONUS grid, which is why the pool is small and
+    # configured. HDF5/netCDF reads are not thread safe, so any non-GRIB file
+    # stays on the calling thread, exactly as before.
+    outcomes = [None] * len(jobs)
+
+    def _record(index):
+        try:
+            outcomes[index] = (jobs[index], _run_job(jobs[index]), None)
+        except Exception as e:
+            outcomes[index] = (jobs[index], None, e)
+
+    pooled = [index for index, job in enumerate(jobs) if str(job[1]).endswith(".grib2")]
+    max_workers = min(stats_file_workers(), len(pooled))
+    if max_workers < 2 or not eccodes_thread_safe():
+        pooled = []
+    pooled_set = set(pooled)
+
+    if pooled:
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="stats-file") as executor:
+            futures = [executor.submit(_record, index) for index in pooled]
+            for index in range(len(jobs)):
+                if index not in pooled_set:
+                    _record(index)
+            for future in futures:
+                future.result()
+    else:
+        for index in range(len(jobs)):
+            _record(index)
+
+    # Merge in catalog order so property insertion order and last-writer
+    # semantics match the former one-file-at-a-time loop.
+    result_cells = cells
+    for (name_str, _selected_file, _group_list), scratch, error in outcomes:
+        if error is not None:
+            io_manager.write_error(f"Failed to integrate {name_str} data: {error}")
+            continue
+        if result_cells is cells:
+            result_cells = copy.deepcopy(cells)
+        for target_cell, scratch_cell in zip(result_cells, scratch):
+            if "properties" in scratch_cell:
+                target_cell.setdefault("properties", {}).update(scratch_cell["properties"])
+        io_manager.write_debug(f"Integration completed for {name_str}")
 
     return result_cells
 

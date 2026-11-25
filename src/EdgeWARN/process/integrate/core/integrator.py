@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import xarray as xr
 
@@ -11,6 +13,11 @@ from .subset import axis_slice_indices, build_spatial_lookup, extract_spatial_su
 
 # Suppress cfgrib/xarray compatibility warnings
 xr.set_options(use_new_combine_kwarg_defaults=True)
+
+# Statistics files are integrated on concurrent threads that share one set of
+# per-cell contexts. Cache misses are filled under this lock so each spatial
+# lookup is still built exactly once per grid, as in the serial loop.
+_CONTEXT_CACHE_LOCK = threading.Lock()
 
 
 class StormCellIntegrator:
@@ -91,6 +98,15 @@ class StormCellIntegrator:
         if spatial_lookup is not None:
             return spatial_lookup
 
+        with _CONTEXT_CACHE_LOCK:
+            spatial_lookup = context["spatial_lookup_by_grid"].get(cache_key)
+            if spatial_lookup is not None:
+                return spatial_lookup
+            return self._build_spatial_lookup_for_cell(
+                context, ds, lat_name, lon_name, lat_vals, lon_vals, cache_key, use_360_longitude
+            )
+
+    def _build_spatial_lookup_for_cell(self, context, ds, lat_name, lon_name, lat_vals, lon_vals, cache_key, use_360_longitude):
         polygon = self._context_polygon_for_longitudes(context, use_360_longitude)
         if polygon is None:
             spatial_lookup = {"empty": True}

@@ -92,21 +92,27 @@ def polygon_to_radial_profile(
         return np.zeros(n_angles, dtype=np.float32)
     angles = 2.0 * math.pi * np.arange(n_angles) / n_angles
     result = np.zeros(n_angles, dtype=np.float32)
+    if n_angles < 1:
+        return result
+    # Every ray against every edge at once.  ``math.cos``/``math.sin`` (not
+    # numpy's SIMD versions) and the same operation order keep each radius
+    # bit-identical to the original per-ray loop.
+    dx = np.array([math.cos(angle) for angle in angles])[:, None]
+    dy = np.array([math.sin(angle) for angle in angles])[:, None]
+    start_x, start_y = points[:, 0], points[:, 1]
     rolled = np.roll(points, -1, axis=0)
-    for index, angle in enumerate(angles):
-        dx, dy = math.cos(angle), math.sin(angle)
-        best = 0.0
-        for start, end in zip(points, rolled):
-            edge_x = end[0] - start[0]
-            edge_y = end[1] - start[1]
-            denominator = dx * edge_y - dy * edge_x
-            if abs(denominator) < 1e-10:
-                continue
-            radius = (start[0] * edge_y - start[1] * edge_x) / denominator
-            fraction = (start[0] * dy - start[1] * dx) / denominator
-            if radius >= 0.0 and 0.0 <= fraction <= 1.0 and radius > best:
-                best = float(radius)
-        result[index] = min(best, max_radius_km)
+    edge_x = rolled[:, 0] - start_x
+    edge_y = rolled[:, 1] - start_y
+    with np.errstate(all="ignore"):
+        denominator = dx * edge_y - dy * edge_x
+        radius = (start_x * edge_y - start_y * edge_x) / denominator
+        fraction = (start_x * dy - start_y * dx) / denominator
+        valid = ((np.abs(denominator) >= 1e-10) & (radius >= 0.0)
+                 & (fraction >= 0.0) & (fraction <= 1.0))
+        # ``+ 0.0`` turns a -0.0 winner into the loop's 0.0 starting value.
+        best = np.where(valid, radius, 0.0).max(axis=1) + 0.0
+    for index, value in enumerate(best.tolist()):
+        result[index] = min(value, max_radius_km)
     return result
 
 

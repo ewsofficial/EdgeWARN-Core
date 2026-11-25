@@ -33,6 +33,16 @@ def output_decimals(config_dir=None):
     return section("output", config_dir)["decimals"]
 
 
+def stats_file_workers(config_dir=None):
+    """Threads that decode and reduce MRMS statistics files concurrently.
+
+    ``performance`` is optional so configuration trees written before it
+    existed still validate and migrate; they keep the former serial loop.
+    """
+    config = load_config(_CONFIG_NAME, config_dir=config_dir or fs.MRMS_CONFIG_DIR)
+    return config.get("performance", {}).get("stats_file_workers", 1)
+
+
 def probsevere_field_map(config_dir=None):
     """output_property -> ProbSevere source field.
 

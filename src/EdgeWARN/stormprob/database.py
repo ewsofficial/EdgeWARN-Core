@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import util.file as fs
+from util import fastjson
 
 from .features import HISTORY_STEPS, N_CURRENT, feature_order_checksum
 from .geometry import N_RAYS
@@ -27,6 +28,8 @@ from .records import SCHEMA_VERSION, build_observation_record
 DB_VERSION = 1
 LEADS = (15, 30, 45, 60)
 PENDING_MODEL_VERSION = "stormprob-pending/v1"
+# Row limit model_inputs uses to read a cell's complete committed track.
+FULL_HISTORY_LIMIT = 1_000_000
 
 _PROJECTION_INDEX_SQL = """
     CREATE INDEX IF NOT EXISTS observations_cycle_cell
@@ -62,8 +65,36 @@ def _json(value: Any) -> str:
     return json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True, default=str)
 
 
+_PASS_THROUGH = frozenset({str, int, bool, type(None)})
+
+
 def clean_projection(value: Any) -> Any:
-    """Keep legacy projections JSON-safe without changing model input vectors."""
+    """Keep legacy projections JSON-safe without changing model input vectors.
+
+    Exact built-in types are handled inline, without a call per leaf; any
+    other type (subclasses, numpy scalars, ...) takes ``_clean_general``,
+    which is the original ``isinstance`` walk.
+    """
+    kind = type(value)
+    if kind is dict:
+        return {(key if type(key) is str else str(key)):
+                (item if type(item) in _PASS_THROUGH
+                 else (item if math.isfinite(item) else None) if type(item) is float
+                 else clean_projection(item))
+                for key, item in value.items()}
+    if kind is list or kind is tuple:
+        return [item if type(item) in _PASS_THROUGH
+                else (item if math.isfinite(item) else None) if type(item) is float
+                else clean_projection(item)
+                for item in value]
+    if kind is float:
+        return value if math.isfinite(value) else None
+    if kind in _PASS_THROUGH:
+        return value
+    return _clean_general(value)
+
+
+def _clean_general(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): clean_projection(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -316,7 +347,7 @@ class StormProbRepository:
                     last_cycle_id = rows[-1]["cycle_id"]
                     for row in rows:
                         try:
-                            projection = json.loads(row["projection_json"])
+                            projection = fastjson.loads(row["projection_json"])
                         except (TypeError, ValueError):
                             continue
                         if not isinstance(projection, list):
@@ -556,30 +587,38 @@ class StormProbRepository:
         if any(row["order_checksum"] != feature_order_checksum() for row in rows):
             raise RuntimeError("StormProb feature order checksum mismatch")
         return [{"cell_id": row["cell_id"], "analysis_time": row["analysis_time"],
-                 "centroid": json.loads(row["centroid_json"]),
-                 "polygon": json.loads(row["polygon_json"]),
-                 "lineage": json.loads(row["lineage_json"]),
+                 "centroid": fastjson.loads(row["centroid_json"]),
+                 "polygon": fastjson.loads(row["polygon_json"]),
+                 "lineage": fastjson.loads(row["lineage_json"]),
                  "geometry_status": row["geometry_status"],
                  "inference_ready": bool(row["inference_ready"]),
                  "feature_schema_version": row["feature_schema_version"],
                  "order_checksum": row["order_checksum"],
                  "features": _unpack(row["values_f32"], N_CURRENT),
-                 "raw_values": json.loads(row["raw_values_json"]),
-                 "units": json.loads(row["units_json"]),
-                 "quality": json.loads(row["quality_json"]),
-                 "source_times": json.loads(row["source_times_json"]),
+                 "raw_values": fastjson.loads(row["raw_values_json"]),
+                 "units": fastjson.loads(row["units_json"]),
+                 "quality": fastjson.loads(row["quality_json"]),
+                 "source_times": fastjson.loads(row["source_times_json"]),
                  "radial_profile": _unpack(row["radii_f32"], N_RAYS),
                  "radial_log_area": row["log_area"]} for row in rows]
 
-    def model_inputs(self, cell_id: Any, *, through: Any | None = None) -> dict:
-        """Build 30-step tensors only from committed database feature rows."""
+    def model_inputs(self, cell_id: Any, *, through: Any | None = None,
+                     history_rows: list[dict] | None = None) -> dict:
+        """Build 30-step tensors only from committed database feature rows.
+
+        ``history_rows`` lets a per-cycle caller pass the exact result of
+        ``feature_history(cell_id, limit=FULL_HISTORY_LIMIT, through=through)``
+        it already holds instead of querying it again.
+        """
         from .features import HISTORY_STEPS, N_TRAJECTORY
         from .tracks import build_trajectory_sequence
 
+        if history_rows is None:
+            history_rows = self.feature_history(cell_id, limit=FULL_HISTORY_LIMIT,
+                                                through=through)
         # Derive trajectory/age from the complete committed track, then retain
         # the last 30 rows. Truncating first would reset storm age at row 31.
-        history = list(reversed(self.feature_history(cell_id, limit=1_000_000,
-                                                      through=through)))
+        history = list(reversed(history_rows))
         # Predicted continuity rows remain in the database for tracking, but
         # are not measured observations and have no model geometry/centroid.
         history = [row for row in history
@@ -632,7 +671,7 @@ class StormProbRepository:
                 JOIN cycles c ON c.cycle_id=o.cycle_id
                 WHERE o.cell_id=? AND c.state IN ('inputs-committed','legacy-imported') {clause}
                 ORDER BY o.analysis_time DESC LIMIT ?""", params).fetchall()
-        return [json.loads(row[0]) for row in reversed(rows)]
+        return [fastjson.loads(row[0]) for row in reversed(rows)]
 
     def legacy_histories(self, cell_ids: list[Any]) -> dict[str, list[dict]]:
         """Read full compatibility histories for touched cells in one snapshot."""
@@ -652,7 +691,7 @@ class StormProbRepository:
                 for row in rows:
                     history = histories[row["cell_id"]]
                     if len(history) < 1000000:  # Match legacy_history's default limit.
-                        history.append(json.loads(row["legacy_projection_json"]))
+                        history.append(fastjson.loads(row["legacy_projection_json"]))
         for history in histories.values():
             history.reverse()
         return histories
@@ -666,10 +705,10 @@ class StormProbRepository:
             if row is None:
                 return []
             if row["projection_json"] is not None:
-                return json.loads(row["projection_json"])
+                return fastjson.loads(row["projection_json"])
             rows = db.execute("""SELECT legacy_projection_json FROM cell_observations
                 WHERE cycle_id=? ORDER BY cell_id""", (row[0],)).fetchall()
-        return [json.loads(item[0]) for item in rows]
+        return [fastjson.loads(item[0]) for item in rows]
 
     def cycle_projection_hash(self, cycle_id: str) -> str | None:
         with self.reader() as db:

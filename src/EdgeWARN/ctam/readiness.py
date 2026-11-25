@@ -25,13 +25,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from common.ingest.manifest import CycleInputManifest, StagedInput
+from util import fastjson
 from util.atomic import atomic_write_json
 
 from .discovery import (
@@ -331,6 +335,67 @@ def _json_payload(path: Path) -> tuple[Any, str | None]:
         return None, f"{path.name} is not valid UTF-8 JSON"
 
 
+@dataclass(frozen=True)
+class _JsonFacts:
+    """What the readiness checks read from a parsed host artifact."""
+
+    type_name: str
+    is_list: bool
+    list_length: int
+    is_snapshot: bool                 # a dict with a "features" member
+    latest_timestamp: str | None      # the dict's latest_timestamp when a str
+
+
+# One cycle builds its catalog twice (the discovery pass and the external
+# module run) and evaluates history requirements per module, so the same
+# stormcell snapshot and cell histories used to be parsed several times per
+# cycle.  The facts above are memoized by the identity of the file actually
+# opened (device, inode, size, mtime and ctime in ns), so any rewrite --
+# atomic replace or in place -- is parsed afresh.  Failures are not cached.
+_FACTS_CACHE_SIZE = 4096
+_facts_cache: "OrderedDict[tuple, _JsonFacts]" = OrderedDict()
+_facts_cache_lock = threading.Lock()
+
+
+def _facts_of(payload: Any) -> _JsonFacts:
+    is_dict = isinstance(payload, dict)
+    recorded = payload.get("latest_timestamp") if is_dict else None
+    return _JsonFacts(
+        type_name=type(payload).__name__,
+        is_list=isinstance(payload, list),
+        list_length=len(payload) if isinstance(payload, list) else 0,
+        is_snapshot=is_dict and "features" in payload,
+        latest_timestamp=recorded if isinstance(recorded, str) else None,
+    )
+
+
+def _json_facts(path: Path) -> tuple[_JsonFacts | None, str | None]:
+    """``_json_payload`` reduced to its facts, parsed once per file version."""
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            info = os.fstat(handle.fileno())
+            key = (str(path), info.st_dev, info.st_ino, info.st_size,
+                   info.st_mtime_ns, info.st_ctime_ns)
+            with _facts_cache_lock:
+                facts = _facts_cache.get(key)
+                if facts is not None:
+                    _facts_cache.move_to_end(key)
+                    return facts, None
+            # Same result (and the same errors) as json.load(handle).
+            facts = _facts_of(fastjson.loads(handle.read()))
+    except json.JSONDecodeError as exc:
+        return None, f"{path.name} is not parseable JSON: line {exc.lineno} {exc.msg}"
+    except OSError as exc:
+        return None, f"cannot read {path.name}: {exc.strerror or exc}"
+    except UnicodeDecodeError:
+        return None, f"{path.name} is not valid UTF-8 JSON"
+    with _facts_cache_lock:
+        _facts_cache[key] = facts
+        while len(_facts_cache) > _FACTS_CACHE_SIZE:
+            _facts_cache.popitem(last=False)
+    return facts, None
+
+
 def _alignment_errors(
     input_manifest: CycleInputManifest, record: StagedInput
 ) -> tuple[str, ...]:
@@ -560,7 +625,7 @@ def _describe_stormcells(
             ),
         )
 
-    payload, parse_reason = _json_payload(stormcell_path)
+    facts, parse_reason = _json_facts(stormcell_path)
     if parse_reason is not None:
         return replace(
             descriptor,
@@ -569,7 +634,7 @@ def _describe_stormcells(
             size_bytes=size,
             reason=parse_reason,
         )
-    if not isinstance(payload, dict) or "features" not in payload:
+    if not facts.is_snapshot:
         # The snapshot is a flat dict with `source, product, version,
         # latest_timestamp, features` -- not a GeoJSON FeatureCollection, and it
         # has no `type` key. See the retired Phase 0 findings, finding 3
@@ -585,7 +650,7 @@ def _describe_stormcells(
             ),
         )
 
-    recorded = payload.get("latest_timestamp")
+    recorded = facts.latest_timestamp
     if isinstance(recorded, str) and recorded and not _same_cycle(recorded, cycle_time):
         # `stale`: a real snapshot, but of another cycle. This is the wrong-cycle
         # file the readiness enum has to be able to distinguish from a missing
@@ -655,7 +720,7 @@ def _describe_cell_history(
             ),
         )
 
-    payload, parse_reason = _json_payload(path)
+    facts, parse_reason = _json_facts(path)
     if parse_reason is not None:
         return replace(
             descriptor,
@@ -664,14 +729,14 @@ def _describe_cell_history(
             size_bytes=size,
             reason=parse_reason,
         )
-    if not isinstance(payload, list):
+    if not facts.is_list:
         return replace(
             descriptor,
             validated=False,
             readiness=INVALID,
             size_bytes=size,
             reason=(
-                f"{path.name} is a {type(payload).__name__}, but a cell history "
+                f"{path.name} is a {facts.type_name}, but a cell history "
                 f"file is a JSON array of past states"
             ),
         )
@@ -801,10 +866,10 @@ def _history_entry_count(path: Path | None) -> int | None:
     """
     if path is None:
         return None
-    payload, reason = _json_payload(path)
-    if reason is not None or not isinstance(payload, list):
+    facts, reason = _json_facts(path)
+    if reason is not None or not facts.is_list:
         return None
-    return min(len(payload), MAX_HISTORY_WINDOW)
+    return min(facts.list_length, MAX_HISTORY_WINDOW)
 
 
 def _qualify(

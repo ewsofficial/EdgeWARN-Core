@@ -27,6 +27,7 @@ dependencies:
   - xarray
   - psutil
   - ijson
+  - orjson
   - ruamel.yaml
   - textual
   - pip:
