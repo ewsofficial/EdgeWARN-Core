@@ -1005,6 +1005,28 @@ def _drain(log_queue, stop):
         os.write(1, (text if text.endswith("\n") else text + "\n").encode("utf-8", "replace"))
 
 
+def _warm_rap_cache(manifest_payload):
+    """Decode the pinned RAP file into the trial's field cache, untimed.
+
+    The cache key includes the RAP file's real path, so a cache copied from
+    the source tree never hits in a trial root. In production the hourly
+    file is decoded once and then served from the cache by later cycles.
+    """
+    import util.file as fs
+    from common.ingest.manifest import CycleInputManifest
+    from EdgeWARN.process.integrate.config import get_rap_products
+    from EdgeWARN.process.integrate.integrate_rap import _rap_field_cache_dir
+    from util.grib_loader import RAPPointExtractor
+
+    manifest = CycleInputManifest.from_dict(manifest_payload)
+    record = manifest.latest_for_directory(fs.RAP_DIR) if manifest is not None else None
+    if record is None:
+        print("WARN: --warm-rap found no pinned RAP input")
+        return
+    extractor = RAPPointExtractor(record.local_path, cache_dir=_rap_field_cache_dir())
+    extractor.extract_batch(get_rap_products().get("products", []), {0: (35.0, 263.0)})
+
+
 def _trial(context):
     """Body of one forked trial process; writes its measurements as JSON."""
     log = os.open(context["log_path"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
@@ -1017,6 +1039,8 @@ def _trial(context):
     try:
         import util.file as fs
         fs.initialize_filesystem(trial_dir, config_dir=context["config_dir"])
+        if context["warm_rap"]:
+            _warm_rap_cache(context["manifests"]["integration"])
 
         profiler = Profiler(context["prefixes"], trace_memory=context["trace_memory"],
                             sample_seconds=context["sample_seconds"],
@@ -1311,6 +1335,9 @@ def _parse_args(argv):
                         help="first-party package prefixes to instrument (default: %(default)s)")
     parser.add_argument("--no-third-party", action="store_true",
                         help="do not wrap the curated xarray/eccodes/shapely/ONNX/json entry points")
+    parser.add_argument("--warm-rap", action="store_true",
+                        help="decode the RAP field cache untimed before each trial, as "
+                             "production cycles after the first of each hour find it")
     parser.add_argument("--top", type=int, default=25,
                         help="rows per console table (default 25; the CSV holds everything)")
     if "--" in argv:
@@ -1441,6 +1468,7 @@ def main(argv=None):
                 "trace_memory": not args.no_tracemalloc,
                 "sample_seconds": args.sample_ms / 1000.0,
                 "third_party": not args.no_third_party,
+                "warm_rap": args.warm_rap,
                 "log_path": str(logs / f"trial_{index}.log"),
                 "result_path": str(work / f"trial_{index}.json"),
             }

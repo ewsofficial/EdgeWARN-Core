@@ -43,6 +43,12 @@ system temporary directory if not given) must not overlap the source tree. The
 profiler deletes the work directory at the end unless you pass
 `--keep-work-dir`.
 
+The RAP decoded-field cache (`data/cache/rap_fields`) is keyed by the RAP
+file's real path, so the trials always miss it and decode the hourly RAP file
+in full. In production only the first cycle of each hour does that. Pass
+`--warm-rap` to fill each trial's cache before timing starts, so that
+`Integration - RAP` measures the cached path that most cycles take.
+
 ## What is measured
 
 | Kind | Granularity |
