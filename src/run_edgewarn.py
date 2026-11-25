@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from common.config import loader as config_loader
 from EdgeWARN import initialize_runtime
 from EdgeWARN.ctam.preflight import PreflightError, StormProbDependencyError, check_core_startup
+from util import fastjson
 from util.io import TimestampedOutput, IOManager
 from util.release import get_release_version
 from util.runtime.handoff import ServiceLock
@@ -62,6 +63,9 @@ def main():
         fs.ensure_mrms_directories(registry)
 
     print(f"Primary EdgeWARN service started (v{get_release_version()}). Press CTRL+C to exit.")
+    print("[EdgeWARN] JSON parsing: "
+          + ("orjson accelerated" if fastjson.available()
+             else "standard library (orjson not installed)"))
     print("[EdgeWARN] NEXRAD is owned by run_nexrad.py.")
     print("[EdgeWARN] Realtime MRMS/RAP/GLM acquisition is owned by run_ingest.py; this "
           "process consumes its durable readiness records and waits when they are absent.")
