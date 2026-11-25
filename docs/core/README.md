@@ -44,5 +44,6 @@ establish correctness. Publication is atomic across processes.
 - [Service registry](service_registry.md)
 - [Detection](detection.md)
 - [Integration](integration.md)
+- [Execution-time profiler](profiling.md)
 - [CTAM](../ctam/README.md)
 - [API v3](../api/unified_v3.md)

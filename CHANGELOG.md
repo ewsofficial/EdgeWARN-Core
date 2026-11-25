@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added: realtime Core execution-time profiler
+- `scripts/bench_realtime_pipeline.py` replays one realtime scan through the
+  Core cycle worker over `--trials` isolated trials (default 2). It reports
+  wall time, CPU and memory for each process, stage, tracker phase, lazy
+  import, function and call path, as mean/median/p95/p99, and saves the
+  results as CSV. See [docs/core/profiling.md](docs/core/profiling.md).
+
 ### Added: StormProb swept probability field
 - Core publishes one domain-wide swept probability field per scan: the fraction
   of the 20 ensemble members whose footprint covers each 0.01° cell of the
