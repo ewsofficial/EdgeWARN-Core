@@ -187,12 +187,19 @@ class GateMapper:
         min_valid_threshold = float(np.min(dyn_thresh[valid_ids]))
         composite_mask = np.isfinite(sub_refl) & (sub_refl >= min_valid_threshold)
         
-        # Markers are valid polygons intersecting their own logical threshold mask
-        pixel_thresholds = dyn_thresh[np.clip(sub_polygon, 0, max_id)]
-        markers = np.where(valid_id_mask[sub_polygon] & np.isfinite(sub_refl) & (sub_refl >= pixel_thresholds), sub_polygon, 0)
+        # Markers are valid polygons intersecting their own logical threshold mask.
+        # Only labeled polygon pixels can qualify, so test just those.
+        labeled_index = np.flatnonzero(labeled_mask)
+        marker_ok = (
+            valid_id_mask[labels]
+            & finite_label_mask
+            & (refl_values >= dyn_thresh[labels])
+        )
+        markers = np.zeros_like(sub_polygon)
+        markers.flat[labeled_index[marker_ok]] = labels[marker_ok]
         _mark("threshold_prep", threshold_start)
 
-        if not np.any(markers > 0):
+        if not np.any(marker_ok):
              return xr.Dataset(
                 {'PolygonID': (('latitude', 'longitude'), np.zeros_like(polygon_grid))},
                 coords={'latitude': mapped_ds['latitude'].values, 'longitude': mapped_ds['longitude'].values}
@@ -205,7 +212,11 @@ class GateMapper:
         edt_total = 0.0
         watershed_total = 0.0
 
-        for component_idx, component_slice in enumerate(component_slices, start=1):
+        # Every marker lies inside the composite mask, so only components that
+        # hold a marker need a watershed.
+        marked_components = np.unique(component_labels[markers > 0])
+        for component_idx in marked_components[marked_components > 0].tolist():
+            component_slice = component_slices[component_idx - 1]
             if component_slice is None:
                 continue
 
@@ -239,16 +250,19 @@ class GateMapper:
         
         # Post-filtering to enforce strict per-cell thresholds against watershed competition leaks.
         post_filter_start = time.perf_counter()
-        final_thresholds = dyn_thresh[np.clip(sub_final, 0, max_id)]
-        invalid_mask = (sub_final > 0) & (~np.isfinite(sub_refl) | (sub_refl < final_thresholds))
-        sub_final[invalid_mask] = 0
-        
-        # 5. Final Size Filter: reject expanded cells at or below the gate floor
-        final_ids = np.unique(sub_final)
-        final_ids = final_ids[final_ids > 0]
+        # Only assigned pixels can change, so filter just those.
+        flat_final = sub_final.reshape(-1)
+        assigned_index = np.flatnonzero(flat_final > 0)
+        assigned_ids = flat_final[assigned_index]
+        assigned_refl = sub_refl.flat[assigned_index]
+        invalid = ~np.isfinite(assigned_refl) | (assigned_refl < dyn_thresh[assigned_ids])
+        flat_final[assigned_index[invalid]] = 0
+        assigned_index = assigned_index[~invalid]
+        assigned_ids = assigned_ids[~invalid]
 
-        if len(final_ids) > 0:
-             final_counts = np.bincount(sub_final.ravel(), minlength=int(final_ids.max()) + 1)
+        # 5. Final Size Filter: reject expanded cells at or below the gate floor
+        if assigned_ids.size > 0:
+             final_counts = np.bincount(assigned_ids)
              rejected_ids = np.flatnonzero(
                  (final_counts > 0)
                  & (final_counts <= self.gm.reject_clusters_at_or_below_gates)
@@ -258,7 +272,7 @@ class GateMapper:
                   self.io_manager.write_debug(f"Rejecting small expanded clusters: {rejected_ids.tolist()}")
                   reject_lookup = np.zeros(final_counts.shape[0], dtype=bool)
                   reject_lookup[rejected_ids] = True
-                  sub_final[reject_lookup[sub_final]] = 0
+                  flat_final[assigned_index[reject_lookup[assigned_ids]]] = 0
         _mark("post_filter", post_filter_start)
 
         self.io_manager.write_debug(
@@ -278,7 +292,7 @@ class GateMapper:
         final_grid[rmin:rmax, cmin:cmax] = sub_final
         
         return xr.Dataset(
-            {'PolygonID': (('latitude', 'longitude'), final_grid.astype(np.int32))},
+            {'PolygonID': (('latitude', 'longitude'), final_grid.astype(np.int32, copy=False))},
             coords={
                 'latitude': mapped_ds['latitude'].values,
                 'longitude': mapped_ds['longitude'].values
